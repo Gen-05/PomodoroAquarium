@@ -5,14 +5,12 @@
 //  Created by 阿部弦生 on 2026/07/17.
 //
 
-import SwiftUI
+import Foundation
+import Observation
 
-struct TimerViewModel: View {
-    var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
-    }
-}
-
-#Preview {
-    TimerViewModel()
+@Observable
+final class TimerViewModel {
+    
+    var timeRemaining = 25 * 60
+    var isRunning = false
 }

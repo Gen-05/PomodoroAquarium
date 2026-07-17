@@ -12,8 +12,7 @@ struct TimerView: View {
     
     private let initialTime = 25 * 60
     
-    @State private var timeRemaining = 25 * 60
-    @State private var isRunning = false
+    @State private var viewModel = TimerViewModel()
     
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -23,28 +22,32 @@ struct TimerView: View {
             Text("🐠")
                 .font(.system(size: 80))
             
-            Text(formatTime(timeRemaining))
+            Text(formatTime(viewModel.timeRemaining))
                 .font(.system(size: 60, weight: .bold))
             
             Text("勉強中")
                 .font(.title2)
             
-            Button(isRunning ? "一時停止" : "勉強開始") {
-                isRunning.toggle()
+            Button(viewModel.isRunning ? "一時停止" : "勉強開始") {
+                viewModel.isRunning.toggle()
             }
             .buttonStyle(.borderedProminent)
             
             Button("リセット") {
-                isRunning = false
-                timeRemaining = 25 * 60
+                viewModel.isRunning = false
+                viewModel.timeRemaining = 25 * 60
             }
             .buttonStyle(.bordered)
         }
         .padding()
         .navigationTitle("タイマー")
         .onReceive(timer) { _ in
-            if isRunning && timeRemaining > 0 {
-                timeRemaining -= 1
+            guard viewModel.isRunning else { return }
+            
+            if viewModel.timeRemaining > 0 {
+                viewModel.timeRemaining -= 1
+            } else {
+                viewModel.isRunning = false
             }
         }
     }
