@@ -10,8 +10,6 @@ import Combine
 
 struct TimerView: View {
     
-    private let initialTime = 25 * 60
-    
     @State private var viewModel = TimerViewModel()
     
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -29,26 +27,19 @@ struct TimerView: View {
                 .font(.title2)
             
             Button(viewModel.isRunning ? "一時停止" : "勉強開始") {
-                viewModel.isRunning.toggle()
+                viewModel.startStopTimer()
             }
             .buttonStyle(.borderedProminent)
             
             Button("リセット") {
-                viewModel.isRunning = false
-                viewModel.timeRemaining = 25 * 60
+                viewModel.resetTimer()
             }
             .buttonStyle(.bordered)
         }
         .padding()
         .navigationTitle("タイマー")
         .onReceive(timer) { _ in
-            guard viewModel.isRunning else { return }
-            
-            if viewModel.timeRemaining > 0 {
-                viewModel.timeRemaining -= 1
-            } else {
-                viewModel.isRunning = false
-            }
+            viewModel.tick()
         }
     }
 }
