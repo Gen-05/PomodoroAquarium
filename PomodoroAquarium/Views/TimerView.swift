@@ -23,7 +23,7 @@ struct TimerView: View {
             Text(formatTime(viewModel.timeRemaining))
                 .font(.system(size: 60, weight: .bold))
             
-            Text("勉強中")
+            Text(viewModel.isStudyTime ? "📚 勉強時間" : "☕️ 休憩時間")
                 .font(.title2)
             
             Button(viewModel.isRunning ? "一時停止" : "勉強開始") {
