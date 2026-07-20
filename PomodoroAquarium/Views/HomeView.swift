@@ -8,6 +8,10 @@
 import SwiftUI
 
 struct HomeView: View {
+    
+    @State private var studyTime = "25"
+    @State private var breakTime = "5"
+    
     var body: some View {
         NavigationStack{
             VStack(spacing: 30) {
@@ -41,6 +45,19 @@ struct HomeView: View {
                 Spacer()
             }
             .padding()
+            .navigationTitle("ポモドーロ水族館")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SettingsView(
+                            studyTime: $studyTime,
+                            breakTime: $breakTime
+                        )
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
         }
     }
 }
