@@ -32,7 +32,10 @@ struct HomeView: View {
                     .font(.system(size: 50,weight: .bold))
                 
                 NavigationLink("勉強開始") {
-                    TimerView()
+                    TimerView(
+                        studyTime: Int(studyTime) ?? 25,
+                        breakTime: Int(breakTime) ?? 5
+                    )
                 }
                 .buttonStyle(.borderedProminent)
                 

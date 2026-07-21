@@ -11,16 +11,18 @@ import Observation
 @Observable
 final class TimerViewModel {
     
-    private let studyTime = 10
-    private let breakTime = 5
+    private let studyTime : Int
+    private let breakTime : Int
     
     
     var timeRemaining: Int
     var isRunning = false
     var isStudyTime = true
     
-    init() {
-        timeRemaining = studyTime
+    init(studyTime: Int, breakTime: Int) {
+        self.studyTime = studyTime
+        self.breakTime = breakTime
+        timeRemaining = studyTime * 60
     }
     
     func startStopTimer() {
@@ -30,7 +32,7 @@ final class TimerViewModel {
     func resetTimer() {
         isRunning = false
         isStudyTime = true
-        timeRemaining = isStudyTime ? studyTime : breakTime
+        timeRemaining = isStudyTime ? studyTime * 60 : breakTime * 60
     }
     
     func tick() {
@@ -41,7 +43,7 @@ final class TimerViewModel {
         } else {
             isStudyTime.toggle()
             
-            timeRemaining = isStudyTime ? studyTime : breakTime
+            timeRemaining = isStudyTime ? studyTime * 60 : breakTime * 60
             
             isRunning = false
         }

@@ -10,7 +10,22 @@ import Combine
 
 struct TimerView: View {
     
-    @State private var viewModel = TimerViewModel()
+    let studyTime: Int
+    let breakTime: Int
+    
+    init(studyTime: Int, breakTime: Int) {
+        self.studyTime = studyTime
+        self.breakTime = breakTime
+        
+        _viewModel = State(
+            initialValue: TimerViewModel(
+                studyTime: studyTime,
+                breakTime: breakTime
+            )
+        )
+    }
+    
+    @State private var viewModel: TimerViewModel
     
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -52,5 +67,8 @@ func formatTime(_ seconds: Int) -> String {
 }
 
 #Preview {
-    TimerView()
+    TimerView(
+        studyTime: 25,
+        breakTime: 5
+    )
 }
