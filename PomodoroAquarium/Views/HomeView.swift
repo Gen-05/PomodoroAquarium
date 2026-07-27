@@ -11,7 +11,7 @@ struct HomeView: View {
     
     @State private var studyTime = "25"
     @State private var breakTime = "5"
-    @State private var todayStudyTime = 0
+    @AppStorage("todayStudyTime") private var todayStudyTime = 0
     
     var body: some View {
         NavigationStack{
