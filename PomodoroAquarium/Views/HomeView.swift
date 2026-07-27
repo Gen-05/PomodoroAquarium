@@ -43,7 +43,7 @@ struct HomeView: View {
                 
                 VStack {
                     Text("今日の勉強時間")
-                    Text("\(todayStudyTime)分")
+                    Text("\(todayStudyTime / 60)時間\(todayStudyTime % 60)分")
                         .font(.title2)
                 }
                 
