@@ -14,6 +14,7 @@ final class TimerViewModel {
     private let studyTime : Int
     private let breakTime : Int
     
+    var onStudyFinished: (() -> Void)?
     
     var timeRemaining: Int
     var isRunning = false
@@ -41,6 +42,10 @@ final class TimerViewModel {
         if timeRemaining > 0 {
             timeRemaining -= 1
         } else {
+            if isStudyTime {
+                onStudyFinished?()
+            }
+            
             isStudyTime.toggle()
             
             timeRemaining = isStudyTime ? studyTime * 60 : breakTime * 60

@@ -12,17 +12,26 @@ struct TimerView: View {
     
     let studyTime: Int
     let breakTime: Int
+    @Binding var todayStudyTime: Int
     
-    init(studyTime: Int, breakTime: Int) {
+    init(
+        studyTime: Int,
+        breakTime: Int,
+        todayStudyTime: Binding<Int>
+    ) {
         self.studyTime = studyTime
         self.breakTime = breakTime
+        self._todayStudyTime = todayStudyTime
         
-        _viewModel = State(
-            initialValue: TimerViewModel(
-                studyTime: studyTime,
-                breakTime: breakTime
-            )
+        let tempViewModel = TimerViewModel(
+            studyTime: studyTime,
+            breakTime: breakTime
         )
+        
+        tempViewModel.onStudyFinished = {
+            todayStudyTime.wrappedValue += studyTime
+        }
+        self._viewModel = State(initialValue: tempViewModel)
     }
     
     @State private var viewModel: TimerViewModel
@@ -41,10 +50,9 @@ struct TimerView: View {
             Text(viewModel.isStudyTime ? "📚 勉強時間" : "☕️ 休憩時間")
                 .font(.title2)
             
-            Button(viewModel.isRunning ? "一時停止" : "勉強開始") {
+            Button(viewModel.isRunning ? "一時停止" : (viewModel.isStudyTime ? "勉強開始" : "休憩開始")) {
                 viewModel.startStopTimer()
-            }
-            .buttonStyle(.borderedProminent)
+            }            .buttonStyle(.borderedProminent)
             
             Button("リセット") {
                 viewModel.resetTimer()
@@ -69,6 +77,7 @@ func formatTime(_ seconds: Int) -> String {
 #Preview {
     TimerView(
         studyTime: 25,
-        breakTime: 5
+        breakTime: 5,
+        todayStudyTime: .constant(0)
     )
 }

@@ -11,6 +11,7 @@ struct HomeView: View {
     
     @State private var studyTime = "25"
     @State private var breakTime = "5"
+    @State private var todayStudyTime = 0
     
     var body: some View {
         NavigationStack{
@@ -34,14 +35,15 @@ struct HomeView: View {
                 NavigationLink("勉強開始") {
                     TimerView(
                         studyTime: Int(studyTime) ?? 25,
-                        breakTime: Int(breakTime) ?? 5
+                        breakTime: Int(breakTime) ?? 5,
+                        todayStudyTime: $todayStudyTime
                     )
                 }
                 .buttonStyle(.borderedProminent)
                 
                 VStack {
                     Text("今日の勉強時間")
-                    Text("0時間0分")
+                    Text("\(todayStudyTime)分")
                         .font(.title2)
                 }
                 
