@@ -9,9 +9,10 @@ import SwiftUI
 
 struct HomeView: View {
     
-    @State private var studyTime = "25"
-    @State private var breakTime = "5"
+    @AppStorage("studyTime") private var studyTime = "25"
+    @AppStorage("breakTime") private var breakTime = "5"
     @AppStorage("todayStudyTime") private var todayStudyTime = 0
+    @AppStorage("lastStudyDate") private var lastStudyDate = ""
     
     var body: some View {
         NavigationStack{
@@ -64,7 +65,24 @@ struct HomeView: View {
                 }
             }
         }
+        .onAppear {
+            let today = DateFormatter.yyyyMMdd.string(from: Date())
+            
+            if lastStudyDate != today {
+                todayStudyTime = 0
+                lastStudyDate = today
+            }
+        }
     }
+    
+}
+
+extension DateFormatter {
+    static let yyyyMMdd: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter
+    }()
 }
 
 
