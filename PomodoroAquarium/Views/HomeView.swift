@@ -14,6 +14,7 @@ struct HomeView: View {
     @AppStorage("todayStudyTime") private var todayStudyTime = 0
     @AppStorage("lastStudyDate") private var lastStudyDate = ""
     
+    
     var body: some View {
         NavigationStack{
             VStack(spacing: 30) {
@@ -53,6 +54,14 @@ struct HomeView: View {
             .padding()
             .navigationTitle("ポモドーロ水族館")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        BookView()
+                    } label: {
+                        Image(systemName: "book")
+                    }
+                }
+                
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
                         SettingsView(
