@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct HomeView: View {
     
@@ -14,6 +15,9 @@ struct HomeView: View {
     @AppStorage("todayStudyTime") private var todayStudyTime = 0
     @AppStorage("lastStudyDate") private var lastStudyDate = ""
     
+    @Environment(\.modelContext) private var modelContext
+    
+    @Query private var players: [Player]
     
     var body: some View {
         NavigationStack{
