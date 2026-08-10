@@ -9,16 +9,16 @@ import SwiftUI
 
 struct BookView: View {
     var body: some View {
-        List(sampleFish) { fish in
+        List(fishSpecies) { species in
             HStack {
                 Image(systemName: "fish")
                     .font(.title2)
                 
                 VStack(alignment: .leading) {
-                    Text(fish.name)
+                    Text(species.name)
                         .font(.headline)
                     
-                    Text(fish.rarity.rawValue)
+                    Text(species.rarity.rawValue)
                         .font(.caption)
                         .foregroundStyle(.gray)
                 }

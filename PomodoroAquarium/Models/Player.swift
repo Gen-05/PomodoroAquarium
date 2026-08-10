@@ -9,14 +9,14 @@ import SwiftData
 
 @Model
 class Player {
-    var ownedFish: [Fish] = []
+    var ownedFish: [PlayerFish] = []
     
     var totalStudyMinutes = 0
     var todayStudyMinutes = 0
     var yesterdayStudyMinutes = 0
     
     init(
-        ownedFish: [Fish] = [],
+        ownedFish: [PlayerFish] = [],
         totalStudyMinutes: Int = 0,
         todayStudyMinutes: Int = 0,
         yesterdayStudyMinutes: Int = 0

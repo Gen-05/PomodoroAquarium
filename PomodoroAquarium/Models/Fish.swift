@@ -15,22 +15,71 @@ enum FishRarity: String, Codable {
     case legendary = "Legendary"
 }
 
+enum FishSpecies: String, Codable, CaseIterable, Identifiable {
+    case clownfish
+    case pufferfish
+    case seahorse
+    case manta
+    case whaleShark
+
+    var id: String {
+        rawValue
+    }
+
+    var name: String {
+        switch self {
+        case .clownfish:
+            "クマノミ"
+        case .pufferfish:
+            "フグ"
+        case .seahorse:
+            "タツノオトシゴ"
+        case .manta:
+            "マンタ"
+        case .whaleShark:
+            "ジンベエザメ"
+        }
+    }
+
+    var imageName: String {
+        switch self {
+        case .clownfish:
+            "clownfish"
+        case .pufferfish:
+            "pufferfish"
+        case .seahorse:
+            "seahorse"
+        case .manta:
+            "manta"
+        case .whaleShark:
+            "whaleshark"
+        }
+    }
+
+    var rarity: FishRarity {
+        switch self {
+        case .clownfish, .pufferfish:
+            .common
+        case .seahorse:
+            .rare
+        case .manta:
+            .epic
+        case .whaleShark:
+            .legendary
+        }
+    }
+}
+
 @Model
-class Fish {
+class PlayerFish {
     var id: UUID
-    var name: String
-    var imageName: String
-    var rarity: FishRarity
+    var species: FishSpecies
     
     init(
         id: UUID = UUID(),
-        name: String,
-        imageName: String,
-        rarity: FishRarity
+        species: FishSpecies
     ) {
         self.id = id
-        self.name = name
-        self.imageName = imageName
-        self.rarity = rarity
+        self.species = species
     }
 }

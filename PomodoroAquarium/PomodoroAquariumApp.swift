@@ -13,7 +13,7 @@ struct PomodoroAquariumApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .modelContainer(for: [Player.self, Fish.self])
+                .modelContainer(for: [Player.self, PlayerFish.self])
         }
     }
 }
