@@ -82,7 +82,9 @@ struct HomeView: View {
             }
         }
         .onAppear {
-            let today = DateFormatter.yyyyMMdd.string(from: Date())
+            let now = Date()
+            let calendar = Calendar.current
+            let today = DateFormatter.yyyyMMdd.string(from: now)
 
             let currentPlayer: Player
             if let player {
@@ -93,7 +95,23 @@ struct HomeView: View {
                 currentPlayer = newPlayer
             }
 
-            if lastStudyDate != today {
+            if lastStudyDate.isEmpty {
+                lastStudyDate = today
+            } else if let lastDate = DateFormatter.yyyyMMdd.date(from: lastStudyDate),
+                      !calendar.isDate(lastDate, inSameDayAs: now) {
+                let yesterday = calendar.date(byAdding: .day, value: -1, to: now)
+
+                if let yesterday,
+                   calendar.isDate(lastDate, inSameDayAs: yesterday) {
+                    currentPlayer.yesterdayStudyMinutes = currentPlayer.todayStudyMinutes
+                } else {
+                    currentPlayer.yesterdayStudyMinutes = 0
+                }
+
+                currentPlayer.todayStudyMinutes = 0
+                lastStudyDate = today
+            } else if DateFormatter.yyyyMMdd.date(from: lastStudyDate) == nil {
+                currentPlayer.yesterdayStudyMinutes = 0
                 currentPlayer.todayStudyMinutes = 0
                 lastStudyDate = today
             }
