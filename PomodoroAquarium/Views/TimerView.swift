@@ -7,21 +7,20 @@
 
 import SwiftUI
 import Combine
+import SwiftData
 
 struct TimerView: View {
     
     let studyTime: Int
     let breakTime: Int
-    @Binding var todayStudyTime: Int
     
     init(
         studyTime: Int,
         breakTime: Int,
-        todayStudyTime: Binding<Int>
+        player: Player?
     ) {
         self.studyTime = studyTime
         self.breakTime = breakTime
-        self._todayStudyTime = todayStudyTime
         
         let tempViewModel = TimerViewModel(
             studyTime: studyTime,
@@ -29,7 +28,10 @@ struct TimerView: View {
         )
         
         tempViewModel.onStudyFinished = {
-            todayStudyTime.wrappedValue += studyTime
+            if let player {
+                player.todayStudyMinutes += studyTime
+                player.totalStudyMinutes += studyTime
+            }
         }
         self._viewModel = State(initialValue: tempViewModel)
     }
@@ -78,6 +80,6 @@ func formatTime(_ seconds: Int) -> String {
     TimerView(
         studyTime: 25,
         breakTime: 5,
-        todayStudyTime: .constant(0)
+        player: nil
     )
 }

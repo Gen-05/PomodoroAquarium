@@ -12,12 +12,15 @@ struct HomeView: View {
     
     @AppStorage("studyTime") private var studyTime = "25"
     @AppStorage("breakTime") private var breakTime = "5"
-    @AppStorage("todayStudyTime") private var todayStudyTime = 0
     @AppStorage("lastStudyDate") private var lastStudyDate = ""
     
     @Environment(\.modelContext) private var modelContext
     
     @Query private var players: [Player]
+    
+    private var player: Player? {
+        players.first
+    }
     
     var body: some View {
         NavigationStack{
@@ -42,14 +45,14 @@ struct HomeView: View {
                     TimerView(
                         studyTime: Int(studyTime) ?? 25,
                         breakTime: Int(breakTime) ?? 5,
-                        todayStudyTime: $todayStudyTime
+                        player: player
                     )
                 }
                 .buttonStyle(.borderedProminent)
                 
                 VStack {
                     Text("今日の勉強時間")
-                    Text("\(todayStudyTime / 60)時間\(todayStudyTime % 60)分")
+                    Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
                         .font(.title2)
                 }
                 
@@ -80,9 +83,18 @@ struct HomeView: View {
         }
         .onAppear {
             let today = DateFormatter.yyyyMMdd.string(from: Date())
-            
+
+            let currentPlayer: Player
+            if let player {
+                currentPlayer = player
+            } else {
+                let newPlayer = Player()
+                modelContext.insert(newPlayer)
+                currentPlayer = newPlayer
+            }
+
             if lastStudyDate != today {
-                todayStudyTime = 0
+                currentPlayer.todayStudyMinutes = 0
                 lastStudyDate = today
             }
         }
@@ -100,5 +112,9 @@ extension DateFormatter {
 
 
 #Preview {
-    HomeView()
+    TimerView(
+        studyTime: 25,
+        breakTime: 5,
+        player: nil
+    )
 }
