@@ -10,6 +10,7 @@ import SwiftData
 @Model
 class Player {
     var ownedFish: [PlayerFish] = []
+    var favoriteFish: PlayerFish?
     
     var totalStudyMinutes = 0
     var todayStudyMinutes = 0
@@ -17,11 +18,13 @@ class Player {
     
     init(
         ownedFish: [PlayerFish] = [],
+        favoriteFish: PlayerFish? = nil,
         totalStudyMinutes: Int = 0,
         todayStudyMinutes: Int = 0,
         yesterdayStudyMinutes: Int = 0
     ) {
         self.ownedFish = ownedFish
+        self.favoriteFish = favoriteFish
         self.totalStudyMinutes = totalStudyMinutes
         self.todayStudyMinutes = todayStudyMinutes
         self.yesterdayStudyMinutes = yesterdayStudyMinutes

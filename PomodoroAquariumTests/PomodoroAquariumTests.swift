@@ -104,4 +104,35 @@ struct PomodoroAquariumTests {
         #expect(BookView.ownedCount(for: .clownfish, in: nil) == 0)
     }
 
+    @Test func ownedFishCanBeSetAsFavorite() {
+        let clownfish = PlayerFish(species: .clownfish)
+        let player = Player(ownedFish: [clownfish])
+
+        let didSetFavorite = BookView.setFavorite(.clownfish, for: player)
+
+        #expect(didSetFavorite)
+        #expect(player.favoriteFish?.id == clownfish.id)
+    }
+
+    @Test func selectingAnotherFishUpdatesFavorite() {
+        let clownfish = PlayerFish(species: .clownfish)
+        let pufferfish = PlayerFish(species: .pufferfish)
+        let player = Player(ownedFish: [clownfish, pufferfish])
+
+        BookView.setFavorite(.clownfish, for: player)
+        BookView.setFavorite(.pufferfish, for: player)
+
+        #expect(player.favoriteFish?.id == pufferfish.id)
+    }
+
+    @Test func unownedSpeciesCannotBeSetAsFavorite() {
+        let clownfish = PlayerFish(species: .clownfish)
+        let player = Player(ownedFish: [clownfish], favoriteFish: clownfish)
+
+        let didSetFavorite = BookView.setFavorite(.whaleShark, for: player)
+
+        #expect(!didSetFavorite)
+        #expect(player.favoriteFish?.id == clownfish.id)
+    }
+
 }

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct HomeView: View {
     
@@ -21,6 +22,10 @@ struct HomeView: View {
     private var player: Player? {
         players.first
     }
+
+    private var favoriteFish: PlayerFish? {
+        player?.favoriteFish
+    }
     
     var body: some View {
         NavigationStack{
@@ -34,8 +39,7 @@ struct HomeView: View {
                     .fill(Color.blue.opacity(0.2))
                     .frame(height: 250)
                     .overlay {
-                        Text("水槽エリア")
-                            .font(.title2)
+                        aquariumContent
                     }
                 
                 Text("25:00")
@@ -117,7 +121,39 @@ struct HomeView: View {
             }
         }
     }
-    
+
+    @ViewBuilder
+    private var aquariumContent: some View {
+        if let favoriteFish {
+            let species = favoriteFish.species
+
+            VStack(spacing: 12) {
+                if let image = UIImage(named: species.imageName) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 120, height: 120)
+                } else {
+                    Image(systemName: "fish")
+                        .font(.system(size: 70))
+                }
+
+                Text(species.name)
+                    .font(.title2)
+                    .bold()
+            }
+        } else {
+            VStack(spacing: 12) {
+                Image(systemName: "fish")
+                    .font(.system(size: 50))
+
+                Text("図鑑からお気に入りの魚を選んでください")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+        }
+    }
 }
 
 extension DateFormatter {

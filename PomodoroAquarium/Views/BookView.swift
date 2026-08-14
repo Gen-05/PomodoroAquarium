@@ -18,34 +18,61 @@ struct BookView: View {
     var body: some View {
         List(FishSpecies.allCases) { species in
             let ownedCount = Self.ownedCount(for: species, in: player)
+            let isFavorite = player?.favoriteFish?.species == species
 
-            HStack {
-                Image(systemName: "fish")
-                    .font(.title2)
-                
-                VStack(alignment: .leading) {
-                    Text(ownedCount > 0 ? species.name : "？？？")
-                        .font(.headline)
+            Button {
+                if let player {
+                    Self.setFavorite(species, for: player)
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "fish")
+                        .font(.title2)
 
-                    if ownedCount > 0 {
-                        Text(species.rarity.rawValue)
-                            .font(.caption)
-                            .foregroundStyle(.gray)
+                    VStack(alignment: .leading) {
+                        Text(ownedCount > 0 ? species.name : "？？？")
+                            .font(.headline)
 
-                        Text("所持数：\(ownedCount)")
+                        if ownedCount > 0 {
+                            Text(species.rarity.rawValue)
+                                .font(.caption)
+                                .foregroundStyle(.gray)
+
+                            Text("所持数：\(ownedCount)")
+                                .font(.caption)
+                        } else {
+                            Text("未所持")
+                                .font(.caption)
+                                .foregroundStyle(.gray)
+                        }
+                    }
+
+                    Spacer()
+
+                    if isFavorite {
+                        Label("お気に入り", systemImage: "star.fill")
                             .font(.caption)
-                    } else {
-                        Text("未所持")
-                            .font(.caption)
-                            .foregroundStyle(.gray)
+                            .foregroundStyle(.yellow)
                     }
                 }
             }
+            .buttonStyle(.plain)
+            .disabled(ownedCount == 0)
         }
     }
 
     static func ownedCount(for species: FishSpecies, in player: Player?) -> Int {
         player?.ownedFish.count { $0.species == species } ?? 0
+    }
+
+    @discardableResult
+    static func setFavorite(_ species: FishSpecies, for player: Player) -> Bool {
+        guard let fish = player.ownedFish.first(where: { $0.species == species }) else {
+            return false
+        }
+
+        player.favoriteFish = fish
+        return true
     }
 }
 
