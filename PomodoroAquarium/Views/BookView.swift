@@ -6,24 +6,46 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct BookView: View {
+    @Query private var players: [Player]
+
+    private var player: Player? {
+        players.first
+    }
+
     var body: some View {
-        List(fishSpecies) { species in
+        List(FishSpecies.allCases) { species in
+            let ownedCount = Self.ownedCount(for: species, in: player)
+
             HStack {
                 Image(systemName: "fish")
                     .font(.title2)
                 
                 VStack(alignment: .leading) {
-                    Text(species.name)
+                    Text(ownedCount > 0 ? species.name : "？？？")
                         .font(.headline)
-                    
-                    Text(species.rarity.rawValue)
-                        .font(.caption)
-                        .foregroundStyle(.gray)
+
+                    if ownedCount > 0 {
+                        Text(species.rarity.rawValue)
+                            .font(.caption)
+                            .foregroundStyle(.gray)
+
+                        Text("所持数：\(ownedCount)")
+                            .font(.caption)
+                    } else {
+                        Text("未所持")
+                            .font(.caption)
+                            .foregroundStyle(.gray)
+                    }
                 }
             }
         }
+    }
+
+    static func ownedCount(for species: FishSpecies, in player: Player?) -> Int {
+        player?.ownedFish.count { $0.species == species } ?? 0
     }
 }
 

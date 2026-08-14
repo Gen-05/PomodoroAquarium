@@ -39,4 +39,20 @@ struct PomodoroAquariumTests {
         #expect(player.ownedFish.count == 3)
     }
 
+    @Test func bookOwnedCountCountsOnlyMatchingSpecies() {
+        let player = Player(ownedFish: [
+            PlayerFish(species: .clownfish),
+            PlayerFish(species: .clownfish),
+            PlayerFish(species: .pufferfish)
+        ])
+
+        #expect(BookView.ownedCount(for: .clownfish, in: player) == 2)
+        #expect(BookView.ownedCount(for: .pufferfish, in: player) == 1)
+        #expect(BookView.ownedCount(for: .seahorse, in: player) == 0)
+    }
+
+    @Test func bookOwnedCountIsZeroWithoutPlayer() {
+        #expect(BookView.ownedCount(for: .clownfish, in: nil) == 0)
+    }
+
 }
