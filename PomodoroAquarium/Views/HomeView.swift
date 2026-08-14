@@ -7,7 +7,6 @@
 
 import SwiftUI
 import SwiftData
-import UIKit
 
 struct HomeView: View {
     
@@ -23,46 +22,42 @@ struct HomeView: View {
         players.first
     }
 
-    private var favoriteFish: PlayerFish? {
-        player?.favoriteFish
-    }
-    
     var body: some View {
         NavigationStack{
-            VStack(spacing: 30) {
+            ZStack {
+                AquariumView(player: player)
                 
-                Text("🐠ポモドーロ水族館")
-                    .font(.largeTitle)
-                    .bold()
-                
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color.blue.opacity(0.2))
-                    .frame(height: 250)
-                    .overlay {
-                        aquariumContent
+                VStack(spacing: 30) {
+                    Text("🐠ポモドーロ水族館")
+                        .font(.largeTitle)
+                        .bold()
+
+                    Spacer()
+
+                    VStack(spacing: 24) {
+                        Text("25:00")
+                            .font(.system(size: 50,weight: .bold))
+
+                        NavigationLink("勉強開始") {
+                            TimerView(
+                                studyTime: Int(studyTime) ?? 25,
+                                breakTime: Int(breakTime) ?? 5,
+                                player: player
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        VStack {
+                            Text("今日の勉強時間")
+                            Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
+                                .font(.title2)
+                        }
                     }
-                
-                Text("25:00")
-                    .font(.system(size: 50,weight: .bold))
-                
-                NavigationLink("勉強開始") {
-                    TimerView(
-                        studyTime: Int(studyTime) ?? 25,
-                        breakTime: Int(breakTime) ?? 5,
-                        player: player
-                    )
+                    .padding(24)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
                 }
-                .buttonStyle(.borderedProminent)
-                
-                VStack {
-                    Text("今日の勉強時間")
-                    Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
-                        .font(.title2)
-                }
-                
-                Spacer()
+                .padding()
             }
-            .padding()
             .navigationTitle("ポモドーロ水族館")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -122,38 +117,6 @@ struct HomeView: View {
         }
     }
 
-    @ViewBuilder
-    private var aquariumContent: some View {
-        if let favoriteFish {
-            let species = favoriteFish.species
-
-            VStack(spacing: 12) {
-                if let image = UIImage(named: species.imageName) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 120, height: 120)
-                } else {
-                    Image(systemName: "fish")
-                        .font(.system(size: 70))
-                }
-
-                Text(species.name)
-                    .font(.title2)
-                    .bold()
-            }
-        } else {
-            VStack(spacing: 12) {
-                Image(systemName: "fish")
-                    .font(.system(size: 50))
-
-                Text("図鑑からお気に入りの魚を選んでください")
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-            }
-            .padding()
-        }
-    }
 }
 
 extension DateFormatter {

@@ -13,6 +13,7 @@ struct TimerView: View {
     
     let studyTime: Int
     let breakTime: Int
+    let player: Player?
     
     init(
         studyTime: Int,
@@ -21,6 +22,7 @@ struct TimerView: View {
     ) {
         self.studyTime = studyTime
         self.breakTime = breakTime
+        self.player = player
         
         let tempViewModel = TimerViewModel(
             studyTime: studyTime,
@@ -42,27 +44,30 @@ struct TimerView: View {
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     var body: some View {
-        VStack(spacing: 30) {
-            
-            Text("🐠")
-                .font(.system(size: 80))
-            
-            Text(formatTime(viewModel.timeRemaining))
-                .font(.system(size: 60, weight: .bold))
-            
-            Text(viewModel.isStudyTime ? "📚 勉強時間" : "☕️ 休憩時間")
-                .font(.title2)
-            
-            Button(viewModel.isRunning ? "一時停止" : (viewModel.isStudyTime ? "勉強開始" : "休憩開始")) {
-                viewModel.startStopTimer()
-            }            .buttonStyle(.borderedProminent)
-            
-            Button("リセット") {
-                viewModel.resetTimer()
+        ZStack {
+            AquariumView(player: player)
+
+            VStack(spacing: 30) {
+                Text(formatTime(viewModel.timeRemaining))
+                    .font(.system(size: 60, weight: .bold))
+
+                Text(viewModel.isStudyTime ? "📚 勉強時間" : "☕️ 休憩時間")
+                    .font(.title2)
+
+                Button(viewModel.isRunning ? "一時停止" : (viewModel.isStudyTime ? "勉強開始" : "休憩開始")) {
+                    viewModel.startStopTimer()
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("リセット") {
+                    viewModel.resetTimer()
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
+            .padding(30)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .padding()
         }
-        .padding()
         .navigationTitle("タイマー")
         .onReceive(timer) { _ in
             viewModel.tick()
