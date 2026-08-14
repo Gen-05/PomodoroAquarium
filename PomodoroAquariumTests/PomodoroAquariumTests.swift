@@ -10,10 +10,33 @@ import Testing
 
 struct PomodoroAquariumTests {
 
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-        // Swift Testing Documentation
-        // https://developer.apple.com/documentation/testing
+    @Test func studySessionUnder25MinutesDoesNotAwardFish() {
+        let player = Player()
+
+        let awardedFish = FishRewardService.awardFish(for: 24, to: player)
+
+        #expect(awardedFish == nil)
+        #expect(player.ownedFish.isEmpty)
+    }
+
+    @Test func studySessionOf25MinutesAwardsOneFish() {
+        let player = Player()
+
+        let awardedFish = FishRewardService.awardFish(for: 25, to: player)
+
+        #expect(awardedFish != nil)
+        #expect(player.ownedFish.count == 1)
+        #expect(player.ownedFish.first === awardedFish)
+    }
+
+    @Test func repeatedEligibleSessionsAwardOneFishEach() {
+        let player = Player()
+
+        FishRewardService.awardFish(for: 25, to: player)
+        FishRewardService.awardFish(for: 30, to: player)
+        FishRewardService.awardFish(for: 60, to: player)
+
+        #expect(player.ownedFish.count == 3)
     }
 
 }

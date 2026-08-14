@@ -31,6 +31,7 @@ struct TimerView: View {
             if let player {
                 player.todayStudyMinutes += studyTime
                 player.totalStudyMinutes += studyTime
+                FishRewardService.awardFish(for: studyTime, to: player)
             }
         }
         self._viewModel = State(initialValue: tempViewModel)
