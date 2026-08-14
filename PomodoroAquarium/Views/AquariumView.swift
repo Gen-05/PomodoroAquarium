@@ -166,15 +166,7 @@ private struct SwimmingFishView: View {
     }
 
     var body: some View {
-        VStack(spacing: 5) {
-            fishImage
-
-            if isFavorite {
-                Text(species.name)
-                    .font(.headline)
-                    .bold()
-            }
-        }
+        fishImage
         .offset(x: isSwimmingToRight ? swimmingDistance : -swimmingDistance)
         .onAppear {
             withAnimation(

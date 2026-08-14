@@ -20,10 +20,8 @@ struct BookView: View {
             let ownedCount = Self.ownedCount(for: species, in: player)
             let isFavorite = player?.favoriteFish?.species == species
 
-            Button {
-                if let player {
-                    Self.setFavorite(species, for: player)
-                }
+            NavigationLink {
+                FishDetailView(species: species, player: player)
             } label: {
                 HStack {
                     Image(systemName: "fish")
@@ -56,9 +54,9 @@ struct BookView: View {
                     }
                 }
             }
-            .buttonStyle(.plain)
             .disabled(ownedCount == 0)
         }
+        .navigationTitle("魚図鑑")
     }
 
     static func ownedCount(for species: FishSpecies, in player: Player?) -> Int {
