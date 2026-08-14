@@ -47,28 +47,46 @@ struct TimerView: View {
         ZStack {
             AquariumView(player: player)
 
-            VStack(spacing: 30) {
+            VStack(spacing: 22) {
+                Spacer()
+
+                Text(viewModel.isStudyTime ? "FOCUS" : "BREAK")
+                    .font(.caption.weight(.bold))
+                    .tracking(3)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.16), in: Capsule())
+
                 Text(formatTime(viewModel.timeRemaining))
-                    .font(.system(size: 60, weight: .bold))
+                    .font(.system(size: 72, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
 
                 Text(viewModel.isStudyTime ? "📚 勉強時間" : "☕️ 休憩時間")
-                    .font(.title2)
+                    .font(.headline)
+                    .foregroundStyle(.white.opacity(0.9))
 
                 Button(viewModel.isRunning ? "一時停止" : (viewModel.isStudyTime ? "勉強開始" : "休憩開始")) {
                     viewModel.startStopTimer()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AquariumPrimaryButtonStyle())
 
                 Button("リセット") {
                     viewModel.resetTimer()
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(AquariumSecondaryButtonStyle())
+
+                Spacer()
             }
-            .padding(30)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-            .padding()
+            .padding(.horizontal, 32)
+            .padding(.vertical, 24)
         }
         .navigationTitle("タイマー")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .onReceive(timer) { _ in
             viewModel.tick()
         }

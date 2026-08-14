@@ -27,44 +27,47 @@ struct HomeView: View {
             ZStack {
                 AquariumView(player: player)
                 
-                VStack(spacing: 30) {
-                    Text("🐠ポモドーロ水族館")
-                        .font(.largeTitle)
-                        .bold()
-
+                VStack(spacing: 20) {
                     Spacer()
 
-                    VStack(spacing: 24) {
-                        Text("25:00")
-                            .font(.system(size: 50,weight: .bold))
-
-                        NavigationLink("勉強開始") {
-                            TimerView(
-                                studyTime: Int(studyTime) ?? 25,
-                                breakTime: Int(breakTime) ?? 5,
-                                player: player
-                            )
-                        }
-                        .buttonStyle(.borderedProminent)
-
-                        VStack {
-                            Text("今日の勉強時間")
-                            Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
-                                .font(.title2)
-                        }
+                    VStack(spacing: 8) {
+                        Text("今日の勉強時間")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.8))
+                        Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.white)
                     }
-                    .padding(24)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 14)
+                    .aquariumGlass(cornerRadius: 18)
+
+                    NavigationLink {
+                        TimerView(
+                            studyTime: Int(studyTime) ?? 25,
+                            breakTime: Int(breakTime) ?? 5,
+                            player: player
+                        )
+                    } label: {
+                        Label("勉強をはじめる", systemImage: "timer")
+                    }
+                    .buttonStyle(AquariumPrimaryButtonStyle())
                 }
-                .padding()
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
             }
             .navigationTitle("ポモドーロ水族館")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     NavigationLink {
                         BookView()
                     } label: {
-                        Image(systemName: "book")
+                        Image(systemName: "book.closed.fill")
+                            .foregroundStyle(.white)
+                            .padding(10)
+                            .background(.black.opacity(0.16), in: Circle())
                     }
                 }
                 
@@ -75,7 +78,10 @@ struct HomeView: View {
                             breakTime: $breakTime
                         )
                     } label: {
-                        Image(systemName: "gearshape")
+                        Image(systemName: "gearshape.fill")
+                            .foregroundStyle(.white)
+                            .padding(10)
+                            .background(.black.opacity(0.16), in: Circle())
                     }
                 }
             }
