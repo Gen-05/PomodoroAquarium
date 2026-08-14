@@ -9,10 +9,19 @@ import UIKit
 struct AquariumView: View {
     let player: Player?
 
-    @State private var isSwimmingToRight = false
-
     private var favoriteFish: PlayerFish? {
         player?.favoriteFish
+    }
+
+    private var displayedFish: [PlayerFish] {
+        guard let player else { return [] }
+
+        var fish = player.ownedFish
+        if let favoriteFish {
+            fish.removeAll { $0.id == favoriteFish.id }
+            fish.insert(favoriteFish, at: 0)
+        }
+        return fish
     }
 
     var body: some View {
@@ -20,7 +29,16 @@ struct AquariumView: View {
             ZStack {
                 aquariumBackground
                 aquariumDecorations
-                aquariumContent(in: geometry.size)
+                fishLayer(in: geometry.size)
+
+                if displayedFish.isEmpty {
+                    favoriteFishGuide
+                        .offset(y: -geometry.size.height * 0.16)
+                } else if favoriteFish == nil {
+                    favoriteFishGuide
+                        .scaleEffect(0.8)
+                        .offset(y: -geometry.size.height * 0.36)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
@@ -78,56 +96,118 @@ struct AquariumView: View {
         }
     }
 
-    @ViewBuilder
-    private func aquariumContent(in size: CGSize) -> some View {
-        if let favoriteFish {
-            fishView(for: favoriteFish.species)
-                .offset(
-                    x: isSwimmingToRight ? swimmingDistance(in: size) : -swimmingDistance(in: size),
-                    y: -size.height * 0.16
-                )
-                .onAppear {
-                    withAnimation(.linear(duration: 9).repeatForever(autoreverses: true)) {
-                        isSwimmingToRight = true
-                    }
-                }
-        } else {
-            VStack(spacing: 12) {
-                Image(systemName: "fish")
-                    .font(.system(size: 50))
+    // 魚の配置と泳ぎは、背景装飾とは独立したレイヤーで管理する。
+    private func fishLayer(in size: CGSize) -> some View {
+        ZStack {
+            ForEach(Array(displayedFish.enumerated()), id: \.element.id) { index, playerFish in
+                let isFavorite = playerFish.id == favoriteFish?.id
 
-                Text("図鑑からお気に入りの魚を選んでください")
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                SwimmingFishView(
+                    species: playerFish.species,
+                    isFavorite: isFavorite,
+                    index: index,
+                    swimmingDistance: swimmingDistance(in: size, isFavorite: isFavorite)
+                )
+                .position(
+                    x: size.width / 2,
+                    y: verticalPosition(for: index, count: displayedFish.count, in: size)
+                )
             }
-            .padding()
-            .aquariumGlass(cornerRadius: 20)
-            .padding(.horizontal, 32)
-            .offset(y: -size.height * 0.16)
         }
     }
 
-    private func fishView(for species: FishSpecies) -> some View {
+    private var favoriteFishGuide: some View {
         VStack(spacing: 8) {
-            if let image = UIImage(named: species.imageName) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 120, height: 120)
-            } else {
-                Image(systemName: "fish")
-                    .font(.system(size: 70))
-            }
+            Image(systemName: "fish")
+                .font(.system(size: 42))
 
-            Text(species.name)
-                .font(.headline)
-                .bold()
+            Text("図鑑からお気に入りの魚を選んでください")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .aquariumGlass(cornerRadius: 20)
+        .padding(.horizontal, 32)
+    }
+
+    private func swimmingDistance(in size: CGSize, isFavorite: Bool) -> CGFloat {
+        let fishWidth: CGFloat = isFavorite ? 130 : 90
+        return max(0, (size.width - fishWidth) / 2)
+    }
+
+    private func verticalPosition(for index: Int, count: Int, in size: CGSize) -> CGFloat {
+        let top = size.height * 0.18
+        let bottom = size.height * 0.62
+
+        guard count > 1 else { return size.height * 0.34 }
+        return top + (bottom - top) * CGFloat(index) / CGFloat(count - 1)
+    }
+}
+
+private struct SwimmingFishView: View {
+    let species: FishSpecies
+    let isFavorite: Bool
+    let index: Int
+    let swimmingDistance: CGFloat
+
+    @State private var isSwimmingToRight: Bool
+
+    init(
+        species: FishSpecies,
+        isFavorite: Bool,
+        index: Int,
+        swimmingDistance: CGFloat
+    ) {
+        self.species = species
+        self.isFavorite = isFavorite
+        self.index = index
+        self.swimmingDistance = swimmingDistance
+        self._isSwimmingToRight = State(initialValue: index.isMultiple(of: 2))
+    }
+
+    var body: some View {
+        VStack(spacing: 5) {
+            fishImage
+
+            if isFavorite {
+                Text(species.name)
+                    .font(.headline)
+                    .bold()
+            }
+        }
+        .offset(x: isSwimmingToRight ? swimmingDistance : -swimmingDistance)
+        .onAppear {
+            withAnimation(
+                .linear(duration: animationDuration)
+                .delay(Double(index % 4) * 0.3)
+                .repeatForever(autoreverses: true)
+            ) {
+                isSwimmingToRight.toggle()
+            }
         }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(isFavorite ? "お気に入りの\(species.name)" : species.name)
     }
 
-    private func swimmingDistance(in size: CGSize) -> CGFloat {
-        max(0, (size.width - 160) / 2)
+    @ViewBuilder
+    private var fishImage: some View {
+        if let image = UIImage(named: species.imageName) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: fishSize, height: fishSize)
+        } else {
+            Image(systemName: "fish")
+                .font(.system(size: isFavorite ? 70 : 48))
+        }
+    }
+
+    private var fishSize: CGFloat {
+        isFavorite ? 120 : 78
+    }
+
+    private var animationDuration: Double {
+        8 + Double(index % 3)
     }
 }
 
