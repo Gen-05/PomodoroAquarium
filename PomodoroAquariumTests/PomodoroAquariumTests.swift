@@ -10,6 +10,55 @@ import Testing
 
 struct PomodoroAquariumTests {
 
+    @Test func rarityProbabilitiesAtZeroMinutesUseBaseRates() {
+        let probabilities = FishRewardService.rarityProbabilities(for: 0)
+
+        #expect(probabilities.common == 70)
+        #expect(probabilities.rare == 20)
+        #expect(probabilities.epic == 8)
+        #expect(probabilities.legendary == 2)
+        #expect(probabilities.total == 100)
+    }
+
+    @Test func rarityProbabilitiesAt90MinutesAreHalfway() {
+        let probabilities = FishRewardService.rarityProbabilities(for: 90)
+
+        #expect(probabilities.common == 64)
+        #expect(probabilities.rare == 22.5)
+        #expect(probabilities.epic == 10.5)
+        #expect(probabilities.legendary == 3)
+        #expect(probabilities.total == 100)
+    }
+
+    @Test func rarityProbabilitiesAt180MinutesUseMaximumBonus() {
+        let probabilities = FishRewardService.rarityProbabilities(for: 180)
+
+        #expect(probabilities.common == 58)
+        #expect(probabilities.rare == 25)
+        #expect(probabilities.epic == 13)
+        #expect(probabilities.legendary == 4)
+        #expect(probabilities.total == 100)
+    }
+
+    @Test func rarityProbabilitiesAreCappedAt180Minutes() {
+        let at180Minutes = FishRewardService.rarityProbabilities(for: 180)
+        let at300Minutes = FishRewardService.rarityProbabilities(for: 300)
+
+        #expect(at300Minutes.common == at180Minutes.common)
+        #expect(at300Minutes.rare == at180Minutes.rare)
+        #expect(at300Minutes.epic == at180Minutes.epic)
+        #expect(at300Minutes.legendary == at180Minutes.legendary)
+        #expect(at300Minutes.total == 100)
+    }
+
+    @Test func rarityProbabilitiesAlwaysTotal100Percent() {
+        for minutes in [0, 1, 47, 90, 179, 180, 300] {
+            let probabilities = FishRewardService.rarityProbabilities(for: minutes)
+
+            #expect(abs(probabilities.total - 100) < 0.000_001)
+        }
+    }
+
     @Test func studySessionUnder25MinutesDoesNotAwardFish() {
         let player = Player()
 
