@@ -24,11 +24,31 @@ struct AquariumView: View {
         return fish
     }
 
+    // 保存・編集機能を追加するまでは、固定装飾をこの配列から表示する。
+    private let decorations: [AquariumDecoration] = [
+        AquariumDecoration(
+            id: "default-seaweed",
+            kind: .seaweed,
+            relativeX: 0.14,
+            relativeY: 0.82,
+            scale: 1.0
+        ),
+        AquariumDecoration(
+            id: "default-rock",
+            kind: .rock,
+            relativeX: 0.82,
+            relativeY: 0.88,
+            scale: 1.1
+        )
+    ]
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                aquariumBackground
-                aquariumDecorations
+                AquariumBackground()
+                BubbleLayer()
+                AquariumFloor()
+                decorationLayer(in: geometry.size)
                 fishLayer(in: geometry.size)
 
                 if displayedFish.isEmpty {
@@ -46,53 +66,17 @@ struct AquariumView: View {
         .ignoresSafeArea()
     }
 
-    // 背景テーマは、今後このレイヤーを差し替えて変更する。
-    private var aquariumBackground: some View {
+    // AquariumDecorationを画面上の座標へ変換して描画する装飾レイヤー。
+    private func decorationLayer(in size: CGSize) -> some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.22, green: 0.78, blue: 0.88),
-                    Color(red: 0.04, green: 0.38, blue: 0.68),
-                    Color(red: 0.02, green: 0.12, blue: 0.32)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            LinearGradient(
-                colors: [.white.opacity(0.22), .clear],
-                startPoint: .topLeading,
-                endPoint: .center
-            )
-        }
-    }
-
-    // 泡、水草、装飾などはこのレイヤーに追加できる。
-    private var aquariumDecorations: some View {
-        ZStack {
-            Ellipse()
-                .fill(.white.opacity(0.07))
-                .frame(width: 110, height: 700)
-                .rotationEffect(.degrees(18))
-                .offset(x: -120, y: -180)
-
-            Ellipse()
-                .fill(.white.opacity(0.05))
-                .frame(width: 80, height: 620)
-                .rotationEffect(.degrees(18))
-                .offset(x: 60, y: -220)
-
-            Circle()
-                .fill(.white.opacity(0.12))
-                .frame(width: 180, height: 180)
-                .blur(radius: 4)
-                .offset(x: -130, y: -280)
-
-            Circle()
-                .fill(.cyan.opacity(0.12))
-                .frame(width: 260, height: 260)
-                .blur(radius: 8)
-                .offset(x: 150, y: 300)
+            ForEach(decorations) { decoration in
+                AquariumDecorationView(decoration: decoration)
+                    .scaleEffect(decoration.scale)
+                    .position(
+                        x: size.width * decoration.relativeX,
+                        y: size.height * decoration.relativeY
+                    )
+            }
         }
     }
 
@@ -144,6 +128,54 @@ struct AquariumView: View {
     }
 }
 
+private struct AquariumDecorationView: View {
+    let decoration: AquariumDecoration
+
+    @ViewBuilder
+    var body: some View {
+        switch decoration.kind {
+        case .seaweed:
+            HStack(alignment: .bottom, spacing: -8) {
+                seaweedStem(height: 88, rotation: -8)
+                seaweedStem(height: 120, rotation: 3)
+                seaweedStem(height: 76, rotation: 10)
+            }
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [.mint, .green.opacity(0.75)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+
+        case .rock:
+            ZStack(alignment: .bottom) {
+                Ellipse()
+                    .fill(Color.black.opacity(0.18))
+                    .frame(width: 112, height: 30)
+
+                RoundedRectangle(cornerRadius: 28)
+                    .fill(
+                        LinearGradient(
+                            colors: [.gray.opacity(0.9), .black.opacity(0.55)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 94, height: 64)
+                    .offset(y: -8)
+            }
+        }
+    }
+
+    private func seaweedStem(height: CGFloat, rotation: Double) -> some View {
+        Capsule()
+            .fill(.green)
+            .frame(width: 18, height: height)
+            .rotationEffect(.degrees(rotation), anchor: .bottom)
+    }
+}
+
 private struct SwimmingFishView: View {
     let species: FishSpecies
     let isFavorite: Bool
@@ -167,18 +199,18 @@ private struct SwimmingFishView: View {
 
     var body: some View {
         fishImage
-        .offset(x: isSwimmingToRight ? swimmingDistance : -swimmingDistance)
-        .onAppear {
-            withAnimation(
-                .linear(duration: animationDuration)
-                .delay(Double(index % 4) * 0.3)
-                .repeatForever(autoreverses: true)
-            ) {
-                isSwimmingToRight.toggle()
+            .offset(x: isSwimmingToRight ? swimmingDistance : -swimmingDistance)
+            .onAppear {
+                withAnimation(
+                    .linear(duration: animationDuration)
+                    .delay(Double(index % 4) * 0.3)
+                    .repeatForever(autoreverses: true)
+                ) {
+                    isSwimmingToRight.toggle()
+                }
             }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(isFavorite ? "お気に入りの\(species.name)" : species.name)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(isFavorite ? "お気に入りの\(species.name)" : species.name)
     }
 
     @ViewBuilder

@@ -28,18 +28,12 @@ struct TimerView: View {
             studyTime: studyTime,
             breakTime: breakTime
         )
-        
-        tempViewModel.onStudyFinished = {
-            if let player {
-                player.todayStudyMinutes += studyTime
-                player.totalStudyMinutes += studyTime
-                FishRewardService.awardFish(for: studyTime, to: player)
-            }
-        }
         self._viewModel = State(initialValue: tempViewModel)
+        self._awardedFish = State(initialValue: nil)
     }
     
     @State private var viewModel: TimerViewModel
+    @State private var awardedFish: PlayerFish?
     
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -87,8 +81,35 @@ struct TimerView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .onAppear {
+            configureStudyCompletion()
+        }
         .onReceive(timer) { _ in
             viewModel.tick()
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { awardedFish != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        awardedFish = nil
+                    }
+                }
+            )
+        ) {
+            if let awardedFish {
+                FishRewardView(fish: awardedFish)
+            }
+        }
+    }
+
+    private func configureStudyCompletion() {
+        viewModel.onStudyFinished = {
+            guard let player else { return }
+
+            player.todayStudyMinutes += studyTime
+            player.totalStudyMinutes += studyTime
+            awardedFish = FishRewardService.awardFish(for: studyTime, to: player)
         }
     }
 }

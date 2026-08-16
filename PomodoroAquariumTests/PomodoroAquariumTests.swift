@@ -88,6 +88,19 @@ struct PomodoroAquariumTests {
         #expect(player.ownedFish.count == 3)
     }
 
+    @Test func playerCanOwnMultipleFishOfTheSameSpecies() {
+        let firstClownfish = PlayerFish(species: .clownfish)
+        let secondClownfish = PlayerFish(species: .clownfish)
+        let player = Player()
+
+        player.ownedFish.append(firstClownfish)
+        player.ownedFish.append(secondClownfish)
+
+        #expect(firstClownfish.id != secondClownfish.id)
+        #expect(player.ownedFish.count == 2)
+        #expect(player.ownedFish.count { $0.species == .clownfish } == 2)
+    }
+
     @Test func bookOwnedCountCountsOnlyMatchingSpecies() {
         let player = Player(ownedFish: [
             PlayerFish(species: .clownfish),
