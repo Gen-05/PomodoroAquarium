@@ -14,6 +14,8 @@ struct TimerView: View {
     let studyTime: Int
     let breakTime: Int
     let player: Player?
+
+    @Environment(\.scenePhase) private var scenePhase
     
     init(
         studyTime: Int,
@@ -86,6 +88,11 @@ struct TimerView: View {
         }
         .onReceive(timer) { _ in
             viewModel.tick()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                viewModel.synchronizeTime()
+            }
         }
         .sheet(
             isPresented: Binding(

@@ -5,10 +5,148 @@
 //  Created by 阿部弦生 on 2026/07/02.
 //
 
+import Foundation
 import Testing
 @testable import PomodoroAquarium
 
 struct PomodoroAquariumTests {
+
+    @Test func runningTimerUsesElapsedTimeForTenSeconds() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+
+        viewModel.startStopTimer()
+        clock.advance(by: 10)
+        viewModel.tick()
+
+        #expect(viewModel.timeRemaining == 25 * 60 - 10)
+    }
+
+    @Test func foregroundSynchronizationCorrectsBackgroundElapsedTime() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+
+        viewModel.startStopTimer()
+        clock.advance(by: 10 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(viewModel.timeRemaining == 15 * 60)
+    }
+
+    @Test func pausedTimerDoesNotLoseTime() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+
+        viewModel.startStopTimer()
+        clock.advance(by: 10)
+        viewModel.startStopTimer()
+        let pausedTimeRemaining = viewModel.timeRemaining
+
+        clock.advance(by: 5 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(!viewModel.isRunning)
+        #expect(viewModel.timeRemaining == pausedTimeRemaining)
+    }
+
+    @Test func studyCompletionIsHandledOnlyOnce() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+        var completionCount = 0
+        viewModel.onStudyFinished = {
+            completionCount += 1
+        }
+
+        viewModel.startStopTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        viewModel.synchronizeTime()
+        viewModel.tick()
+
+        #expect(completionCount == 1)
+        #expect(!viewModel.isStudyTime)
+        #expect(!viewModel.isRunning)
+        #expect(viewModel.timeRemaining == 5 * 60)
+    }
+
+    @Test func studyCompletionSwitchesToConfiguredBreakTime() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 7, now: { clock.now })
+
+        viewModel.startStopTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(!viewModel.isStudyTime)
+        #expect(!viewModel.isRunning)
+        #expect(viewModel.timeRemaining == 7 * 60)
+        #expect(viewModel.endDate == nil)
+    }
+
+    @Test func breakTimerUsesEndDateToCorrectBackgroundElapsedTime() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+
+        viewModel.startStopTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+
+        viewModel.startStopTimer()
+        let expectedEndDate = clock.now.addingTimeInterval(5 * 60)
+        clock.advance(by: 2 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(viewModel.endDate == expectedEndDate)
+        #expect(!viewModel.isStudyTime)
+        #expect(viewModel.isRunning)
+        #expect(viewModel.timeRemaining == 3 * 60)
+    }
+
+    @Test func pausedBreakTimerDoesNotLoseTime() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+
+        viewModel.startStopTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        viewModel.startStopTimer()
+        clock.advance(by: 30)
+        viewModel.startStopTimer()
+        let pausedTimeRemaining = viewModel.timeRemaining
+
+        clock.advance(by: 10 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(!viewModel.isStudyTime)
+        #expect(!viewModel.isRunning)
+        #expect(viewModel.endDate == nil)
+        #expect(viewModel.timeRemaining == pausedTimeRemaining)
+        #expect(viewModel.timeRemaining == 4 * 60 + 30)
+    }
+
+    @Test func breakCompletionIsHandledOnlyOnce() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+        var studyCompletionCount = 0
+        viewModel.onStudyFinished = {
+            studyCompletionCount += 1
+        }
+
+        viewModel.startStopTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        viewModel.startStopTimer()
+        clock.advance(by: 5 * 60)
+        viewModel.synchronizeTime()
+        viewModel.synchronizeTime()
+        viewModel.tick()
+
+        #expect(studyCompletionCount == 1)
+        #expect(viewModel.isStudyTime)
+        #expect(!viewModel.isRunning)
+        #expect(viewModel.timeRemaining == 25 * 60)
+        #expect(viewModel.endDate == nil)
+    }
 
     @Test func rarityProbabilitiesAtZeroMinutesUseBaseRates() {
         let probabilities = FishRewardService.rarityProbabilities(for: 0)
@@ -148,4 +286,12 @@ struct PomodoroAquariumTests {
         #expect(player.favoriteFish?.id == clownfish.id)
     }
 
+}
+
+private final class TestClock {
+    var now = Date(timeIntervalSinceReferenceDate: 1_000_000)
+
+    func advance(by interval: TimeInterval) {
+        now = now.addingTimeInterval(interval)
+    }
 }
