@@ -112,6 +112,8 @@ struct TimerView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 viewModel.synchronizeTime()
+            } else {
+                viewModel.recordLastActiveTime()
             }
         }
         .alert(viewModel.isStudyTime ? "勉強を終了しますか？" : "休憩を終了しますか？", isPresented: $showsEndConfirmation) {

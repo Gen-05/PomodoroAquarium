@@ -347,22 +347,21 @@ struct PomodoroAquariumTests {
         #expect(restored.timeRemaining == 24 * 60)
     }
 
-    @Test func newProcessInterruptsSessionAfterOneHundredTwentyOneSeconds() {
+    @Test func newProcessRestoresSessionAfterFiveMinutes() {
         let clock = TestClock()
         let defaults = makeTimerDefaults()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
         let oldViewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
         oldViewModel.startStopTimer()
-        clock.advance(by: 121)
+        clock.advance(by: 5 * 60)
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
         let restored = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: newStore)
         restored.restorePersistedSessionIfNeeded()
 
-        #expect(!restored.isRunning)
+        #expect(restored.isRunning)
         #expect(restored.isStudyTime)
-        #expect(restored.timeRemaining == 25 * 60)
-        #expect(newStore.load() == nil)
+        #expect(restored.timeRemaining == 20 * 60)
     }
 
     @Test func expiredSessionWithinGracePeriodCompletesOnlyOnce() {
@@ -387,26 +386,31 @@ struct PomodoroAquariumTests {
         #expect(newStore.load() == nil)
     }
 
-    @Test func interruptedSessionDoesNotCompleteOrAwardFish() {
+    @Test func sessionOlderThanTenMinutesFinishesUsingSavedElapsedTime() {
         let clock = TestClock()
         let defaults = makeTimerDefaults()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
-        let oldViewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
-        oldViewModel.startStopTimer()
-        clock.advance(by: 121)
+        let oldViewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+        oldViewModel.resumeTimer()
+        clock.advance(by: 30 * 60)
+        oldViewModel.recordLastActiveTime()
+        clock.advance(by: 10 * 60 + 1)
 
-        let player = Player()
         var completionCount = 0
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
-        let restored = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        let restored = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: newStore)
         restored.onStudyFinished = {
             completionCount += 1
-            FishRewardService.awardFish(for: 25, to: player)
         }
         restored.restorePersistedSessionIfNeeded()
 
-        #expect(completionCount == 0)
-        #expect(player.ownedFish.isEmpty)
+        #expect(completionCount == 1)
+        #expect(restored.lastCompletedStudyMinutes == 40)
+        #expect(CurrencyService.studyCompletionReward(
+            for: restored.lastCompletedStudyMinutes,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 10)
+        #expect(newStore.load() == nil)
     }
 
     @Test func pausedSessionRestoresPausedWithinGracePeriod() {
@@ -428,7 +432,7 @@ struct PomodoroAquariumTests {
         #expect(restored.endDate == nil)
     }
 
-    @Test func breakSessionRestoresWithinGracePeriod() {
+    @Test func breakSessionIsNotPersistedOrRestored() {
         let clock = TestClock()
         let defaults = makeTimerDefaults()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
@@ -439,13 +443,15 @@ struct PomodoroAquariumTests {
         oldViewModel.startStopTimer()
         clock.advance(by: 60)
 
+        #expect(oldStore.load() == nil)
+
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
         let restored = TimerViewModel(studyTime: 1, breakTime: 5, now: { clock.now }, sessionStore: newStore)
         restored.restorePersistedSessionIfNeeded()
 
-        #expect(!restored.isStudyTime)
-        #expect(restored.isRunning)
-        #expect(restored.timeRemaining == 4 * 60)
+        #expect(restored.isStudyTime)
+        #expect(!restored.isRunning)
+        #expect(restored.timeRemaining == 60)
     }
 
     @Test func resetPreventsOldSessionFromRestoring() {
@@ -471,18 +477,41 @@ struct PomodoroAquariumTests {
         #expect(!store.consumeInterruptionBanner())
     }
 
-    @Test func interruptionBannerIsConsumedOnlyOnce() {
+    @Test func expiredSessionIsReturnedForViewModelCompletion() {
         let clock = TestClock()
         let defaults = makeTimerDefaults()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
         let oldViewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
         oldViewModel.startStopTimer()
-        clock.advance(by: 121)
+        clock.advance(by: 10 * 60 + 1)
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
-        #expect(newStore.launchStatus(at: clock.now) == .interrupted)
-        #expect(newStore.consumeInterruptionBanner())
-        #expect(!newStore.consumeInterruptionBanner())
+        guard case .expired = newStore.launchStatus(at: clock.now) else {
+            Issue.record("10分を超えたセッションがexpiredになっていません")
+            return
+        }
+        #expect(newStore.load() != nil)
+    }
+
+    @Test func expiredStudyUnderTwentyFiveMinutesHasNoReward() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
+        let original = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+        original.resumeTimer()
+        clock.advance(by: 10 * 60)
+        original.recordLastActiveTime()
+        clock.advance(by: 10 * 60 + 1)
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
+        let restored = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        restored.restorePersistedSessionIfNeeded()
+
+        #expect(restored.lastCompletedStudyMinutes == 20)
+        #expect(CurrencyService.studyCompletionReward(
+            for: restored.lastCompletedStudyMinutes,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 0)
     }
 
     @Test @MainActor func defaultAquariumDecorationsAreCreatedOnFirstLaunch() throws {
@@ -1142,7 +1171,7 @@ struct PomodoroAquariumTests {
         #expect(CurrencyService.balance(of: player) == 10)
     }
 
-    @Test @MainActor func interruptedStudySessionDoesNotAwardCoins() throws {
+    @Test @MainActor func expiredStudyUnderTwentyFiveMinutesDoesNotAwardCoins() throws {
         let container = try makePlayerContainer()
         let context = container.mainContext
         let player = Player()
@@ -1151,23 +1180,29 @@ struct PomodoroAquariumTests {
         let defaults = makeTimerDefaults()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "coin-old")
         let oldViewModel = TimerViewModel(
-            studyTime: 25,
+            studyTime: 60,
             breakTime: 5,
             now: { clock.now },
             sessionStore: oldStore
         )
         oldViewModel.startStopTimer()
-        clock.advance(by: 121)
+        clock.advance(by: 10 * 60)
+        oldViewModel.recordLastActiveTime()
+        clock.advance(by: 10 * 60 + 1)
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "coin-new")
         let restored = TimerViewModel(
-            studyTime: 25,
+            studyTime: 60,
             breakTime: 5,
             now: { clock.now },
             sessionStore: newStore
         )
         restored.onStudyFinished = {
-            _ = try? CurrencyService.addCoins(10, to: player, in: context)
+            let reward = CurrencyService.studyCompletionReward(
+                for: restored.lastCompletedStudyMinutes,
+                todayStudyMinutesBeforeCompletion: player.todayStudyMinutes
+            )
+            _ = try? CurrencyService.addCoins(reward, to: player, in: context)
         }
         restored.restorePersistedSessionIfNeeded()
 

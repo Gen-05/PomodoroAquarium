@@ -18,11 +18,11 @@ enum TimerSessionLaunchStatus: Equatable {
     case none
     case sameProcess(PersistedTimerSession)
     case recoverable(PersistedTimerSession)
-    case interrupted
+    case expired(PersistedTimerSession)
 }
 
 final class TimerSessionStore {
-    static let gracePeriod: TimeInterval = 120
+    static let gracePeriod: TimeInterval = 10 * 60
     static let heartbeatInterval: TimeInterval = 20
     static let shared = TimerSessionStore()
 
@@ -73,6 +73,10 @@ final class TimerSessionStore {
 
     func launchStatus(at date: Date) -> TimerSessionLaunchStatus {
         guard let session = load(), session.sessionIsActive else { return .none }
+        guard session.isStudyTime else {
+            clearSession()
+            return .none
+        }
 
         if session.processIdentifier == processIdentifier {
             return .sameProcess(session)
@@ -82,9 +86,8 @@ final class TimerSessionStore {
             return .recoverable(session)
         }
 
-        clearSession()
-        defaults.set(true, forKey: Key.interruptionBannerPending)
-        return .interrupted
+        // TimerViewModelが保存済み経過時間で途中終了処理を行ってから削除する。
+        return .expired(session)
     }
 
     func clearSession() {

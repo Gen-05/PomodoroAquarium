@@ -118,6 +118,14 @@ final class TimerViewModel {
         updateHeartbeatIfNeeded()
     }
 
+    /// 非アクティブになる直前の時刻と、その時点までの経過時間を保存する。
+    func recordLastActiveTime() {
+        guard sessionStore.load()?.sessionIsActive == true else { return }
+        synchronizeTime()
+        guard state == .running || state == .paused else { return }
+        persistSession(at: now())
+    }
+
     func restorePersistedSessionIfNeeded() {
         guard !hasAttemptedRestore else { return }
         hasAttemptedRestore = true
@@ -126,7 +134,9 @@ final class TimerViewModel {
         switch sessionStore.launchStatus(at: currentDate) {
         case .sameProcess(let session), .recoverable(let session):
             restore(session, at: currentDate)
-        case .none, .interrupted:
+        case .expired(let session):
+            finishExpiredSession(session)
+        case .none:
             break
         }
     }
@@ -163,6 +173,34 @@ final class TimerViewModel {
         }
     }
 
+    private func finishExpiredSession(_ session: PersistedTimerSession) {
+        guard session.isStudyTime else {
+            sessionStore.clearSession()
+            return
+        }
+
+        isStudyTime = session.isStudyTime
+        state = .paused
+        endDate = nil
+        lastHeartbeatDate = session.lastHeartbeatDate
+        hasHandledCurrentSessionCompletion = false
+
+        let fallbackElapsed = max(0, session.studyTime * 60 - session.timeRemaining)
+        let savedElapsed = max(0, session.elapsedStudySeconds ?? fallbackElapsed)
+        let timeSinceLastActive = max(0, now().timeIntervalSince(session.lastHeartbeatDate))
+        let allowedBackgroundTime = min(
+            Int(timeSinceLastActive.rounded(.down)),
+            Int(TimerSessionStore.gracePeriod)
+        )
+        let elapsedAtTermination = session.isRunning
+            ? savedElapsed + allowedBackgroundTime
+            : savedElapsed
+        let creditedElapsed = min(elapsedAtTermination, studyTime * 60)
+        timeRemaining = max(0, studyTime * 60 - creditedElapsed)
+
+        _ = endCurrentSession()
+    }
+
     private func updateHeartbeatIfNeeded() {
         guard sessionStore.load()?.sessionIsActive == true else { return }
         let currentDate = now()
@@ -174,6 +212,12 @@ final class TimerViewModel {
     }
 
     private func persistSession(at date: Date) {
+        guard isStudyTime else {
+            lastHeartbeatDate = nil
+            sessionStore.clearSession()
+            return
+        }
+
         lastHeartbeatDate = date
         sessionStore.save(sessionStore.makeSession(
             endDate: endDate,
