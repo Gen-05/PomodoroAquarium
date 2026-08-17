@@ -1238,6 +1238,23 @@ struct PomodoroAquariumTests {
         #expect(reward.totalReward == 60)
     }
 
+    @Test func smallRewardCountAnimationIncrementsOneCoinAtATime() {
+        #expect(RewardCountAnimation.values(to: 10) == Array(0...10))
+    }
+
+    @Test func largeRewardCountAnimationIsBoundedAndEndsAtExactAmount() {
+        let values = RewardCountAnimation.values(to: 2_000)
+
+        #expect(values.first == 0)
+        #expect(values.last == 2_000)
+        #expect(values.count <= RewardCountAnimation.maximumSteps + 1)
+    }
+
+    @Test func rewardCountAnimationSafelyHandlesZero() {
+        #expect(RewardCountAnimation.values(to: 0) == [0])
+        #expect(RewardCountAnimation.values(to: -10) == [0])
+    }
+
     @Test func studyRewardMultiplierDoesNotMultiplyStreakReward() {
         let reward = StudyCompletionReward(
             studyReward: 10,
