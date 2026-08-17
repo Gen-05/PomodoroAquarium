@@ -74,6 +74,19 @@ struct HomeView: View {
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
 
+                    HStack {
+                        Spacer()
+                        Label(
+                            "\(CurrencyService.balance(of: player))",
+                            systemImage: "circle.hexagongrid.fill"
+                        )
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.yellow)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .aquariumGlass(cornerRadius: 16)
+                    }
+
                     Spacer()
 
                     if isEditingAquarium {

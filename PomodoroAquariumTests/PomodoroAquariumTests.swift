@@ -791,6 +791,55 @@ struct PomodoroAquariumTests {
         #expect(player.favoriteFish?.id == clownfish.id)
     }
 
+    @Test @MainActor func initialCoinBalanceIsZero() throws {
+        let container = try makePlayerContainer()
+        let player = Player()
+        container.mainContext.insert(player)
+        try container.mainContext.save()
+
+        #expect(CurrencyService.balance(of: player) == 0)
+    }
+
+    @Test @MainActor func coinsCanBeAddedMultipleTimesAndPersisted() throws {
+        let container = try makePlayerContainer()
+        let context = container.mainContext
+        let player = Player()
+        context.insert(player)
+        try context.save()
+
+        #expect(try CurrencyService.addCoins(10, to: player, in: context) == 10)
+        #expect(try CurrencyService.addCoins(25, to: player, in: context) == 35)
+
+        let refetchContext = ModelContext(container)
+        let refetched = try #require(
+            refetchContext.fetch(FetchDescriptor<Player>()).first
+        )
+        #expect(CurrencyService.balance(of: refetched) == 35)
+    }
+
+    @Test @MainActor func zeroAndNegativeCoinAdditionsAreIgnoredSafely() throws {
+        let container = try makePlayerContainer()
+        let context = container.mainContext
+        let player = Player(coins: 12)
+        context.insert(player)
+        try context.save()
+
+        #expect(try CurrencyService.addCoins(0, to: player, in: context) == 12)
+        #expect(try CurrencyService.addCoins(-100, to: player, in: context) == 12)
+        #expect(player.coins == 12)
+    }
+
+    @Test @MainActor func coinAdditionSaturatesAtIntegerMaximum() throws {
+        let container = try makePlayerContainer()
+        let context = container.mainContext
+        let player = Player(coins: Int.max - 2)
+        context.insert(player)
+        try context.save()
+
+        #expect(try CurrencyService.addCoins(10, to: player, in: context) == Int.max)
+        #expect(CurrencyService.canAfford(Int.max, player: player))
+    }
+
 }
 
 private final class TestClock {
@@ -813,6 +862,14 @@ private func makeDecorationContainer() throws -> ModelContainer {
     let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
     return try ModelContainer(
         for: AquariumDecorationPlacement.self,
+        configurations: configuration
+    )
+}
+
+private func makePlayerContainer() throws -> ModelContainer {
+    let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+    return try ModelContainer(
+        for: Player.self, PlayerFish.self,
         configurations: configuration
     )
 }
