@@ -85,6 +85,7 @@ struct TimerView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .onAppear {
             configureStudyCompletion()
+            viewModel.restorePersistedSessionIfNeeded()
         }
         .onReceive(timer) { _ in
             viewModel.tick()

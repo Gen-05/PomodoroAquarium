@@ -13,7 +13,7 @@ struct PomodoroAquariumTests {
 
     @Test func runningTimerUsesElapsedTimeForTenSeconds() {
         let clock = TestClock()
-        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
 
         viewModel.startStopTimer()
         clock.advance(by: 10)
@@ -24,7 +24,7 @@ struct PomodoroAquariumTests {
 
     @Test func foregroundSynchronizationCorrectsBackgroundElapsedTime() {
         let clock = TestClock()
-        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
 
         viewModel.startStopTimer()
         clock.advance(by: 10 * 60)
@@ -35,7 +35,7 @@ struct PomodoroAquariumTests {
 
     @Test func pausedTimerDoesNotLoseTime() {
         let clock = TestClock()
-        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
 
         viewModel.startStopTimer()
         clock.advance(by: 10)
@@ -51,7 +51,7 @@ struct PomodoroAquariumTests {
 
     @Test func studyCompletionIsHandledOnlyOnce() {
         let clock = TestClock()
-        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
         var completionCount = 0
         viewModel.onStudyFinished = {
             completionCount += 1
@@ -71,7 +71,7 @@ struct PomodoroAquariumTests {
 
     @Test func studyCompletionSwitchesToConfiguredBreakTime() {
         let clock = TestClock()
-        let viewModel = TimerViewModel(studyTime: 25, breakTime: 7, now: { clock.now })
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 7, now: { clock.now }, sessionStore: makeTimerStore())
 
         viewModel.startStopTimer()
         clock.advance(by: 25 * 60)
@@ -85,7 +85,7 @@ struct PomodoroAquariumTests {
 
     @Test func breakTimerUsesEndDateToCorrectBackgroundElapsedTime() {
         let clock = TestClock()
-        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
 
         viewModel.startStopTimer()
         clock.advance(by: 25 * 60)
@@ -104,7 +104,7 @@ struct PomodoroAquariumTests {
 
     @Test func pausedBreakTimerDoesNotLoseTime() {
         let clock = TestClock()
-        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
 
         viewModel.startStopTimer()
         clock.advance(by: 25 * 60)
@@ -126,7 +126,7 @@ struct PomodoroAquariumTests {
 
     @Test func breakCompletionIsHandledOnlyOnce() {
         let clock = TestClock()
-        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now })
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
         var studyCompletionCount = 0
         viewModel.onStudyFinished = {
             studyCompletionCount += 1
@@ -146,6 +146,174 @@ struct PomodoroAquariumTests {
         #expect(!viewModel.isRunning)
         #expect(viewModel.timeRemaining == 25 * 60)
         #expect(viewModel.endDate == nil)
+    }
+
+    @Test func sameProcessBackgroundLongerThanGracePeriodStillContinues() {
+        let clock = TestClock()
+        let store = makeTimerStore(processIdentifier: "same-process")
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: store)
+
+        viewModel.startStopTimer()
+        clock.advance(by: 10 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(viewModel.isRunning)
+        #expect(viewModel.timeRemaining == 15 * 60)
+    }
+
+    @Test func newProcessRestoresRunningSessionAfterSixtySeconds() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
+        let oldViewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+        oldViewModel.startStopTimer()
+        clock.advance(by: 60)
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
+        let restored = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        restored.restorePersistedSessionIfNeeded()
+
+        #expect(restored.isRunning)
+        #expect(restored.isStudyTime)
+        #expect(restored.timeRemaining == 24 * 60)
+    }
+
+    @Test func newProcessInterruptsSessionAfterOneHundredTwentyOneSeconds() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
+        let oldViewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+        oldViewModel.startStopTimer()
+        clock.advance(by: 121)
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
+        let restored = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        restored.restorePersistedSessionIfNeeded()
+
+        #expect(!restored.isRunning)
+        #expect(restored.isStudyTime)
+        #expect(restored.timeRemaining == 25 * 60)
+        #expect(newStore.load() == nil)
+    }
+
+    @Test func expiredSessionWithinGracePeriodCompletesOnlyOnce() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
+        let oldViewModel = TimerViewModel(studyTime: 1, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+        oldViewModel.startStopTimer()
+        clock.advance(by: 60)
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
+        let restored = TimerViewModel(studyTime: 1, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        var completionCount = 0
+        restored.onStudyFinished = { completionCount += 1 }
+        restored.restorePersistedSessionIfNeeded()
+        restored.synchronizeTime()
+        restored.tick()
+
+        #expect(completionCount == 1)
+        #expect(!restored.isStudyTime)
+        #expect(!restored.isRunning)
+        #expect(newStore.load() == nil)
+    }
+
+    @Test func interruptedSessionDoesNotCompleteOrAwardFish() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
+        let oldViewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+        oldViewModel.startStopTimer()
+        clock.advance(by: 121)
+
+        let player = Player()
+        var completionCount = 0
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
+        let restored = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        restored.onStudyFinished = {
+            completionCount += 1
+            FishRewardService.awardFish(for: 25, to: player)
+        }
+        restored.restorePersistedSessionIfNeeded()
+
+        #expect(completionCount == 0)
+        #expect(player.ownedFish.isEmpty)
+    }
+
+    @Test func pausedSessionRestoresPausedWithinGracePeriod() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
+        let oldViewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+        oldViewModel.startStopTimer()
+        clock.advance(by: 30)
+        oldViewModel.startStopTimer()
+        clock.advance(by: 60)
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
+        let restored = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        restored.restorePersistedSessionIfNeeded()
+
+        #expect(!restored.isRunning)
+        #expect(restored.timeRemaining == 24 * 60 + 30)
+        #expect(restored.endDate == nil)
+    }
+
+    @Test func breakSessionRestoresWithinGracePeriod() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
+        let oldViewModel = TimerViewModel(studyTime: 1, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+        oldViewModel.startStopTimer()
+        clock.advance(by: 60)
+        oldViewModel.synchronizeTime()
+        oldViewModel.startStopTimer()
+        clock.advance(by: 60)
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
+        let restored = TimerViewModel(studyTime: 1, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        restored.restorePersistedSessionIfNeeded()
+
+        #expect(!restored.isStudyTime)
+        #expect(restored.isRunning)
+        #expect(restored.timeRemaining == 4 * 60)
+    }
+
+    @Test func resetPreventsOldSessionFromRestoring() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let store = TimerSessionStore(defaults: defaults, processIdentifier: "old")
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: store)
+        viewModel.startStopTimer()
+        viewModel.resetTimer()
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
+        #expect(newStore.launchStatus(at: clock.now) == .none)
+    }
+
+    @Test func normalCompletionDoesNotCreateInterruptionBanner() {
+        let clock = TestClock()
+        let store = makeTimerStore()
+        let viewModel = TimerViewModel(studyTime: 1, breakTime: 5, now: { clock.now }, sessionStore: store)
+        viewModel.startStopTimer()
+        clock.advance(by: 60)
+        viewModel.synchronizeTime()
+
+        #expect(!store.consumeInterruptionBanner())
+    }
+
+    @Test func interruptionBannerIsConsumedOnlyOnce() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
+        let oldViewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+        oldViewModel.startStopTimer()
+        clock.advance(by: 121)
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
+        #expect(newStore.launchStatus(at: clock.now) == .interrupted)
+        #expect(newStore.consumeInterruptionBanner())
+        #expect(!newStore.consumeInterruptionBanner())
     }
 
     @Test func rarityProbabilitiesAtZeroMinutesUseBaseRates() {
@@ -294,4 +462,12 @@ private final class TestClock {
     func advance(by interval: TimeInterval) {
         now = now.addingTimeInterval(interval)
     }
+}
+
+private func makeTimerDefaults() -> UserDefaults {
+    UserDefaults(suiteName: "PomodoroAquariumTests.\(UUID().uuidString)")!
+}
+
+private func makeTimerStore(processIdentifier: String = UUID().uuidString) -> TimerSessionStore {
+    TimerSessionStore(defaults: makeTimerDefaults(), processIdentifier: processIdentifier)
 }

@@ -17,6 +17,8 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     
     @Query private var players: [Player]
+    @State private var showsInterruptionBanner = false
+    @State private var resumesPersistedTimer = false
     
     private var player: Player? {
         players.first
@@ -28,6 +30,11 @@ struct HomeView: View {
                 AquariumView(player: player)
                 
                 VStack(spacing: 20) {
+                    if showsInterruptionBanner {
+                        interruptionBanner
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+
                     Spacer()
 
                     VStack(spacing: 8) {
@@ -85,8 +92,16 @@ struct HomeView: View {
                     }
                 }
             }
+            .navigationDestination(isPresented: $resumesPersistedTimer) {
+                TimerView(
+                    studyTime: Int(studyTime) ?? 25,
+                    breakTime: Int(breakTime) ?? 5,
+                    player: player
+                )
+            }
         }
         .onAppear {
+            inspectPersistedTimerSession()
             let now = Date()
             let calendar = Calendar.current
             let today = DateFormatter.yyyyMMdd.string(from: now)
@@ -120,6 +135,43 @@ struct HomeView: View {
                 currentPlayer.todayStudyMinutes = 0
                 lastStudyDate = today
             }
+        }
+    }
+
+    private var interruptionBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("前回の勉強は中断されました")
+                    .font(.subheadline.weight(.semibold))
+                Text("勉強時間と魚獲得には反映されません")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            Spacer()
+            Button {
+                withAnimation { showsInterruptionBanner = false }
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.plain)
+        }
+        .foregroundStyle(.white)
+        .padding(14)
+        .background(.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func inspectPersistedTimerSession() {
+        switch TimerSessionStore.shared.launchStatus(at: Date()) {
+        case .recoverable:
+            resumesPersistedTimer = true
+        case .interrupted, .none, .sameProcess:
+            break
+        }
+
+        if TimerSessionStore.shared.consumeInterruptionBanner() {
+            withAnimation { showsInterruptionBanner = true }
         }
     }
 
