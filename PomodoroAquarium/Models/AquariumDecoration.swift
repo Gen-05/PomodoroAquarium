@@ -4,6 +4,7 @@
 //
 
 import CoreGraphics
+import Foundation
 import SwiftData
 
 enum AquariumDecorationKind: String, Codable, CaseIterable {
@@ -99,7 +100,7 @@ final class AquariumDecorationPlacement {
     var isPlaced: Bool = true
 
     init(
-        decorationID: String,
+        decorationID: String = UUID().uuidString,
         kind: AquariumDecorationKind,
         relativeX: Double,
         relativeY: Double,

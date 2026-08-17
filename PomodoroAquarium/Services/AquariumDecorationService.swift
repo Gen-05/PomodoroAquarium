@@ -22,9 +22,11 @@ enum AquariumDecorationService {
     @discardableResult
     static func createDefaultsIfNeeded(in context: ModelContext) throws -> Bool {
         let descriptor = FetchDescriptor<AquariumDecorationPlacement>()
-        guard try context.fetchCount(descriptor) == 0 else { return false }
+        let existingIDs = Set(try context.fetch(descriptor).map(\.decorationID))
+        let missingDefaults = defaultDecorations.filter { !existingIDs.contains($0.id) }
+        guard !missingDefaults.isEmpty else { return false }
 
-        for decoration in defaultDecorations {
+        for decoration in missingDefaults {
             context.insert(AquariumDecorationPlacement(
                 decorationID: decoration.id,
                 kind: decoration.kind,
@@ -35,6 +37,29 @@ enum AquariumDecorationService {
         }
         try context.save()
         return true
+    }
+
+    /// ショップ等で装飾を1個入手する際に利用できる個体単位の追加処理。
+    /// 同じkindでも毎回異なるUUIDを持つため、独立して配置・収納できる。
+    @discardableResult
+    static func addPlacement(
+        kind: AquariumDecorationKind,
+        at position: CGPoint? = nil,
+        scale: Double = 1,
+        isPlaced: Bool = false,
+        in context: ModelContext
+    ) throws -> AquariumDecorationPlacement {
+        let initialPosition = position ?? kind.restorationPosition
+        let placement = AquariumDecorationPlacement(
+            kind: kind,
+            relativeX: Double(initialPosition.x),
+            relativeY: Double(initialPosition.y),
+            scale: scale,
+            isPlaced: isPlaced
+        )
+        context.insert(placement)
+        try context.save()
+        return placement
     }
 
     static func storedPlacements(

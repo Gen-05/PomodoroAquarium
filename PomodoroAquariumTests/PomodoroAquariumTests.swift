@@ -364,6 +364,96 @@ struct PomodoroAquariumTests {
         #expect(count == AquariumDecorationService.defaultDecorations.count)
     }
 
+    @Test @MainActor func defaultAquariumDecorationsUseStableIDsForDeduplication() throws {
+        let container = try makeDecorationContainer()
+        let context = container.mainContext
+        context.insert(AquariumDecorationPlacement(
+            kind: .seaweed,
+            relativeX: 0.5,
+            relativeY: 0.8,
+            scale: 1
+        ))
+        try context.save()
+
+        #expect(try AquariumDecorationService.createDefaultsIfNeeded(in: context))
+        #expect(!(try AquariumDecorationService.createDefaultsIfNeeded(in: context)))
+
+        let placements = try context.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+        #expect(placements.count == 3)
+        #expect(placements.filter { $0.decorationID == "default-seaweed" }.count == 1)
+        #expect(placements.filter { $0.decorationID == "default-rock" }.count == 1)
+    }
+
+    @Test @MainActor func multipleDecorationsOfTheSameKindCanBeOwnedAndPlaced() throws {
+        let container = try makeDecorationContainer()
+        let context = container.mainContext
+        let positions = [0.2, 0.5, 0.8]
+
+        let seaweeds = try positions.map { x in
+            try AquariumDecorationService.addPlacement(
+                kind: .seaweed,
+                at: CGPoint(x: CGFloat(x), y: 0.82),
+                isPlaced: true,
+                in: context
+            )
+        }
+
+        #expect(Set(seaweeds.map(\.decorationID)).count == 3)
+        #expect(seaweeds.allSatisfy { $0.kind == .seaweed && $0.isPlaced })
+        #expect(Set(seaweeds.map(\.relativeX)) == Set(positions))
+        #expect(try context.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 3)
+    }
+
+    @Test @MainActor func oneSameKindDecorationCanBeStoredWithoutAffectingOthers() throws {
+        let container = try makeDecorationContainer()
+        let context = container.mainContext
+        let seaweeds = try (0..<3).map { index in
+            try AquariumDecorationService.addPlacement(
+                kind: .seaweed,
+                at: CGPoint(x: 0.2 + CGFloat(index) * 0.3, y: 0.82),
+                isPlaced: true,
+                in: context
+            )
+        }
+
+        try AquariumDecorationService.store(seaweeds[1], in: context)
+
+        #expect(seaweeds[0].isPlaced)
+        #expect(!seaweeds[1].isPlaced)
+        #expect(seaweeds[2].isPlaced)
+        let stored = AquariumDecorationService.storedPlacements(from: seaweeds)
+        #expect(stored.map(\.decorationID) == [seaweeds[1].decorationID])
+    }
+
+    @Test @MainActor func multipleStoredSameKindDecorationsAreReturnedAndOneCanBeRestored() throws {
+        let container = try makeDecorationContainer()
+        let context = container.mainContext
+        let first = try AquariumDecorationService.addPlacement(
+            kind: .seaweed,
+            isPlaced: false,
+            in: context
+        )
+        let second = try AquariumDecorationService.addPlacement(
+            kind: .seaweed,
+            isPlaced: false,
+            in: context
+        )
+
+        let storedBefore = AquariumDecorationService.storedPlacements(from: [first, second])
+        #expect(storedBefore.count == 2)
+
+        try AquariumDecorationService.confirmPlacement(
+            first,
+            at: CGPoint(x: 0.3, y: 0.8),
+            in: context
+        )
+
+        #expect(first.isPlaced)
+        #expect(!second.isPlaced)
+        let storedAfter = AquariumDecorationService.storedPlacements(from: [first, second])
+        #expect(storedAfter.map(\.decorationID) == [second.decorationID])
+    }
+
     @Test func aquariumDecorationDragDoesNotMoveOutsideEditingMode() {
         let original = CGPoint(x: 0.25, y: 0.82)
         let result = AquariumDecorationEditor.relativePosition(
