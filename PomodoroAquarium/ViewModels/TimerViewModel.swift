@@ -89,10 +89,17 @@ final class TimerViewModel {
 
     @discardableResult
     func endCurrentStudySession() -> Bool {
-        guard isStudyTime, state == .paused, !hasHandledCurrentSessionCompletion else {
+        guard isStudyTime else { return false }
+        return endCurrentSession()
+    }
+
+    /// 一時停止中の勉強・休憩を、ユーザー操作で現在位置までとして終了する。
+    @discardableResult
+    func endCurrentSession() -> Bool {
+        guard state == .paused, !hasHandledCurrentSessionCompletion else {
             return false
         }
-        finishCurrentSession(completedStudyMinutes: elapsedStudyMinutes)
+        finishCurrentSession(completedStudyMinutes: isStudyTime ? elapsedStudyMinutes : nil)
         return true
     }
     

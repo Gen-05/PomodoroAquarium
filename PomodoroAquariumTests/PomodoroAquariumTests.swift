@@ -180,6 +180,44 @@ struct PomodoroAquariumTests {
         #expect(viewModel.timeRemaining == 50 * 60)
     }
 
+    @Test func confirmingPausedStudyEndCallsExistingCompletionOnce() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 50, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        var completionCount = 0
+        viewModel.onStudyFinished = { completionCount += 1 }
+
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.pauseTimer()
+
+        #expect(viewModel.endCurrentSession())
+        #expect(!viewModel.endCurrentSession())
+        #expect(completionCount == 1)
+        #expect(viewModel.lastCompletedStudyMinutes == 25)
+    }
+
+    @Test func pausedBreakCanBeEndedWithoutCallingStudyCompletion() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        var completionCount = 0
+        viewModel.onStudyFinished = { completionCount += 1 }
+
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        #expect(completionCount == 1)
+
+        viewModel.resumeTimer()
+        clock.advance(by: 60)
+        viewModel.pauseTimer()
+        #expect(viewModel.endCurrentSession())
+
+        #expect(completionCount == 1)
+        #expect(viewModel.isStudyTime)
+        #expect(viewModel.state == .completed)
+        #expect(viewModel.timeRemaining == 25 * 60)
+    }
+
     @Test func studyCompletionIsHandledOnlyOnce() {
         let clock = TestClock()
         let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())

@@ -77,28 +77,21 @@ struct TimerView: View {
                     .foregroundStyle(.white.opacity(0.9))
 
                 if viewModel.state == .paused {
-                    Button("再開") {
+                    Button("再開する") {
                         viewModel.resumeTimer()
                     }
                     .buttonStyle(AquariumPrimaryButtonStyle())
 
-                    if viewModel.isStudyTime {
-                        Button("終了") {
-                            showsEndConfirmation = true
-                        }
-                        .buttonStyle(AquariumSecondaryButtonStyle())
+                    Button("終了する") {
+                        showsEndConfirmation = true
                     }
+                    .buttonStyle(AquariumSecondaryButtonStyle())
                 } else {
                     Button(viewModel.isRunning ? "一時停止" : (viewModel.isStudyTime ? "勉強開始" : "休憩開始")) {
                         viewModel.startStopTimer()
                     }
                     .buttonStyle(AquariumPrimaryButtonStyle())
                 }
-
-                Button("リセット") {
-                    viewModel.resetTimer()
-                }
-                .buttonStyle(AquariumSecondaryButtonStyle())
 
                 Spacer()
             }
@@ -121,13 +114,17 @@ struct TimerView: View {
                 viewModel.synchronizeTime()
             }
         }
-        .alert("この勉強を終了しますか？", isPresented: $showsEndConfirmation) {
+        .alert(viewModel.isStudyTime ? "勉強を終了しますか？" : "休憩を終了しますか？", isPresented: $showsEndConfirmation) {
             Button("キャンセル", role: .cancel) {}
             Button("終了する", role: .destructive) {
-                viewModel.endCurrentStudySession()
+                viewModel.endCurrentSession()
             }
         } message: {
-            Text("今回の勉強時間: \(viewModel.elapsedStudyMinutes)分\n\n終了すると報酬を受け取ります。")
+            if viewModel.isStudyTime {
+                Text("現在の勉強時間を報酬計算します。\n\n今回の勉強時間: \(viewModel.elapsedStudyMinutes)分")
+            } else {
+                Text("現在の休憩を終了して、次の勉強へ進みます。")
+            }
         }
         .sheet(
             isPresented: Binding(
