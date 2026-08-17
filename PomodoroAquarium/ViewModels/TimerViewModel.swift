@@ -8,6 +8,13 @@
 import Foundation
 import Observation
 
+enum TimerState: Equatable {
+    case idle
+    case running
+    case paused
+    case completed
+}
+
 @Observable
 final class TimerViewModel {
     
@@ -23,9 +30,16 @@ final class TimerViewModel {
     var onStudyFinished: (() -> Void)?
     
     var timeRemaining: Int
-    var isRunning = false
+    private(set) var state: TimerState = .idle
+    var isRunning: Bool { state == .running }
     var isStudyTime = true
     private(set) var endDate: Date?
+    private(set) var lastCompletedStudyMinutes = 0
+
+    var elapsedStudyMinutes: Int {
+        guard isStudyTime else { return 0 }
+        return max(0, studyTime * 60 - timeRemaining) / 60
+    }
     
     init(
         studyTime: Int,
@@ -42,25 +56,44 @@ final class TimerViewModel {
     
     func startStopTimer() {
         if isRunning {
-            synchronizeTime()
-
-            // 同期時に終了した場合は、既に次のセッションへ切り替わっている。
-            guard isRunning else { return }
-
-            isRunning = false
-            endDate = nil
-            persistSession(at: now())
+            pauseTimer()
         } else {
-            hasHandledCurrentSessionCompletion = false
-            let currentDate = now()
-            endDate = currentDate.addingTimeInterval(TimeInterval(timeRemaining))
-            isRunning = true
-            persistSession(at: currentDate)
+            resumeTimer()
         }
+    }
+
+    func pauseTimer() {
+        guard isRunning else { return }
+        synchronizeTime()
+
+        // 同期時に終了した場合は、既に次のセッションへ切り替わっている。
+        guard isRunning else { return }
+
+        state = .paused
+        endDate = nil
+        persistSession(at: now())
+    }
+
+    func resumeTimer() {
+        guard state != .running else { return }
+        hasHandledCurrentSessionCompletion = false
+        let currentDate = now()
+        endDate = currentDate.addingTimeInterval(TimeInterval(timeRemaining))
+        state = .running
+        persistSession(at: currentDate)
+    }
+
+    @discardableResult
+    func endCurrentStudySession() -> Bool {
+        guard isStudyTime, state == .paused, !hasHandledCurrentSessionCompletion else {
+            return false
+        }
+        finishCurrentSession(completedStudyMinutes: elapsedStudyMinutes)
+        return true
     }
     
     func resetTimer() {
-        isRunning = false
+        state = .idle
         isStudyTime = true
         timeRemaining = studyTime * 60
         endDate = nil
@@ -102,7 +135,7 @@ final class TimerViewModel {
 
     private func restore(_ session: PersistedTimerSession, at currentDate: Date) {
         isStudyTime = session.isStudyTime
-        isRunning = session.isRunning
+        state = session.isRunning ? .running : .paused
         timeRemaining = session.timeRemaining
         endDate = session.isRunning ? session.endDate : nil
         lastHeartbeatDate = session.lastHeartbeatDate
@@ -142,15 +175,16 @@ final class TimerViewModel {
         ))
     }
 
-    private func finishCurrentSession() {
+    private func finishCurrentSession(completedStudyMinutes: Int? = nil) {
         guard !hasHandledCurrentSessionCompletion else { return }
         hasHandledCurrentSessionCompletion = true
-        isRunning = false
+        state = .completed
         endDate = nil
         lastHeartbeatDate = nil
         sessionStore.clearSession()
 
         if isStudyTime {
+            lastCompletedStudyMinutes = completedStudyMinutes ?? studyTime
             onStudyFinished?()
         }
 

@@ -44,6 +44,7 @@ struct TimerView: View {
     @State private var awardedFish: PlayerFish?
     @State private var pendingAwardedFish: PlayerFish?
     @State private var completionReward: StudyCompletionReward?
+    @State private var showsEndConfirmation = false
     
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -75,10 +76,24 @@ struct TimerView: View {
                     .font(.headline)
                     .foregroundStyle(.white.opacity(0.9))
 
-                Button(viewModel.isRunning ? "一時停止" : (viewModel.isStudyTime ? "勉強開始" : "休憩開始")) {
-                    viewModel.startStopTimer()
+                if viewModel.state == .paused {
+                    Button("再開") {
+                        viewModel.resumeTimer()
+                    }
+                    .buttonStyle(AquariumPrimaryButtonStyle())
+
+                    if viewModel.isStudyTime {
+                        Button("終了") {
+                            showsEndConfirmation = true
+                        }
+                        .buttonStyle(AquariumSecondaryButtonStyle())
+                    }
+                } else {
+                    Button(viewModel.isRunning ? "一時停止" : (viewModel.isStudyTime ? "勉強開始" : "休憩開始")) {
+                        viewModel.startStopTimer()
+                    }
+                    .buttonStyle(AquariumPrimaryButtonStyle())
                 }
-                .buttonStyle(AquariumPrimaryButtonStyle())
 
                 Button("リセット") {
                     viewModel.resetTimer()
@@ -105,6 +120,14 @@ struct TimerView: View {
             if newPhase == .active {
                 viewModel.synchronizeTime()
             }
+        }
+        .alert("この勉強を終了しますか？", isPresented: $showsEndConfirmation) {
+            Button("キャンセル", role: .cancel) {}
+            Button("終了する", role: .destructive) {
+                viewModel.endCurrentStudySession()
+            }
+        } message: {
+            Text("今回の勉強時間: \(viewModel.elapsedStudyMinutes)分\n\n終了すると報酬を受け取ります。")
         }
         .sheet(
             isPresented: Binding(
@@ -141,13 +164,20 @@ struct TimerView: View {
         viewModel.onStudyFinished = {
             guard let player else { return }
 
+            let completedStudyMinutes = viewModel.lastCompletedStudyMinutes
+
             let coinReward = CurrencyService.studyCompletionReward(
-                for: studyTime,
+                for: completedStudyMinutes,
                 todayStudyMinutesBeforeCompletion: player.todayStudyMinutes
             )
-            player.todayStudyMinutes += studyTime
-            player.totalStudyMinutes += studyTime
-            pendingAwardedFish = FishRewardService.awardFish(for: studyTime, to: player)
+            player.todayStudyMinutes += completedStudyMinutes
+            player.totalStudyMinutes += completedStudyMinutes
+
+            guard StudyCompletionReward.shouldPresent(forStudyMinutes: completedStudyMinutes) else {
+                return
+            }
+
+            pendingAwardedFish = FishRewardService.awardFish(for: completedStudyMinutes, to: player)
 
             var awardedStudyReward = 0
             if coinReward > 0 {
@@ -165,15 +195,11 @@ struct TimerView: View {
                 in: modelContext
             )
 
-            if StudyCompletionReward.shouldPresent(forStudyMinutes: studyTime) {
-                completionReward = StudyCompletionReward(
-                    studyReward: awardedStudyReward,
-                    streakReward: streakUpdate?.awardedCoins ?? 0,
-                    streakDays: streakUpdate?.streakDays ?? player.studyStreakDays
-                )
-            } else {
-                presentPendingFishReward()
-            }
+            completionReward = StudyCompletionReward(
+                studyReward: awardedStudyReward,
+                streakReward: streakUpdate?.awardedCoins ?? 0,
+                streakDays: streakUpdate?.streakDays ?? player.studyStreakDays
+            )
         }
     }
 

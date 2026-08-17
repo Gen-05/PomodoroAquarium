@@ -50,6 +50,101 @@ struct PomodoroAquariumTests {
         #expect(viewModel.timeRemaining == pausedTimeRemaining)
     }
 
+    @Test func timerStateTransitionsFromRunningToPausedAndBackToRunning() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+
+        viewModel.resumeTimer()
+        #expect(viewModel.state == .running)
+
+        clock.advance(by: 10 * 60)
+        viewModel.pauseTimer()
+        #expect(viewModel.state == .paused)
+        #expect(viewModel.elapsedStudyMinutes == 10)
+
+        viewModel.resumeTimer()
+        #expect(viewModel.state == .running)
+        #expect(viewModel.timeRemaining == 50 * 60)
+    }
+
+    @Test func pausedStudyDoesNotAdvanceAndResumeContinuesWithoutDoubleCounting() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+
+        viewModel.resumeTimer()
+        clock.advance(by: 10 * 60)
+        viewModel.pauseTimer()
+        clock.advance(by: 15 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(viewModel.elapsedStudyMinutes == 10)
+
+        viewModel.resumeTimer()
+        clock.advance(by: 5 * 60)
+        viewModel.pauseTimer()
+
+        #expect(viewModel.elapsedStudyMinutes == 15)
+        #expect(viewModel.timeRemaining == 45 * 60)
+    }
+
+    @Test func endingPausedFiftyMinuteStudyUsesElapsedMinutesAndCompletesOnce() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        var completionCount = 0
+        viewModel.onStudyFinished = { completionCount += 1 }
+
+        viewModel.resumeTimer()
+        clock.advance(by: 50 * 60)
+        viewModel.pauseTimer()
+
+        #expect(viewModel.endCurrentStudySession())
+        #expect(!viewModel.endCurrentStudySession())
+        #expect(viewModel.lastCompletedStudyMinutes == 50)
+        #expect(completionCount == 1)
+        #expect(viewModel.state == .completed)
+        #expect(!viewModel.isStudyTime)
+        #expect(CurrencyService.studyCompletionReward(
+            for: viewModel.lastCompletedStudyMinutes,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 20)
+    }
+
+    @Test func endingPausedTenMinuteStudyIsBelowRewardThreshold() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+
+        viewModel.resumeTimer()
+        clock.advance(by: 10 * 60)
+        viewModel.pauseTimer()
+        viewModel.endCurrentStudySession()
+
+        #expect(viewModel.lastCompletedStudyMinutes == 10)
+        #expect(!StudyCompletionReward.shouldPresent(forStudyMinutes: viewModel.lastCompletedStudyMinutes))
+        #expect(CurrencyService.studyCompletionReward(
+            for: viewModel.lastCompletedStudyMinutes,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 0)
+    }
+
+    @Test func cancelingEndConfirmationLeavesPausedSessionAvailableToResume() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        var completionCount = 0
+        viewModel.onStudyFinished = { completionCount += 1 }
+
+        viewModel.resumeTimer()
+        clock.advance(by: 10 * 60)
+        viewModel.pauseTimer()
+        // UIのキャンセルは終了メソッドを呼ばない。
+
+        #expect(viewModel.state == .paused)
+        #expect(completionCount == 0)
+
+        viewModel.resumeTimer()
+        #expect(viewModel.state == .running)
+        #expect(viewModel.timeRemaining == 50 * 60)
+    }
+
     @Test func studyCompletionIsHandledOnlyOnce() {
         let clock = TestClock()
         let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
