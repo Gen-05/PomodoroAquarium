@@ -19,6 +19,7 @@ struct TimerView: View {
     private var backgroundThemeRawValue = AquariumBackgroundTheme.aquarium.rawValue
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.modelContext) private var modelContext
     
     init(
         studyTime: Int,
@@ -121,9 +122,21 @@ struct TimerView: View {
         viewModel.onStudyFinished = {
             guard let player else { return }
 
+            let coinReward = CurrencyService.studyCompletionReward(
+                for: studyTime,
+                todayStudyMinutesBeforeCompletion: player.todayStudyMinutes
+            )
             player.todayStudyMinutes += studyTime
             player.totalStudyMinutes += studyTime
             awardedFish = FishRewardService.awardFish(for: studyTime, to: player)
+
+            if coinReward > 0 {
+                _ = try? CurrencyService.addCoins(
+                    coinReward,
+                    to: player,
+                    in: modelContext
+                )
+            }
         }
     }
 }

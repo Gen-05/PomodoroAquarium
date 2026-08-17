@@ -1,8 +1,23 @@
 import SwiftData
 
 enum CurrencyService {
+    static let baseStudyCompletionReward = 10
+    static let reducedStudyCompletionReward = 2
+    static let dailyStudyRewardReductionThreshold = 200
+
     static func balance(of player: Player?) -> Int {
         max(0, player?.coins ?? 0)
+    }
+
+    /// 今回の完了分を加算する前の今日累計を基準に報酬を計算する。
+    static func studyCompletionReward(
+        for minutes: Int,
+        todayStudyMinutesBeforeCompletion: Int
+    ) -> Int {
+        guard minutes >= 25 else { return 0 }
+        return todayStudyMinutesBeforeCompletion >= dailyStudyRewardReductionThreshold
+            ? reducedStudyCompletionReward
+            : baseStudyCompletionReward
     }
 
     /// 正の値だけを加算し、オーバーフロー時はInt.maxで停止する。

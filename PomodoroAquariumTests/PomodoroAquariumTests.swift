@@ -840,6 +840,174 @@ struct PomodoroAquariumTests {
         #expect(CurrencyService.canAfford(Int.max, player: player))
     }
 
+    @Test @MainActor func completedStudySessionAwardsTenCoinsAndKeepsFishReward() throws {
+        let container = try makePlayerContainer()
+        let context = container.mainContext
+        let player = Player()
+        context.insert(player)
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore()
+        )
+        viewModel.onStudyFinished = {
+            FishRewardService.awardFish(for: 25, to: player)
+            let reward = CurrencyService.studyCompletionReward(
+                for: 25,
+                todayStudyMinutesBeforeCompletion: player.todayStudyMinutes
+            )
+            _ = try? CurrencyService.addCoins(reward, to: player, in: context)
+        }
+
+        viewModel.startStopTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(CurrencyService.balance(of: player) == 10)
+        #expect(player.ownedFish.count == 1)
+    }
+
+    @Test @MainActor func breakCompletionDoesNotAwardAdditionalCoins() throws {
+        let container = try makePlayerContainer()
+        let context = container.mainContext
+        let player = Player()
+        context.insert(player)
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore()
+        )
+        viewModel.onStudyFinished = {
+            let reward = CurrencyService.studyCompletionReward(
+                for: 25,
+                todayStudyMinutesBeforeCompletion: player.todayStudyMinutes
+            )
+            _ = try? CurrencyService.addCoins(reward, to: player, in: context)
+        }
+
+        viewModel.startStopTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        #expect(CurrencyService.balance(of: player) == 10)
+
+        viewModel.startStopTimer()
+        clock.advance(by: 5 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(CurrencyService.balance(of: player) == 10)
+    }
+
+    @Test func studyCoinRewardIsZeroForSessionsUnderTwentyFiveMinutes() {
+        #expect(CurrencyService.studyCompletionReward(
+            for: 24,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 0)
+        #expect(CurrencyService.studyCompletionReward(
+            for: 24,
+            todayStudyMinutesBeforeCompletion: 200
+        ) == 0)
+    }
+
+    @Test func studyCoinRewardIsTenBelowDailyTwoHundredMinutes() {
+        #expect(CurrencyService.studyCompletionReward(
+            for: 25,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 10)
+        #expect(CurrencyService.studyCompletionReward(
+            for: 25,
+            todayStudyMinutesBeforeCompletion: 199
+        ) == 10)
+    }
+
+    @Test func studyCoinRewardIsTwoAtOrAboveDailyTwoHundredMinutes() {
+        #expect(CurrencyService.studyCompletionReward(
+            for: 25,
+            todayStudyMinutesBeforeCompletion: 200
+        ) == 2)
+        #expect(CurrencyService.studyCompletionReward(
+            for: 60,
+            todayStudyMinutesBeforeCompletion: 300
+        ) == 2)
+    }
+
+    @Test @MainActor func rewardUsesDailyTotalBeforeCompletedMinutesAreAdded() throws {
+        let container = try makePlayerContainer()
+        let context = container.mainContext
+        let player = Player(todayStudyMinutes: 190)
+        context.insert(player)
+
+        let reward = CurrencyService.studyCompletionReward(
+            for: 25,
+            todayStudyMinutesBeforeCompletion: player.todayStudyMinutes
+        )
+        player.todayStudyMinutes += 25
+        _ = try CurrencyService.addCoins(reward, to: player, in: context)
+
+        #expect(player.todayStudyMinutes == 215)
+        #expect(CurrencyService.balance(of: player) == 10)
+    }
+
+    @Test @MainActor func interruptedStudySessionDoesNotAwardCoins() throws {
+        let container = try makePlayerContainer()
+        let context = container.mainContext
+        let player = Player()
+        context.insert(player)
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "coin-old")
+        let oldViewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: oldStore
+        )
+        oldViewModel.startStopTimer()
+        clock.advance(by: 121)
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "coin-new")
+        let restored = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: newStore
+        )
+        restored.onStudyFinished = {
+            _ = try? CurrencyService.addCoins(10, to: player, in: context)
+        }
+        restored.restorePersistedSessionIfNeeded()
+
+        #expect(CurrencyService.balance(of: player) == 0)
+    }
+
+    @Test @MainActor func repeatedCompletionChecksDoNotAwardCoinsTwice() throws {
+        let container = try makePlayerContainer()
+        let context = container.mainContext
+        let player = Player()
+        context.insert(player)
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore()
+        )
+        viewModel.onStudyFinished = {
+            _ = try? CurrencyService.addCoins(10, to: player, in: context)
+        }
+
+        viewModel.startStopTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        viewModel.synchronizeTime()
+        viewModel.tick()
+
+        #expect(CurrencyService.balance(of: player) == 10)
+    }
+
 }
 
 private final class TestClock {
