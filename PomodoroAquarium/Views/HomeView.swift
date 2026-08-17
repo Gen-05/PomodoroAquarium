@@ -17,13 +17,28 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     
     @Query private var players: [Player]
+    @Query private var decorationPlacements: [AquariumDecorationPlacement]
     @State private var showsInterruptionBanner = false
     @State private var resumesPersistedTimer = false
     @State private var isEditingAquarium = false
     @State private var isEditingDecoration = false
+    @State private var showsDecorationStorage = false
+    @State private var decorationRestoreRequestID: String?
+    @State private var selectedDecorationCategory: AquariumDecorationCategory?
     
     private var player: Player? {
         players.first
+    }
+
+    private var storedDecorations: [AquariumDecorationPlacement] {
+        AquariumDecorationService.storedPlacements(from: decorationPlacements)
+    }
+
+    private var filteredStoredDecorations: [AquariumDecorationPlacement] {
+        AquariumDecorationService.storedPlacements(
+            from: decorationPlacements,
+            category: selectedDecorationCategory
+        )
     }
 
     var body: some View {
@@ -32,7 +47,11 @@ struct HomeView: View {
                 AquariumView(
                     player: player,
                     isEditing: isEditingAquarium,
-                    onDecorationEditingChanged: updateDecorationEditingState
+                    onDecorationEditingChanged: updateDecorationEditingState,
+                    decorationRestoreRequestID: decorationRestoreRequestID,
+                    onDecorationRestoreRequestHandled: {
+                        decorationRestoreRequestID = nil
+                    }
                 )
                 
                 VStack(spacing: 20) {
@@ -44,7 +63,7 @@ struct HomeView: View {
                     Spacer()
 
                     if isEditingAquarium {
-                        if !isEditingDecoration {
+                        if !isEditingDecoration && !showsDecorationStorage {
                             Group {
                                 Text("水草や岩をドラッグして移動できます")
                                     .font(.subheadline.weight(.medium))
@@ -53,10 +72,21 @@ struct HomeView: View {
                                     .padding(.vertical, 10)
                                     .aquariumGlass(cornerRadius: 16)
 
-                                Button("完了") {
-                                    withAnimation { isEditingAquarium = false }
+                                HStack(spacing: 12) {
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.22)) {
+                                            showsDecorationStorage = true
+                                        }
+                                    } label: {
+                                        Label("収納", systemImage: "shippingbox.fill")
+                                    }
+                                    .buttonStyle(AquariumSecondaryButtonStyle())
+
+                                    Button("完了") {
+                                        withAnimation { isEditingAquarium = false }
+                                    }
+                                    .buttonStyle(AquariumPrimaryButtonStyle())
                                 }
-                                .buttonStyle(AquariumPrimaryButtonStyle())
                             }
                             .transition(.opacity)
                         }
@@ -94,6 +124,11 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
+
+                if showsDecorationStorage {
+                    decorationStorageOverlay
+                        .zIndex(20)
+                }
             }
             .navigationTitle("ポモドーロ水族館")
             .navigationBarTitleDisplayMode(.inline)
@@ -167,6 +202,136 @@ struct HomeView: View {
                 currentPlayer.todayStudyMinutes = 0
                 lastStudyDate = today
             }
+        }
+    }
+
+    private var decorationStorageOverlay: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { closeDecorationStorage() }
+
+                decorationStoragePanel
+                    .frame(maxWidth: .infinity)
+                    .frame(height: geometry.size.height * 0.31)
+                    .background(.ultraThinMaterial)
+                    .clipShape(
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: 24,
+                            topTrailingRadius: 24
+                        )
+                    )
+                    .overlay(alignment: .top) {
+                        Capsule()
+                            .fill(.white.opacity(0.45))
+                            .frame(width: 42, height: 5)
+                            .padding(.top, 8)
+                    }
+                    .shadow(color: .black.opacity(0.2), radius: 18, y: -6)
+                    .transition(.move(edge: .bottom))
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private var decorationStoragePanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("装飾の収納", systemImage: "shippingbox.fill")
+                    .font(.headline)
+                Spacer()
+                Button(action: closeDecorationStorage) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    categoryButton(title: "すべて", category: nil)
+                    ForEach(AquariumDecorationCategory.allCases) { category in
+                        categoryButton(title: category.displayName, category: category)
+                    }
+                }
+            }
+
+            if filteredStoredDecorations.isEmpty {
+                ContentUnavailableView(
+                    storedDecorations.isEmpty
+                        ? "収納中の装飾はありません"
+                        : "このカテゴリの装飾はありません",
+                    systemImage: "shippingbox"
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 12) {
+                        ForEach(filteredStoredDecorations) { placement in
+                            decorationStorageCard(placement)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .padding(.top, 18)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
+    }
+
+    private func categoryButton(
+        title: String,
+        category: AquariumDecorationCategory?
+    ) -> some View {
+        Button(title) {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                selectedDecorationCategory = category
+            }
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(selectedDecorationCategory == category ? .white : .primary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            selectedDecorationCategory == category
+                ? Color.blue.opacity(0.85)
+                : Color.white.opacity(0.16),
+            in: Capsule()
+        )
+    }
+
+    private func decorationStorageCard(
+        _ placement: AquariumDecorationPlacement
+    ) -> some View {
+        Button {
+            decorationRestoreRequestID = placement.decorationID
+            closeDecorationStorage()
+        } label: {
+            VStack(spacing: 8) {
+                AquariumDecorationView(decoration: placement.decoration)
+                    .scaleEffect(0.5)
+                    .frame(height: 72)
+
+                Text(placement.kind.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+            .frame(width: 104)
+            .padding(10)
+            .background(.white.opacity(0.2), in: RoundedRectangle(cornerRadius: 16))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(.white.opacity(0.3))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func closeDecorationStorage() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            showsDecorationStorage = false
         }
     }
 

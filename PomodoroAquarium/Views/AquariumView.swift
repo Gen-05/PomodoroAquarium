@@ -11,6 +11,8 @@ struct AquariumView: View {
     let player: Player?
     var isEditing = false
     var onDecorationEditingChanged: (Bool) -> Void = { _ in }
+    var decorationRestoreRequestID: String?
+    var onDecorationRestoreRequestHandled: () -> Void = {}
 
     @Environment(\.modelContext) private var modelContext
     @Query private var decorationPlacements: [AquariumDecorationPlacement]
@@ -63,12 +65,22 @@ struct AquariumView: View {
                 cancelDecorationEditing()
             }
         }
+        .onChange(of: decorationRestoreRequestID) { _, decorationID in
+            guard let decorationID,
+                  let placement = decorationPlacements.first(where: {
+                      $0.decorationID == decorationID && !$0.isPlaced
+                  }) else { return }
+            beginEditing(placement, at: placement.kind.restorationPosition)
+            onDecorationRestoreRequestHandled()
+        }
     }
 
     // AquariumDecorationを画面上の座標へ変換して描画する装飾レイヤー。
     private func decorationLayer(in size: CGSize) -> some View {
         ZStack {
-            ForEach(decorationPlacements.filter(\.isPlaced)) { placement in
+            ForEach(decorationPlacements.filter {
+                $0.isPlaced || $0.decorationID == editingDecorationID
+            }) { placement in
                 EditableAquariumDecorationView(
                     placement: placement,
                     aquariumSize: size,
@@ -94,12 +106,22 @@ struct AquariumView: View {
     }
 
     private func beginEditing(_ placement: AquariumDecorationPlacement) {
+        beginEditing(
+            placement,
+            at: CGPoint(x: placement.relativeX, y: placement.relativeY)
+        )
+    }
+
+    private func beginEditing(
+        _ placement: AquariumDecorationPlacement,
+        at initialPreviewPosition: CGPoint
+    ) {
         guard isEditing else { return }
         let position = CGPoint(x: placement.relativeX, y: placement.relativeY)
         let wasEditing = editingDecorationID != nil
         editingDecorationID = placement.decorationID
         originalPosition = position
-        previewPosition = position
+        previewPosition = initialPreviewPosition
         if !wasEditing {
             onDecorationEditingChanged(true)
         }
@@ -112,16 +134,17 @@ struct AquariumView: View {
     }
 
     private func storeDecoration(_ placement: AquariumDecorationPlacement) {
-        placement.isPlaced = false
-        try? modelContext.save()
+        try? AquariumDecorationService.store(placement, in: modelContext)
         finishDecorationEditing()
     }
 
     private func confirmDecoration(_ placement: AquariumDecorationPlacement) {
         guard editingDecorationID == placement.decorationID, let previewPosition else { return }
-        placement.relativeX = Double(previewPosition.x)
-        placement.relativeY = Double(previewPosition.y)
-        try? modelContext.save()
+        try? AquariumDecorationService.confirmPlacement(
+            placement,
+            at: previewPosition,
+            in: modelContext
+        )
         finishDecorationEditing()
     }
 
@@ -297,42 +320,50 @@ private struct DecorationEditingControls: View {
     }
 }
 
-private struct AquariumDecorationView: View {
+struct AquariumDecorationView: View {
     let decoration: AquariumDecoration
 
     @ViewBuilder
     var body: some View {
-        switch decoration.kind {
-        case .seaweed:
-            HStack(alignment: .bottom, spacing: -8) {
-                seaweedStem(height: 88, rotation: -8)
-                seaweedStem(height: 120, rotation: 3)
-                seaweedStem(height: 76, rotation: 10)
-            }
-            .foregroundStyle(
-                LinearGradient(
-                    colors: [.mint, .green.opacity(0.75)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-
-        case .rock:
-            ZStack(alignment: .bottom) {
-                Ellipse()
-                    .fill(Color.black.opacity(0.18))
-                    .frame(width: 112, height: 30)
-
-                RoundedRectangle(cornerRadius: 28)
-                    .fill(
-                        LinearGradient(
-                            colors: [.gray.opacity(0.9), .black.opacity(0.55)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+        if let imageName = decoration.kind.assetImageName,
+           let image = UIImage(named: imageName) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 120, height: 120)
+        } else {
+            switch decoration.kind {
+            case .seaweed:
+                HStack(alignment: .bottom, spacing: -8) {
+                    seaweedStem(height: 88, rotation: -8)
+                    seaweedStem(height: 120, rotation: 3)
+                    seaweedStem(height: 76, rotation: 10)
+                }
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [.mint, .green.opacity(0.75)],
+                        startPoint: .top,
+                        endPoint: .bottom
                     )
-                    .frame(width: 94, height: 64)
-                    .offset(y: -8)
+                )
+
+            case .rock:
+                ZStack(alignment: .bottom) {
+                    Ellipse()
+                        .fill(Color.black.opacity(0.18))
+                        .frame(width: 112, height: 30)
+
+                    RoundedRectangle(cornerRadius: 28)
+                        .fill(
+                            LinearGradient(
+                                colors: [.gray.opacity(0.9), .black.opacity(0.55)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 94, height: 64)
+                        .offset(y: -8)
+                }
             }
         }
     }

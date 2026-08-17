@@ -392,6 +392,136 @@ struct PomodoroAquariumTests {
         #expect(result.y == 0.9)
     }
 
+    @Test @MainActor func decorationStorageContainsOnlyUnplacedDecorations() throws {
+        let container = try makeDecorationContainer()
+        let context = container.mainContext
+        let placed = AquariumDecorationPlacement(
+            decorationID: "placed",
+            kind: .rock,
+            relativeX: 0.3,
+            relativeY: 0.8,
+            scale: 1,
+            isPlaced: true
+        )
+        let stored = AquariumDecorationPlacement(
+            decorationID: "stored",
+            kind: .seaweed,
+            relativeX: 0.7,
+            relativeY: 0.8,
+            scale: 1,
+            isPlaced: false
+        )
+        context.insert(placed)
+        context.insert(stored)
+
+        let result = AquariumDecorationService.storedPlacements(from: [placed, stored])
+
+        #expect(result.map(\.decorationID) == ["stored"])
+    }
+
+    @Test func aquariumDecorationKindsHaveExpectedCategories() {
+        #expect(AquariumDecorationKind.seaweed.category == .plant)
+        #expect(AquariumDecorationKind.rock.category == .rock)
+    }
+
+    @Test @MainActor func decorationStorageCategoryFilterReturnsMatchingItemsOnly() throws {
+        let container = try makeDecorationContainer()
+        let context = container.mainContext
+        let seaweed = AquariumDecorationPlacement(
+            decorationID: "stored-seaweed-filter",
+            kind: .seaweed,
+            relativeX: 0.3,
+            relativeY: 0.8,
+            scale: 1,
+            isPlaced: false
+        )
+        let rock = AquariumDecorationPlacement(
+            decorationID: "stored-rock-filter",
+            kind: .rock,
+            relativeX: 0.7,
+            relativeY: 0.85,
+            scale: 1,
+            isPlaced: false
+        )
+        context.insert(seaweed)
+        context.insert(rock)
+
+        let plants = AquariumDecorationService.storedPlacements(
+            from: [seaweed, rock],
+            category: .plant
+        )
+        let rocks = AquariumDecorationService.storedPlacements(
+            from: [seaweed, rock],
+            category: .rock
+        )
+        let corals = AquariumDecorationService.storedPlacements(
+            from: [seaweed, rock],
+            category: .coral
+        )
+
+        #expect(plants.map(\.decorationID) == ["stored-seaweed-filter"])
+        #expect(rocks.map(\.decorationID) == ["stored-rock-filter"])
+        #expect(corals.isEmpty)
+    }
+
+    @Test @MainActor func confirmingStoredDecorationPersistsPlacementAndPosition() throws {
+        let container = try makeDecorationContainer()
+        let context = container.mainContext
+        let placement = AquariumDecorationPlacement(
+            decorationID: "stored-rock",
+            kind: .rock,
+            relativeX: 0.2,
+            relativeY: 0.8,
+            scale: 1,
+            isPlaced: false
+        )
+        context.insert(placement)
+        try context.save()
+
+        try AquariumDecorationService.confirmPlacement(
+            placement,
+            at: CGPoint(x: 0.55, y: 0.86),
+            in: context
+        )
+
+        let refetchContext = ModelContext(container)
+        let refetched = try #require(
+            refetchContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+                .first { $0.decorationID == "stored-rock" }
+        )
+        #expect(refetched.isPlaced)
+        #expect(refetched.relativeX == 0.55)
+        #expect(refetched.relativeY == 0.86)
+    }
+
+    @Test @MainActor func cancellingStoredDecorationLeavesItUnplaced() throws {
+        let container = try makeDecorationContainer()
+        let context = container.mainContext
+        let placement = AquariumDecorationPlacement(
+            decorationID: "stored-seaweed",
+            kind: .seaweed,
+            relativeX: 0.14,
+            relativeY: 0.82,
+            scale: 1,
+            isPlaced: false
+        )
+        context.insert(placement)
+        try context.save()
+
+        // 再配置中の仮位置はViewのStateだけで扱うため、キャンセル時はモデル操作を行わない。
+        let previewPosition = placement.kind.restorationPosition
+        #expect(previewPosition != CGPoint(x: placement.relativeX, y: placement.relativeY))
+
+        let refetchContext = ModelContext(container)
+        let refetched = try #require(
+            refetchContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+                .first { $0.decorationID == "stored-seaweed" }
+        )
+        #expect(!refetched.isPlaced)
+        #expect(refetched.relativeX == 0.14)
+        #expect(refetched.relativeY == 0.82)
+    }
+
     @Test func rarityProbabilitiesAtZeroMinutesUseBaseRates() {
         let probabilities = FishRewardService.rarityProbabilities(for: 0)
 

@@ -36,6 +36,34 @@ enum AquariumDecorationService {
         try context.save()
         return true
     }
+
+    static func storedPlacements(
+        from placements: [AquariumDecorationPlacement],
+        category: AquariumDecorationCategory? = nil
+    ) -> [AquariumDecorationPlacement] {
+        placements.filter { placement in
+            !placement.isPlaced && (category == nil || placement.kind.category == category)
+        }
+    }
+
+    static func confirmPlacement(
+        _ placement: AquariumDecorationPlacement,
+        at position: CGPoint,
+        in context: ModelContext
+    ) throws {
+        placement.relativeX = Double(position.x)
+        placement.relativeY = Double(position.y)
+        placement.isPlaced = true
+        try context.save()
+    }
+
+    static func store(
+        _ placement: AquariumDecorationPlacement,
+        in context: ModelContext
+    ) throws {
+        placement.isPlaced = false
+        try context.save()
+    }
 }
 
 enum AquariumDecorationEditor {
