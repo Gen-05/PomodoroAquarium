@@ -6,6 +6,7 @@
 //
 
 import SwiftData
+import Foundation
 
 @Model
 class Player {
@@ -16,6 +17,11 @@ class Player {
     var todayStudyMinutes = 0
     var yesterdayStudyMinutes = 0
     var coins = 0
+    var studyStreakDays = 0
+    var lastStudyCompletionDate: Date?
+    var hasClaimedSevenDayStreakReward = false
+    var hasClaimedThirtyDayStreakReward = false
+    var hasClaimedYearStreakReward = false
     
     init(
         ownedFish: [PlayerFish] = [],
@@ -23,7 +29,12 @@ class Player {
         totalStudyMinutes: Int = 0,
         todayStudyMinutes: Int = 0,
         yesterdayStudyMinutes: Int = 0,
-        coins: Int = 0
+        coins: Int = 0,
+        studyStreakDays: Int = 0,
+        lastStudyCompletionDate: Date? = nil,
+        hasClaimedSevenDayStreakReward: Bool = false,
+        hasClaimedThirtyDayStreakReward: Bool = false,
+        hasClaimedYearStreakReward: Bool = false
     ) {
         self.ownedFish = ownedFish
         self.favoriteFish = favoriteFish
@@ -31,5 +42,10 @@ class Player {
         self.todayStudyMinutes = todayStudyMinutes
         self.yesterdayStudyMinutes = yesterdayStudyMinutes
         self.coins = max(0, coins)
+        self.studyStreakDays = max(0, studyStreakDays)
+        self.lastStudyCompletionDate = lastStudyCompletionDate
+        self.hasClaimedSevenDayStreakReward = hasClaimedSevenDayStreakReward
+        self.hasClaimedThirtyDayStreakReward = hasClaimedThirtyDayStreakReward
+        self.hasClaimedYearStreakReward = hasClaimedYearStreakReward
     }
 }

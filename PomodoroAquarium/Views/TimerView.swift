@@ -36,10 +36,14 @@ struct TimerView: View {
         )
         self._viewModel = State(initialValue: tempViewModel)
         self._awardedFish = State(initialValue: nil)
+        self._pendingAwardedFish = State(initialValue: nil)
+        self._completionReward = State(initialValue: nil)
     }
     
     @State private var viewModel: TimerViewModel
     @State private var awardedFish: PlayerFish?
+    @State private var pendingAwardedFish: PlayerFish?
+    @State private var completionReward: StudyCompletionReward?
     
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -104,6 +108,21 @@ struct TimerView: View {
         }
         .sheet(
             isPresented: Binding(
+                get: { completionReward != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        completionReward = nil
+                    }
+                }
+            ),
+            onDismiss: presentPendingFishReward
+        ) {
+            if let completionReward {
+                StudyCompletionRewardView(reward: completionReward)
+            }
+        }
+        .sheet(
+            isPresented: Binding(
                 get: { awardedFish != nil },
                 set: { isPresented in
                     if !isPresented {
@@ -128,16 +147,39 @@ struct TimerView: View {
             )
             player.todayStudyMinutes += studyTime
             player.totalStudyMinutes += studyTime
-            awardedFish = FishRewardService.awardFish(for: studyTime, to: player)
+            pendingAwardedFish = FishRewardService.awardFish(for: studyTime, to: player)
 
+            var awardedStudyReward = 0
             if coinReward > 0 {
-                _ = try? CurrencyService.addCoins(
+                if (try? CurrencyService.addCoins(
                     coinReward,
                     to: player,
                     in: modelContext
+                )) != nil {
+                    awardedStudyReward = coinReward
+                }
+            }
+
+            let streakUpdate = try? StudyStreakService.recordStudyCompletion(
+                for: player,
+                in: modelContext
+            )
+
+            if StudyCompletionReward.shouldPresent(forStudyMinutes: studyTime) {
+                completionReward = StudyCompletionReward(
+                    studyReward: awardedStudyReward,
+                    streakReward: streakUpdate?.awardedCoins ?? 0,
+                    streakDays: streakUpdate?.streakDays ?? player.studyStreakDays
                 )
+            } else {
+                presentPendingFishReward()
             }
         }
+    }
+
+    private func presentPendingFishReward() {
+        awardedFish = pendingAwardedFish
+        pendingAwardedFish = nil
     }
 }
 

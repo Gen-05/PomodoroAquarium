@@ -931,7 +931,30 @@ struct PomodoroAquariumTests {
         #expect(CurrencyService.studyCompletionReward(
             for: 60,
             todayStudyMinutesBeforeCompletion: 300
-        ) == 2)
+        ) == 4)
+    }
+
+    @Test func studyCoinRewardUsesTwentyFiveMinuteUnitsAcrossReductionThreshold() {
+        #expect(CurrencyService.studyCompletionReward(
+            for: 25,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 10)
+        #expect(CurrencyService.studyCompletionReward(
+            for: 50,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 20)
+        #expect(CurrencyService.studyCompletionReward(
+            for: 150,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 60)
+        #expect(CurrencyService.studyCompletionReward(
+            for: 200,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 80)
+        #expect(CurrencyService.studyCompletionReward(
+            for: 250,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 84)
     }
 
     @Test @MainActor func rewardUsesDailyTotalBeforeCompletedMinutesAreAdded() throws {
@@ -1008,6 +1031,231 @@ struct PomodoroAquariumTests {
         #expect(CurrencyService.balance(of: player) == 10)
     }
 
+    @Test @MainActor func firstStudyCompletionStartsStreakAtOne() throws {
+        let container = try makePlayerContainer()
+        let player = Player()
+        container.mainContext.insert(player)
+
+        let result = try StudyStreakService.recordStudyCompletion(
+            for: player,
+            at: streakDate(year: 2026, month: 8, day: 1),
+            calendar: streakCalendar,
+            in: container.mainContext
+        )
+
+        #expect(result == StudyStreakUpdate(streakDays: 1, awardedCoins: 0, didAdvance: true))
+        #expect(player.studyStreakDays == 1)
+    }
+
+    @Test @MainActor func multipleCompletionsOnSameDayDoNotAdvanceStreak() throws {
+        let container = try makePlayerContainer()
+        let player = Player()
+        container.mainContext.insert(player)
+        let completionDate = streakDate(year: 2026, month: 8, day: 2)
+
+        _ = try StudyStreakService.recordStudyCompletion(
+            for: player,
+            at: completionDate,
+            calendar: streakCalendar,
+            in: container.mainContext
+        )
+        let secondResult = try StudyStreakService.recordStudyCompletion(
+            for: player,
+            at: completionDate.addingTimeInterval(60 * 60),
+            calendar: streakCalendar,
+            in: container.mainContext
+        )
+
+        #expect(!secondResult.didAdvance)
+        #expect(secondResult.awardedCoins == 0)
+        #expect(player.studyStreakDays == 1)
+    }
+
+    @Test @MainActor func studyingOnTheNextDayContinuesStreakAndGapResetsIt() throws {
+        let container = try makePlayerContainer()
+        let player = Player()
+        container.mainContext.insert(player)
+
+        _ = try StudyStreakService.recordStudyCompletion(
+            for: player,
+            at: streakDate(year: 2026, month: 8, day: 1),
+            calendar: streakCalendar,
+            in: container.mainContext
+        )
+        _ = try StudyStreakService.recordStudyCompletion(
+            for: player,
+            at: streakDate(year: 2026, month: 8, day: 2),
+            calendar: streakCalendar,
+            in: container.mainContext
+        )
+        #expect(player.studyStreakDays == 2)
+
+        _ = try StudyStreakService.recordStudyCompletion(
+            for: player,
+            at: streakDate(year: 2026, month: 8, day: 4),
+            calendar: streakCalendar,
+            in: container.mainContext
+        )
+        #expect(player.studyStreakDays == 1)
+    }
+
+    @Test @MainActor func sevenDayRewardIsAwardedEverySevenConsecutiveDays() throws {
+        let container = try makePlayerContainer()
+        let player = Player(
+            studyStreakDays: 6,
+            lastStudyCompletionDate: streakDate(year: 2026, month: 8, day: 6)
+        )
+        container.mainContext.insert(player)
+
+        let firstAchievement = try StudyStreakService.recordStudyCompletion(
+            for: player,
+            at: streakDate(year: 2026, month: 8, day: 7),
+            calendar: streakCalendar,
+            in: container.mainContext
+        )
+        #expect(firstAchievement.awardedCoins == 70)
+        #expect(CurrencyService.balance(of: player) == 70)
+
+        let sameDayCompletion = try StudyStreakService.recordStudyCompletion(
+            for: player,
+            at: streakDate(year: 2026, month: 8, day: 7).addingTimeInterval(60 * 60),
+            calendar: streakCalendar,
+            in: container.mainContext
+        )
+        #expect(sameDayCompletion.awardedCoins == 0)
+        #expect(CurrencyService.balance(of: player) == 70)
+
+        player.studyStreakDays = 13
+        player.lastStudyCompletionDate = streakDate(year: 2026, month: 8, day: 13)
+        let fourteenDayAchievement = try StudyStreakService.recordStudyCompletion(
+            for: player,
+            at: streakDate(year: 2026, month: 8, day: 14),
+            calendar: streakCalendar,
+            in: container.mainContext
+        )
+        #expect(fourteenDayAchievement.awardedCoins == 70)
+        #expect(CurrencyService.balance(of: player) == 140)
+
+        player.studyStreakDays = 20
+        player.lastStudyCompletionDate = streakDate(year: 2026, month: 8, day: 20)
+        let twentyOneDayAchievement = try StudyStreakService.recordStudyCompletion(
+            for: player,
+            at: streakDate(year: 2026, month: 8, day: 21),
+            calendar: streakCalendar,
+            in: container.mainContext
+        )
+        #expect(twentyOneDayAchievement.awardedCoins == 70)
+        #expect(CurrencyService.balance(of: player) == 210)
+    }
+
+    @Test @MainActor func thirtyDayRewardIsAwardedEveryThirtyConsecutiveDays() throws {
+        let thirtyDayContainer = try makePlayerContainer()
+        let thirtyDayPlayer = Player(
+            studyStreakDays: 29,
+            lastStudyCompletionDate: streakDate(year: 2026, month: 8, day: 29)
+        )
+        thirtyDayContainer.mainContext.insert(thirtyDayPlayer)
+        let thirtyDayResult = try StudyStreakService.recordStudyCompletion(
+            for: thirtyDayPlayer,
+            at: streakDate(year: 2026, month: 8, day: 30),
+            calendar: streakCalendar,
+            in: thirtyDayContainer.mainContext
+        )
+        #expect(thirtyDayResult.awardedCoins == 200)
+        #expect(CurrencyService.balance(of: thirtyDayPlayer) == 200)
+
+        let sameDayResult = try StudyStreakService.recordStudyCompletion(
+            for: thirtyDayPlayer,
+            at: streakDate(year: 2026, month: 8, day: 30).addingTimeInterval(60 * 60),
+            calendar: streakCalendar,
+            in: thirtyDayContainer.mainContext
+        )
+        #expect(sameDayResult.awardedCoins == 0)
+        #expect(CurrencyService.balance(of: thirtyDayPlayer) == 200)
+
+        thirtyDayPlayer.studyStreakDays = 59
+        thirtyDayPlayer.lastStudyCompletionDate = streakDate(year: 2026, month: 9, day: 28)
+        let sixtyDayResult = try StudyStreakService.recordStudyCompletion(
+            for: thirtyDayPlayer,
+            at: streakDate(year: 2026, month: 9, day: 29),
+            calendar: streakCalendar,
+            in: thirtyDayContainer.mainContext
+        )
+        #expect(sixtyDayResult.awardedCoins == 200)
+        #expect(CurrencyService.balance(of: thirtyDayPlayer) == 400)
+    }
+
+    @Test @MainActor func yearRewardIsAwardedEveryThreeHundredSixtyFiveConsecutiveDays() throws {
+        let yearContainer = try makePlayerContainer()
+        let yearPlayer = Player(
+            studyStreakDays: 364,
+            lastStudyCompletionDate: streakDate(year: 2027, month: 7, day: 31)
+        )
+        yearContainer.mainContext.insert(yearPlayer)
+        let yearResult = try StudyStreakService.recordStudyCompletion(
+            for: yearPlayer,
+            at: streakDate(year: 2027, month: 8, day: 1),
+            calendar: streakCalendar,
+            in: yearContainer.mainContext
+        )
+        #expect(yearResult.awardedCoins == 2_000)
+        #expect(CurrencyService.balance(of: yearPlayer) == 2_000)
+
+        yearPlayer.studyStreakDays = 729
+        yearPlayer.lastStudyCompletionDate = streakDate(year: 2028, month: 7, day: 31)
+        let sevenHundredThirtyDayResult = try StudyStreakService.recordStudyCompletion(
+            for: yearPlayer,
+            at: streakDate(year: 2028, month: 8, day: 1),
+            calendar: streakCalendar,
+            in: yearContainer.mainContext
+        )
+        #expect(sevenHundredThirtyDayResult.awardedCoins == 2_000)
+        #expect(CurrencyService.balance(of: yearPlayer) == 4_000)
+    }
+
+    @Test func studyCompletionRewardKeepsStudyAndStreakRewardsSeparate() {
+        let reward = StudyCompletionReward(
+            studyReward: 60,
+            streakReward: 70,
+            streakDays: 7
+        )
+
+        #expect(reward.studyReward == 60)
+        #expect(reward.streakReward == 70)
+        #expect(reward.totalReward == 130)
+        #expect(reward.streakDays == 7)
+        #expect(reward.hasStreakReward)
+    }
+
+    @Test func zeroStreakRewardIsMarkedAsHiddenFromCompletionBreakdown() {
+        let reward = StudyCompletionReward(
+            studyReward: 60,
+            streakReward: 0,
+            streakDays: 6
+        )
+
+        #expect(!reward.hasStreakReward)
+        #expect(reward.totalReward == 60)
+    }
+
+    @Test func studyRewardMultiplierDoesNotMultiplyStreakReward() {
+        let reward = StudyCompletionReward(
+            studyReward: 10,
+            streakReward: 70,
+            streakDays: 7
+        )
+        let doubled = reward.applyingStudyRewardMultiplier(2)
+
+        #expect(doubled.studyReward == 20)
+        #expect(doubled.streakReward == 70)
+        #expect(doubled.totalReward == 90)
+    }
+
+    @Test func completionRewardPresentationRequiresTwentyFiveMinutes() {
+        #expect(!StudyCompletionReward.shouldPresent(forStudyMinutes: 24))
+        #expect(StudyCompletionReward.shouldPresent(forStudyMinutes: 25))
+    }
+
 }
 
 private final class TestClock {
@@ -1044,4 +1292,19 @@ private func makePlayerContainer() throws -> ModelContainer {
 
 private func makeThemeDefaults() -> UserDefaults {
     UserDefaults(suiteName: "PomodoroAquariumThemeTests.\(UUID().uuidString)")!
+}
+
+private var streakCalendar: Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    return calendar
+}
+
+private func streakDate(year: Int, month: Int, day: Int) -> Date {
+    streakCalendar.date(from: DateComponents(
+        year: year,
+        month: month,
+        day: day,
+        hour: 12
+    ))!
 }
