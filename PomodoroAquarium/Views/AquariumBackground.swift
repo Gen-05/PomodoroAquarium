@@ -13,6 +13,14 @@ enum AquariumBackgroundTheme: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var displayName: String {
+        switch self {
+        case .aquarium: "通常"
+        case .deepSea: "深海"
+        case .tropical: "南国"
+        }
+    }
+
     var imageName: String {
         switch self {
         case .aquarium:

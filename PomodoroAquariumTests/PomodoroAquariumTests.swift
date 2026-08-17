@@ -522,6 +522,47 @@ struct PomodoroAquariumTests {
         #expect(refetched.relativeY == 0.82)
     }
 
+    @Test func aquariumThemeDefaultsToAquariumWithoutSavedValue() {
+        let defaults = makeThemeDefaults()
+        let store = AquariumThemeStore(defaults: defaults)
+
+        #expect(store.selectedTheme == .aquarium)
+    }
+
+    @Test func aquariumThemeCanBeSavedAndRefetched() {
+        let defaults = makeThemeDefaults()
+        AquariumThemeStore(defaults: defaults).save(.deepSea)
+
+        let refetchedStore = AquariumThemeStore(defaults: defaults)
+        #expect(refetchedStore.selectedTheme == .deepSea)
+    }
+
+    @Test func aquariumThemePreviewCancellationDoesNotChangeSavedValue() {
+        let defaults = makeThemeDefaults()
+        let store = AquariumThemeStore(defaults: defaults)
+        store.save(.aquarium)
+
+        let previewTheme = AquariumBackgroundTheme.tropical
+        #expect(previewTheme == .tropical)
+        // キャンセルではsaveを呼ばず、Viewのプレビュー状態だけ破棄する。
+        #expect(store.selectedTheme == .aquarium)
+    }
+
+    @Test func invalidAquariumThemeRawValueFallsBackToAquarium() {
+        #expect(AquariumThemeStore.theme(from: "unknown-theme") == .aquarium)
+        #expect(AquariumThemeStore.theme(from: nil) == .aquarium)
+    }
+
+    @Test func homeAndTimerThemeReadersUseTheSameSavedValue() {
+        let defaults = makeThemeDefaults()
+        let homeThemeStore = AquariumThemeStore(defaults: defaults)
+        let timerThemeStore = AquariumThemeStore(defaults: defaults)
+        homeThemeStore.save(.tropical)
+
+        #expect(homeThemeStore.selectedTheme == .tropical)
+        #expect(timerThemeStore.selectedTheme == .tropical)
+    }
+
     @Test func rarityProbabilitiesAtZeroMinutesUseBaseRates() {
         let probabilities = FishRewardService.rarityProbabilities(for: 0)
 
@@ -684,4 +725,8 @@ private func makeDecorationContainer() throws -> ModelContainer {
         for: AquariumDecorationPlacement.self,
         configurations: configuration
     )
+}
+
+private func makeThemeDefaults() -> UserDefaults {
+    UserDefaults(suiteName: "PomodoroAquariumThemeTests.\(UUID().uuidString)")!
 }

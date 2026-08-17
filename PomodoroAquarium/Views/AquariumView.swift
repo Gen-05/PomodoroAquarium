@@ -9,6 +9,7 @@ import UIKit
 
 struct AquariumView: View {
     let player: Player?
+    var backgroundTheme: AquariumBackgroundTheme = .aquarium
     var isEditing = false
     var onDecorationEditingChanged: (Bool) -> Void = { _ in }
     var decorationRestoreRequestID: String?
@@ -38,7 +39,7 @@ struct AquariumView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                AquariumBackground()
+                AquariumBackground(theme: backgroundTheme)
                 BubbleLayer()
                 AquariumFloor()
                 decorationLayer(in: geometry.size)

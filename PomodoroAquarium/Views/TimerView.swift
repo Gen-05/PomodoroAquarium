@@ -15,6 +15,9 @@ struct TimerView: View {
     let breakTime: Int
     let player: Player?
 
+    @AppStorage(AquariumThemeStore.storageKey)
+    private var backgroundThemeRawValue = AquariumBackgroundTheme.aquarium.rawValue
+
     @Environment(\.scenePhase) private var scenePhase
     
     init(
@@ -41,7 +44,10 @@ struct TimerView: View {
     
     var body: some View {
         ZStack {
-            AquariumView(player: player)
+            AquariumView(
+                player: player,
+                backgroundTheme: AquariumThemeStore.theme(from: backgroundThemeRawValue)
+            )
 
             VStack(spacing: 22) {
                 Spacer()

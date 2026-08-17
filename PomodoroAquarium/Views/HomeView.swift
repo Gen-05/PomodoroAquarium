@@ -13,6 +13,8 @@ struct HomeView: View {
     @AppStorage("studyTime") private var studyTime = "25"
     @AppStorage("breakTime") private var breakTime = "5"
     @AppStorage("lastStudyDate") private var lastStudyDate = ""
+    @AppStorage(AquariumThemeStore.storageKey)
+    private var backgroundThemeRawValue = AquariumBackgroundTheme.aquarium.rawValue
     
     @Environment(\.modelContext) private var modelContext
     
@@ -25,6 +27,9 @@ struct HomeView: View {
     @State private var showsDecorationStorage = false
     @State private var decorationRestoreRequestID: String?
     @State private var selectedDecorationCategory: AquariumDecorationCategory?
+    @State private var showsBackgroundThemePicker = false
+    @State private var originalBackgroundTheme: AquariumBackgroundTheme?
+    @State private var previewBackgroundTheme: AquariumBackgroundTheme?
     
     private var player: Player? {
         players.first
@@ -41,11 +46,20 @@ struct HomeView: View {
         )
     }
 
+    private var savedBackgroundTheme: AquariumBackgroundTheme {
+        AquariumThemeStore.theme(from: backgroundThemeRawValue)
+    }
+
+    private var displayedBackgroundTheme: AquariumBackgroundTheme {
+        previewBackgroundTheme ?? savedBackgroundTheme
+    }
+
     var body: some View {
         NavigationStack{
             ZStack {
                 AquariumView(
                     player: player,
+                    backgroundTheme: displayedBackgroundTheme,
                     isEditing: isEditingAquarium,
                     onDecorationEditingChanged: updateDecorationEditingState,
                     decorationRestoreRequestID: decorationRestoreRequestID,
@@ -63,9 +77,11 @@ struct HomeView: View {
                     Spacer()
 
                     if isEditingAquarium {
-                        if !isEditingDecoration && !showsDecorationStorage {
+                        if !isEditingDecoration &&
+                            !showsDecorationStorage &&
+                            !showsBackgroundThemePicker {
                             Group {
-                                Text("水草や岩をドラッグして移動できます")
+                                Text("水草や岩をタップして移動できます")
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 18)
@@ -79,6 +95,13 @@ struct HomeView: View {
                                         }
                                     } label: {
                                         Label("収納", systemImage: "shippingbox.fill")
+                                    }
+                                    .buttonStyle(AquariumSecondaryButtonStyle())
+
+                                    Button {
+                                        beginBackgroundThemeEditing()
+                                    } label: {
+                                        Label("背景", systemImage: "photo.fill")
                                     }
                                     .buttonStyle(AquariumSecondaryButtonStyle())
 
@@ -128,6 +151,11 @@ struct HomeView: View {
                 if showsDecorationStorage {
                     decorationStorageOverlay
                         .zIndex(20)
+                }
+
+                if showsBackgroundThemePicker {
+                    backgroundThemePickerOverlay
+                        .zIndex(21)
                 }
             }
             .navigationTitle("ポモドーロ水族館")
@@ -333,6 +361,121 @@ struct HomeView: View {
         withAnimation(.easeInOut(duration: 0.22)) {
             showsDecorationStorage = false
         }
+    }
+
+    private var backgroundThemePickerOverlay: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { cancelBackgroundThemeEditing() }
+
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Label("水槽の背景", systemImage: "photo.fill")
+                            .font(.headline)
+                        Spacer()
+                        Button("キャンセル", action: cancelBackgroundThemeEditing)
+                            .font(.caption.weight(.semibold))
+                        Button("確定", action: confirmBackgroundThemeEditing)
+                            .font(.caption.weight(.bold))
+                            .buttonStyle(.borderedProminent)
+                    }
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: 12) {
+                            ForEach(AquariumBackgroundTheme.allCases) { theme in
+                                backgroundThemeCard(theme)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 18)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
+                .frame(maxWidth: .infinity)
+                .frame(height: geometry.size.height * 0.31)
+                .background(.ultraThinMaterial)
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 24,
+                        topTrailingRadius: 24
+                    )
+                )
+                .shadow(color: .black.opacity(0.2), radius: 18, y: -6)
+                .transition(.move(edge: .bottom))
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private func backgroundThemeCard(_ theme: AquariumBackgroundTheme) -> some View {
+        let isSelected = previewBackgroundTheme == theme
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                previewBackgroundTheme = theme
+            }
+        } label: {
+            VStack(spacing: 7) {
+                LinearGradient(
+                    colors: theme.fallbackColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(width: 112, height: 78)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(alignment: .topTrailing) {
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.white, .blue)
+                            .padding(6)
+                    }
+                }
+
+                Text(theme.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+            .padding(8)
+            .background(
+                isSelected ? Color.blue.opacity(0.18) : Color.white.opacity(0.16),
+                in: RoundedRectangle(cornerRadius: 16)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(isSelected ? Color.blue : Color.white.opacity(0.3), lineWidth: 2)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func beginBackgroundThemeEditing() {
+        originalBackgroundTheme = savedBackgroundTheme
+        previewBackgroundTheme = savedBackgroundTheme
+        withAnimation(.easeInOut(duration: 0.22)) {
+            showsBackgroundThemePicker = true
+        }
+    }
+
+    private func cancelBackgroundThemeEditing() {
+        previewBackgroundTheme = originalBackgroundTheme
+        withAnimation(.easeInOut(duration: 0.22)) {
+            showsBackgroundThemePicker = false
+        }
+        previewBackgroundTheme = nil
+        originalBackgroundTheme = nil
+    }
+
+    private func confirmBackgroundThemeEditing() {
+        if let previewBackgroundTheme {
+            backgroundThemeRawValue = previewBackgroundTheme.rawValue
+        }
+        withAnimation(.easeInOut(duration: 0.22)) {
+            showsBackgroundThemePicker = false
+        }
+        previewBackgroundTheme = nil
+        originalBackgroundTheme = nil
     }
 
     private var interruptionBanner: some View {
