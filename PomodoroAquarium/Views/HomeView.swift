@@ -19,6 +19,8 @@ struct HomeView: View {
     @Query private var players: [Player]
     @State private var showsInterruptionBanner = false
     @State private var resumesPersistedTimer = false
+    @State private var isEditingAquarium = false
+    @State private var isEditingDecoration = false
     
     private var player: Player? {
         players.first
@@ -27,7 +29,11 @@ struct HomeView: View {
     var body: some View {
         NavigationStack{
             ZStack {
-                AquariumView(player: player)
+                AquariumView(
+                    player: player,
+                    isEditing: isEditingAquarium,
+                    onDecorationEditingChanged: updateDecorationEditingState
+                )
                 
                 VStack(spacing: 20) {
                     if showsInterruptionBanner {
@@ -37,28 +43,54 @@ struct HomeView: View {
 
                     Spacer()
 
-                    VStack(spacing: 8) {
-                        Text("今日の勉強時間")
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.8))
-                        Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
-                            .font(.title2.weight(.semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 14)
-                    .aquariumGlass(cornerRadius: 18)
+                    if isEditingAquarium {
+                        if !isEditingDecoration {
+                            Group {
+                                Text("水草や岩をドラッグして移動できます")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 18)
+                                    .padding(.vertical, 10)
+                                    .aquariumGlass(cornerRadius: 16)
 
-                    NavigationLink {
-                        TimerView(
-                            studyTime: Int(studyTime) ?? 25,
-                            breakTime: Int(breakTime) ?? 5,
-                            player: player
-                        )
-                    } label: {
-                        Label("勉強をはじめる", systemImage: "timer")
+                                Button("完了") {
+                                    withAnimation { isEditingAquarium = false }
+                                }
+                                .buttonStyle(AquariumPrimaryButtonStyle())
+                            }
+                            .transition(.opacity)
+                        }
+                    } else {
+                        VStack(spacing: 8) {
+                            Text("今日の勉強時間")
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.8))
+                            Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
+                                .font(.title2.weight(.semibold))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 14)
+                        .aquariumGlass(cornerRadius: 18)
+
+                        Button {
+                            withAnimation { isEditingAquarium = true }
+                        } label: {
+                            Label("水槽編集", systemImage: "move.3d")
+                        }
+                        .buttonStyle(AquariumSecondaryButtonStyle())
+
+                        NavigationLink {
+                            TimerView(
+                                studyTime: Int(studyTime) ?? 25,
+                                breakTime: Int(breakTime) ?? 5,
+                                player: player
+                            )
+                        } label: {
+                            Label("勉強をはじめる", systemImage: "timer")
+                        }
+                        .buttonStyle(AquariumPrimaryButtonStyle())
                     }
-                    .buttonStyle(AquariumPrimaryButtonStyle())
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
@@ -172,6 +204,12 @@ struct HomeView: View {
 
         if TimerSessionStore.shared.consumeInterruptionBanner() {
             withAnimation { showsInterruptionBanner = true }
+        }
+    }
+
+    private func updateDecorationEditingState(isEditing: Bool) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            isEditingDecoration = isEditing
         }
     }
 

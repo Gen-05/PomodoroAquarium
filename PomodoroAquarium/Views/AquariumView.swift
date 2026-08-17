@@ -4,10 +4,19 @@
 //
 
 import SwiftUI
+import SwiftData
 import UIKit
 
 struct AquariumView: View {
     let player: Player?
+    var isEditing = false
+    var onDecorationEditingChanged: (Bool) -> Void = { _ in }
+
+    @Environment(\.modelContext) private var modelContext
+    @Query private var decorationPlacements: [AquariumDecorationPlacement]
+    @State private var editingDecorationID: String?
+    @State private var originalPosition: CGPoint?
+    @State private var previewPosition: CGPoint?
 
     private var favoriteFish: PlayerFish? {
         player?.favoriteFish
@@ -23,24 +32,6 @@ struct AquariumView: View {
         }
         return fish
     }
-
-    // 保存・編集機能を追加するまでは、固定装飾をこの配列から表示する。
-    private let decorations: [AquariumDecoration] = [
-        AquariumDecoration(
-            id: "default-seaweed",
-            kind: .seaweed,
-            relativeX: 0.14,
-            relativeY: 0.82,
-            scale: 1.0
-        ),
-        AquariumDecoration(
-            id: "default-rock",
-            kind: .rock,
-            relativeX: 0.82,
-            relativeY: 0.88,
-            scale: 1.1
-        )
-    ]
 
     var body: some View {
         GeometryReader { geometry in
@@ -64,20 +55,81 @@ struct AquariumView: View {
             .clipped()
         }
         .ignoresSafeArea()
+        .onAppear {
+            _ = try? AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
+        }
+        .onChange(of: isEditing) { _, newValue in
+            if !newValue {
+                cancelDecorationEditing()
+            }
+        }
     }
 
     // AquariumDecorationを画面上の座標へ変換して描画する装飾レイヤー。
     private func decorationLayer(in size: CGSize) -> some View {
         ZStack {
-            ForEach(decorations) { decoration in
-                AquariumDecorationView(decoration: decoration)
-                    .scaleEffect(decoration.scale)
-                    .position(
-                        x: size.width * decoration.relativeX,
-                        y: size.height * decoration.relativeY
-                    )
+            ForEach(decorationPlacements.filter(\.isPlaced)) { placement in
+                EditableAquariumDecorationView(
+                    placement: placement,
+                    aquariumSize: size,
+                    isEditing: isEditing,
+                    isSelected: editingDecorationID == placement.decorationID,
+                    position: position(for: placement),
+                    select: { beginEditing(placement) },
+                    updatePreview: { previewPosition = $0 },
+                    cancel: cancelDecorationEditing,
+                    store: { storeDecoration(placement) },
+                    confirm: { confirmDecoration(placement) }
+                )
             }
         }
+        .allowsHitTesting(isEditing)
+    }
+
+    private func position(for placement: AquariumDecorationPlacement) -> CGPoint {
+        if editingDecorationID == placement.decorationID, let previewPosition {
+            return previewPosition
+        }
+        return CGPoint(x: placement.relativeX, y: placement.relativeY)
+    }
+
+    private func beginEditing(_ placement: AquariumDecorationPlacement) {
+        guard isEditing else { return }
+        let position = CGPoint(x: placement.relativeX, y: placement.relativeY)
+        let wasEditing = editingDecorationID != nil
+        editingDecorationID = placement.decorationID
+        originalPosition = position
+        previewPosition = position
+        if !wasEditing {
+            onDecorationEditingChanged(true)
+        }
+    }
+
+    private func cancelDecorationEditing() {
+        guard editingDecorationID != nil else { return }
+        previewPosition = originalPosition
+        finishDecorationEditing()
+    }
+
+    private func storeDecoration(_ placement: AquariumDecorationPlacement) {
+        placement.isPlaced = false
+        try? modelContext.save()
+        finishDecorationEditing()
+    }
+
+    private func confirmDecoration(_ placement: AquariumDecorationPlacement) {
+        guard editingDecorationID == placement.decorationID, let previewPosition else { return }
+        placement.relativeX = Double(previewPosition.x)
+        placement.relativeY = Double(previewPosition.y)
+        try? modelContext.save()
+        finishDecorationEditing()
+    }
+
+    private func finishDecorationEditing() {
+        editingDecorationID = nil
+        originalPosition = nil
+        previewPosition = nil
+        onDecorationEditingChanged(false)
     }
 
     // 魚の配置と泳ぎは、背景装飾とは独立したレイヤーで管理する。
@@ -125,6 +177,123 @@ struct AquariumView: View {
 
         guard count > 1 else { return size.height * 0.34 }
         return top + (bottom - top) * CGFloat(index) / CGFloat(count - 1)
+    }
+}
+
+private struct EditableAquariumDecorationView: View {
+    let placement: AquariumDecorationPlacement
+    let aquariumSize: CGSize
+    let isEditing: Bool
+    let isSelected: Bool
+    let position: CGPoint
+    let select: () -> Void
+    let updatePreview: (CGPoint) -> Void
+    let cancel: () -> Void
+    let store: () -> Void
+    let confirm: () -> Void
+
+    @State private var dragStartPosition: CGPoint?
+
+    private var decoration: AquariumDecoration {
+        placement.decoration
+    }
+
+    private var absolutePosition: CGPoint {
+        CGPoint(x: aquariumSize.width * position.x, y: aquariumSize.height * position.y)
+    }
+
+    private var controlsPosition: CGPoint {
+        let offset: CGFloat = decoration.kind == .seaweed ? 92 : 70
+        return CGPoint(
+            x: min(max(absolutePosition.x, 105), max(105, aquariumSize.width - 105)),
+            y: min(max(absolutePosition.y + offset, 44), max(44, aquariumSize.height - 44))
+        )
+    }
+
+    var body: some View {
+        ZStack {
+            AquariumDecorationView(decoration: decoration)
+                .scaleEffect(decoration.scale)
+                .overlay {
+                    if isEditing {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(
+                                .white.opacity(isSelected ? 0.95 : 0.45),
+                                style: StrokeStyle(lineWidth: 2, dash: isSelected ? [] : [6])
+                            )
+                            .padding(-8)
+                    }
+                }
+                .position(absolutePosition)
+                .onTapGesture {
+                    if isEditing { select() }
+                }
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            guard isEditing, isSelected else { return }
+                            if dragStartPosition == nil {
+                                dragStartPosition = position
+                            }
+                            guard let dragStartPosition else { return }
+                            updatePreview(AquariumDecorationEditor.relativePosition(
+                                originalX: dragStartPosition.x,
+                                originalY: dragStartPosition.y,
+                                translation: value.translation,
+                                aquariumSize: aquariumSize,
+                                kind: decoration.kind,
+                                isEditing: true
+                            ))
+                        }
+                        .onEnded { _ in
+                            dragStartPosition = nil
+                        }
+                )
+
+            if isSelected {
+                DecorationEditingControls(cancel: cancel, store: store, confirm: confirm)
+                    .position(controlsPosition)
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .frame(width: aquariumSize.width, height: aquariumSize.height)
+        .accessibilityLabel(isSelected ? "編集中の水槽装飾" : "水槽装飾")
+    }
+}
+
+private struct DecorationEditingControls: View {
+    let cancel: () -> Void
+    let store: () -> Void
+    let confirm: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            controlButton(title: "キャンセル", systemImage: "xmark", action: cancel)
+            controlButton(title: "収納", systemImage: "shippingbox.fill", action: store)
+            controlButton(title: "確定", systemImage: "checkmark", action: confirm)
+        }
+        .padding(8)
+        .background(.black.opacity(0.42), in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.35)))
+    }
+
+    private func controlButton(
+        title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: systemImage)
+                    .font(.headline)
+                Text(title)
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .frame(width: 50, height: 40)
+            .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -285,4 +454,5 @@ struct AquariumSecondaryButtonStyle: ButtonStyle {
 
 #Preview {
     AquariumView(player: nil)
+        .modelContainer(for: AquariumDecorationPlacement.self, inMemory: true)
 }

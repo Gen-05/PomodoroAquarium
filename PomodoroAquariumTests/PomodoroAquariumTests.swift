@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftData
 import Testing
 @testable import PomodoroAquarium
 
@@ -316,6 +317,81 @@ struct PomodoroAquariumTests {
         #expect(!newStore.consumeInterruptionBanner())
     }
 
+    @Test @MainActor func defaultAquariumDecorationsAreCreatedOnFirstLaunch() throws {
+        let container = try makeDecorationContainer()
+        let context = container.mainContext
+
+        let didCreate = try AquariumDecorationService.createDefaultsIfNeeded(in: context)
+        let placements = try context.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+
+        #expect(didCreate)
+        #expect(placements.count == AquariumDecorationService.defaultDecorations.count)
+        #expect(Set(placements.map(\.decorationID)) == Set(["default-seaweed", "default-rock"]))
+    }
+
+    @Test @MainActor func aquariumDecorationRelativePositionIsPersistedAndRefetched() throws {
+        let container = try makeDecorationContainer()
+        let context = container.mainContext
+        try AquariumDecorationService.createDefaultsIfNeeded(in: context)
+        let placement = try #require(
+            context.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+                .first { $0.decorationID == "default-rock" }
+        )
+
+        placement.relativeX = 0.42
+        placement.relativeY = 0.79
+        try context.save()
+
+        let refetchContext = ModelContext(container)
+        let refetched = try #require(
+            refetchContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+                .first { $0.decorationID == "default-rock" }
+        )
+        #expect(refetched.relativeX == 0.42)
+        #expect(refetched.relativeY == 0.79)
+    }
+
+    @Test @MainActor func defaultAquariumDecorationsAreNotDuplicated() throws {
+        let container = try makeDecorationContainer()
+        let context = container.mainContext
+
+        let firstCreation = try AquariumDecorationService.createDefaultsIfNeeded(in: context)
+        let secondCreation = try AquariumDecorationService.createDefaultsIfNeeded(in: context)
+        let count = try context.fetchCount(FetchDescriptor<AquariumDecorationPlacement>())
+
+        #expect(firstCreation)
+        #expect(!secondCreation)
+        #expect(count == AquariumDecorationService.defaultDecorations.count)
+    }
+
+    @Test func aquariumDecorationDragDoesNotMoveOutsideEditingMode() {
+        let original = CGPoint(x: 0.25, y: 0.82)
+        let result = AquariumDecorationEditor.relativePosition(
+            originalX: original.x,
+            originalY: original.y,
+            translation: CGSize(width: 180, height: -100),
+            aquariumSize: CGSize(width: 390, height: 844),
+            kind: .seaweed,
+            isEditing: false
+        )
+
+        #expect(result == original)
+    }
+
+    @Test func aquariumDecorationDragUsesRelativeCoordinatesAndBounds() {
+        let result = AquariumDecorationEditor.relativePosition(
+            originalX: 0.5,
+            originalY: 0.8,
+            translation: CGSize(width: 100, height: 50),
+            aquariumSize: CGSize(width: 400, height: 500),
+            kind: .rock,
+            isEditing: true
+        )
+
+        #expect(result.x == 0.75)
+        #expect(result.y == 0.9)
+    }
+
     @Test func rarityProbabilitiesAtZeroMinutesUseBaseRates() {
         let probabilities = FishRewardService.rarityProbabilities(for: 0)
 
@@ -470,4 +546,12 @@ private func makeTimerDefaults() -> UserDefaults {
 
 private func makeTimerStore(processIdentifier: String = UUID().uuidString) -> TimerSessionStore {
     TimerSessionStore(defaults: makeTimerDefaults(), processIdentifier: processIdentifier)
+}
+
+private func makeDecorationContainer() throws -> ModelContainer {
+    let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+    return try ModelContainer(
+        for: AquariumDecorationPlacement.self,
+        configurations: configuration
+    )
 }
