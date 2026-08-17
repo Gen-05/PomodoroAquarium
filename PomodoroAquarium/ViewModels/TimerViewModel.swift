@@ -36,9 +36,13 @@ final class TimerViewModel {
     private(set) var endDate: Date?
     private(set) var lastCompletedStudyMinutes = 0
 
-    var elapsedStudyMinutes: Int {
+    var elapsedStudySeconds: Int {
         guard isStudyTime else { return 0 }
-        return max(0, studyTime * 60 - timeRemaining) / 60
+        return max(0, studyTime * 60 - timeRemaining)
+    }
+
+    var elapsedStudyMinutes: Int {
+        elapsedStudySeconds / 60
     }
     
     init(
@@ -169,6 +173,7 @@ final class TimerViewModel {
             isStudyTime: isStudyTime,
             isRunning: isRunning,
             timeRemaining: timeRemaining,
+            elapsedStudySeconds: elapsedStudySeconds,
             lastHeartbeatDate: date,
             studyTime: studyTime,
             breakTime: breakTime

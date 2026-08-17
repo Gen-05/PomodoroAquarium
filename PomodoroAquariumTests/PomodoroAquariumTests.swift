@@ -126,6 +126,41 @@ struct PomodoroAquariumTests {
         ) == 0)
     }
 
+    @Test func pausedStudyPersistsElapsedStudyTime() {
+        let clock = TestClock()
+        let store = makeTimerStore()
+        let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: store)
+
+        viewModel.resumeTimer()
+        clock.advance(by: 12 * 60 + 30)
+        viewModel.pauseTimer()
+
+        #expect(viewModel.elapsedStudySeconds == 12 * 60 + 30)
+        #expect(store.load()?.elapsedStudySeconds == 12 * 60 + 30)
+    }
+
+    @Test func restoredPausedStudyCanFinishUsingItsElapsedRewardTime() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
+        let original = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+
+        original.resumeTimer()
+        clock.advance(by: 50 * 60)
+        original.pauseTimer()
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
+        let restored = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        restored.restorePersistedSessionIfNeeded()
+        restored.endCurrentStudySession()
+
+        #expect(restored.lastCompletedStudyMinutes == 50)
+        #expect(CurrencyService.studyCompletionReward(
+            for: restored.lastCompletedStudyMinutes,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 20)
+    }
+
     @Test func cancelingEndConfirmationLeavesPausedSessionAvailableToResume() {
         let clock = TestClock()
         let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())

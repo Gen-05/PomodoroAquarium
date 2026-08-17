@@ -6,6 +6,8 @@ struct PersistedTimerSession: Codable, Equatable {
     let isStudyTime: Bool
     let isRunning: Bool
     let timeRemaining: Int
+    /// 勉強セッションで実際に経過した秒数。旧保存データとの互換性のためOptional。
+    let elapsedStudySeconds: Int?
     let lastHeartbeatDate: Date
     let studyTime: Int
     let breakTime: Int
@@ -50,6 +52,7 @@ final class TimerSessionStore {
         isStudyTime: Bool,
         isRunning: Bool,
         timeRemaining: Int,
+        elapsedStudySeconds: Int,
         lastHeartbeatDate: Date,
         studyTime: Int,
         breakTime: Int
@@ -60,6 +63,7 @@ final class TimerSessionStore {
             isStudyTime: isStudyTime,
             isRunning: isRunning,
             timeRemaining: timeRemaining,
+            elapsedStudySeconds: elapsedStudySeconds,
             lastHeartbeatDate: lastHeartbeatDate,
             studyTime: studyTime,
             breakTime: breakTime,
