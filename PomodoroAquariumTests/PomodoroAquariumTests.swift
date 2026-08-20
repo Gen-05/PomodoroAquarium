@@ -23,6 +23,222 @@ struct PomodoroAquariumTests {
         #expect(viewModel.timeRemaining == 25 * 60 - 10)
     }
 
+    @Test func stopwatchCountsUpInSeconds() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        viewModel.selectMode(.stopwatch)
+
+        viewModel.resumeTimer()
+        clock.advance(by: 10)
+        viewModel.tick()
+
+        #expect(viewModel.mode == .stopwatch)
+        #expect(viewModel.stopwatchElapsedSeconds == 10)
+        #expect(viewModel.displayedSeconds == 10)
+    }
+
+    @Test func stopwatchPauseAndResumeKeepsAccumulatedTime() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        viewModel.selectMode(.stopwatch)
+
+        viewModel.resumeTimer()
+        clock.advance(by: 10)
+        viewModel.pauseTimer()
+        clock.advance(by: 5 * 60)
+        viewModel.tick()
+        #expect(viewModel.stopwatchElapsedSeconds == 10)
+
+        viewModel.resumeTimer()
+        clock.advance(by: 5)
+        viewModel.tick()
+        #expect(viewModel.stopwatchElapsedSeconds == 15)
+    }
+
+    @Test func endingStopwatchPassesElapsedStudyTimeToExistingRewardFlowOnce() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        var completionCount = 0
+        viewModel.onStudyFinished = { completionCount += 1 }
+        viewModel.selectMode(.stopwatch)
+
+        viewModel.resumeTimer()
+        clock.advance(by: 50 * 60)
+        viewModel.pauseTimer()
+        #expect(viewModel.endCurrentSession())
+        #expect(!viewModel.endCurrentSession())
+
+        #expect(completionCount == 1)
+        #expect(viewModel.lastCompletedStudyMinutes == 50)
+        #expect(CurrencyService.studyCompletionReward(
+            for: viewModel.lastCompletedStudyMinutes,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 20)
+    }
+
+    @Test func stopwatchUnderTwentyFiveMinutesUsesExistingNoRewardRule() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        viewModel.selectMode(.stopwatch)
+        viewModel.resumeTimer()
+        clock.advance(by: 10 * 60)
+        viewModel.pauseTimer()
+        viewModel.endCurrentSession()
+
+        #expect(viewModel.lastCompletedStudyMinutes == 10)
+        #expect(CurrencyService.studyCompletionReward(
+            for: viewModel.lastCompletedStudyMinutes,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 0)
+    }
+
+    @Test func stopwatchModeAndElapsedTimeRestoreWithinGracePeriod() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
+        let original = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+        original.selectMode(.stopwatch)
+        original.resumeTimer()
+        clock.advance(by: 5 * 60)
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
+        let restored = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        restored.restorePersistedSessionIfNeeded()
+
+        #expect(restored.mode == .stopwatch)
+        #expect(restored.isRunning)
+        #expect(restored.stopwatchElapsedSeconds == 5 * 60)
+    }
+
+    @Test func pomodoroStudyCompletionWaitsBeforeStartingBreak() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+
+        #expect(viewModel.mode == .pomodoro)
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(!viewModel.isStudyTime)
+        #expect(viewModel.state == .completed)
+        #expect(!viewModel.isRunning)
+
+        viewModel.beginPomodoroBreak()
+        #expect(viewModel.isRunning)
+        #expect(viewModel.timeRemaining == 5 * 60)
+    }
+
+    @Test func threePomodoroSetsCompleteStudyRewardHookThreeTimes() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        var studyCompletionCount = 0
+        viewModel.onStudyFinished = { studyCompletionCount += 1 }
+
+        for setIndex in 0..<3 {
+            viewModel.resumeTimer()
+            clock.advance(by: 25 * 60)
+            viewModel.synchronizeTime()
+
+            viewModel.beginPomodoroBreak()
+            clock.advance(by: 5 * 60)
+            viewModel.synchronizeTime()
+
+            if setIndex < 2 {
+                viewModel.resumeTimer()
+            }
+        }
+
+        #expect(studyCompletionCount == 3)
+    }
+
+    @Test @MainActor func threePomodoroSetsAwardEachNormalRewardAndAdvanceStreakOnce() throws {
+        let container = try makePlayerContainer()
+        let context = container.mainContext
+        let player = Player()
+        context.insert(player)
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        let completionDate = Date(timeIntervalSince1970: 1_800_000_000)
+
+        viewModel.onStudyFinished = {
+            let reward = CurrencyService.studyCompletionReward(
+                for: viewModel.lastCompletedStudyMinutes,
+                todayStudyMinutesBeforeCompletion: player.todayStudyMinutes
+            )
+            player.todayStudyMinutes += viewModel.lastCompletedStudyMinutes
+            _ = FishRewardService.awardFish(for: viewModel.lastCompletedStudyMinutes, to: player)
+            _ = try? CurrencyService.addCoins(reward, to: player, in: context)
+            _ = try? StudyStreakService.recordStudyCompletion(
+                for: player,
+                at: completionDate,
+                in: context
+            )
+        }
+
+        for setIndex in 0..<3 {
+            viewModel.resumeTimer()
+            clock.advance(by: 25 * 60)
+            viewModel.synchronizeTime()
+            viewModel.beginPomodoroBreak()
+            clock.advance(by: 5 * 60)
+            viewModel.synchronizeTime()
+            if setIndex < 2 { viewModel.resumeTimer() }
+        }
+
+        #expect(player.coins == 30)
+        #expect(player.ownedFish.count == 3)
+        #expect(player.studyStreakDays == 1)
+    }
+
+    @Test func pomodoroBreakCompletionRequestsNextSetOnlyAfterBreakEnds() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        var nextSetPromptCount = 0
+        viewModel.onBreakFinished = { nextSetPromptCount += 1 }
+
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        #expect(nextSetPromptCount == 0)
+
+        viewModel.beginPomodoroBreak()
+        clock.advance(by: 5 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(nextSetPromptCount == 1)
+        #expect(viewModel.isStudyTime)
+        #expect(viewModel.state == .completed)
+    }
+
+    @Test func countdownTimerCompletionDoesNotEnterBreak() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        viewModel.selectMode(.countdown)
+
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(viewModel.mode == .countdown)
+        #expect(viewModel.isStudyTime)
+        #expect(viewModel.state == .completed)
+        #expect(!viewModel.isRunning)
+    }
+
+    @Test func stopwatchCompletionDoesNotEnterBreak() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())
+        viewModel.selectMode(.stopwatch)
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.pauseTimer()
+        viewModel.endCurrentSession()
+
+        #expect(viewModel.isStudyTime)
+        #expect(viewModel.state == .completed)
+        #expect(!viewModel.isRunning)
+    }
+
     @Test func foregroundSynchronizationCorrectsBackgroundElapsedTime() {
         let clock = TestClock()
         let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())

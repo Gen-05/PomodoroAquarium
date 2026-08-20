@@ -20,6 +20,7 @@ struct TimerView: View {
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     
     init(
         studyTime: Int,
@@ -38,13 +39,17 @@ struct TimerView: View {
         self._awardedFish = State(initialValue: nil)
         self._pendingAwardedFish = State(initialValue: nil)
         self._completionReward = State(initialValue: nil)
+        self._pendingCompletionReward = State(initialValue: nil)
     }
     
     @State private var viewModel: TimerViewModel
     @State private var awardedFish: PlayerFish?
     @State private var pendingAwardedFish: PlayerFish?
     @State private var completionReward: StudyCompletionReward?
+    @State private var pendingCompletionReward: StudyCompletionReward?
+    @State private var studyFinishedMinutes: Int?
     @State private var showsEndConfirmation = false
+    @State private var showsNextSetConfirmation = false
     
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -58,6 +63,20 @@ struct TimerView: View {
             VStack(spacing: 22) {
                 Spacer()
 
+                if viewModel.isStudyTime && (viewModel.state == .idle || viewModel.state == .completed) {
+                    Picker("計測方法", selection: Binding(
+                        get: { viewModel.mode },
+                        set: { viewModel.selectMode($0) }
+                    )) {
+                        ForEach(TimerMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(5)
+                    .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                }
+
                 Text(viewModel.isStudyTime ? "FOCUS" : "BREAK")
                     .font(.caption.weight(.bold))
                     .tracking(3)
@@ -66,13 +85,13 @@ struct TimerView: View {
                     .padding(.vertical, 8)
                     .background(.black.opacity(0.16), in: Capsule())
 
-                Text(formatTime(viewModel.timeRemaining))
+                Text(formatTime(viewModel.displayedSeconds))
                     .font(.system(size: 72, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
 
-                Text(viewModel.isStudyTime ? "📚 勉強時間" : "☕️ 休憩時間")
+                Text(sessionDescription)
                     .font(.headline)
                     .foregroundStyle(.white.opacity(0.9))
 
@@ -128,6 +147,31 @@ struct TimerView: View {
                 Text("現在の休憩を終了して、次の勉強へ進みます。")
             }
         }
+        .alert("次のセットを開始しますか？", isPresented: $showsNextSetConfirmation) {
+            Button("終了する", role: .cancel) {
+                dismiss()
+            }
+            Button("続ける") {
+                viewModel.resumeTimer()
+            }
+        } message: {
+            Text("休憩が終了しました。")
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { studyFinishedMinutes != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        studyFinishedMinutes = nil
+                    }
+                }
+            ),
+            onDismiss: presentPendingCompletionReward
+        ) {
+            if let studyFinishedMinutes {
+                StudyFinishedView(studyMinutes: studyFinishedMinutes)
+            }
+        }
         .sheet(
             isPresented: Binding(
                 get: { completionReward != nil },
@@ -151,7 +195,8 @@ struct TimerView: View {
                         awardedFish = nil
                     }
                 }
-            )
+            ),
+            onDismiss: finishStudyFlow
         ) {
             if let awardedFish {
                 FishRewardView(fish: awardedFish)
@@ -161,9 +206,9 @@ struct TimerView: View {
 
     private func configureStudyCompletion() {
         viewModel.onStudyFinished = {
-            guard let player else { return }
-
             let completedStudyMinutes = viewModel.lastCompletedStudyMinutes
+            studyFinishedMinutes = completedStudyMinutes
+            guard let player else { return }
 
             let coinReward = CurrencyService.studyCompletionReward(
                 for: completedStudyMinutes,
@@ -194,17 +239,48 @@ struct TimerView: View {
                 in: modelContext
             )
 
-            completionReward = StudyCompletionReward(
+            pendingCompletionReward = StudyCompletionReward(
                 studyReward: awardedStudyReward,
                 streakReward: streakUpdate?.awardedCoins ?? 0,
                 streakDays: streakUpdate?.streakDays ?? player.studyStreakDays
             )
         }
+        viewModel.onBreakFinished = {
+            showsNextSetConfirmation = true
+        }
+    }
+
+    private var sessionDescription: String {
+        if !viewModel.isStudyTime {
+            return "☕️ 休憩時間"
+        }
+        return viewModel.mode == .stopwatch ? "⏱️ ストップウォッチ" : "📚 勉強時間"
+    }
+
+    private func presentPendingCompletionReward() {
+        if let pendingCompletionReward {
+            completionReward = pendingCompletionReward
+            self.pendingCompletionReward = nil
+        } else {
+            presentPendingFishReward()
+        }
     }
 
     private func presentPendingFishReward() {
-        awardedFish = pendingAwardedFish
-        pendingAwardedFish = nil
+        if let pendingAwardedFish {
+            awardedFish = pendingAwardedFish
+            self.pendingAwardedFish = nil
+        } else {
+            finishStudyFlow()
+        }
+    }
+
+    private func finishStudyFlow() {
+        if viewModel.mode == .pomodoro {
+            viewModel.beginPomodoroBreak()
+        } else {
+            dismiss()
+        }
     }
 }
 

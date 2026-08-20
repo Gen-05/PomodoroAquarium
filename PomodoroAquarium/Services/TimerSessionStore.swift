@@ -8,6 +8,8 @@ struct PersistedTimerSession: Codable, Equatable {
     let timeRemaining: Int
     /// 勉強セッションで実際に経過した秒数。旧保存データとの互換性のためOptional。
     let elapsedStudySeconds: Int?
+    /// 旧保存データはカウントダウンとして復元する。
+    let timerModeRawValue: String?
     let lastHeartbeatDate: Date
     let studyTime: Int
     let breakTime: Int
@@ -53,6 +55,7 @@ final class TimerSessionStore {
         isRunning: Bool,
         timeRemaining: Int,
         elapsedStudySeconds: Int,
+        timerModeRawValue: String,
         lastHeartbeatDate: Date,
         studyTime: Int,
         breakTime: Int
@@ -64,6 +67,7 @@ final class TimerSessionStore {
             isRunning: isRunning,
             timeRemaining: timeRemaining,
             elapsedStudySeconds: elapsedStudySeconds,
+            timerModeRawValue: timerModeRawValue,
             lastHeartbeatDate: lastHeartbeatDate,
             studyTime: studyTime,
             breakTime: breakTime,

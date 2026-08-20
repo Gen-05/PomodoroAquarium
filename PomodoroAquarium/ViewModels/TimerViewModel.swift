@@ -15,6 +15,22 @@ enum TimerState: Equatable {
     case completed
 }
 
+enum TimerMode: String, CaseIterable, Identifiable {
+    case pomodoro
+    case countdown
+    case stopwatch
+
+    var id: Self { self }
+
+    var displayName: String {
+        switch self {
+        case .pomodoro: "ポモドーロ"
+        case .countdown: "タイマー"
+        case .stopwatch: "ストップウォッチ"
+        }
+    }
+}
+
 @Observable
 final class TimerViewModel {
     
@@ -26,10 +42,15 @@ final class TimerViewModel {
     private var hasHandledCurrentSessionCompletion = false
     private var hasAttemptedRestore = false
     private var lastHeartbeatDate: Date?
+    private var stopwatchRunStartDate: Date?
+    private var stopwatchElapsedAtRunStart = 0
     
     var onStudyFinished: (() -> Void)?
+    var onBreakFinished: (() -> Void)?
     
     var timeRemaining: Int
+    private(set) var mode: TimerMode = .pomodoro
+    private(set) var stopwatchElapsedSeconds = 0
     private(set) var state: TimerState = .idle
     var isRunning: Bool { state == .running }
     var isStudyTime = true
@@ -38,11 +59,27 @@ final class TimerViewModel {
 
     var elapsedStudySeconds: Int {
         guard isStudyTime else { return 0 }
+        if mode == .stopwatch {
+            return stopwatchElapsedSeconds
+        }
         return max(0, studyTime * 60 - timeRemaining)
     }
 
     var elapsedStudyMinutes: Int {
         elapsedStudySeconds / 60
+    }
+
+    var displayedSeconds: Int {
+        isStudyTime && mode == .stopwatch ? stopwatchElapsedSeconds : timeRemaining
+    }
+
+    func selectMode(_ newMode: TimerMode) {
+        guard isStudyTime, state == .idle || state == .completed else { return }
+        mode = newMode
+        stopwatchElapsedSeconds = 0
+        stopwatchElapsedAtRunStart = 0
+        stopwatchRunStartDate = nil
+        timeRemaining = studyTime * 60
     }
     
     init(
@@ -75,6 +112,10 @@ final class TimerViewModel {
 
         state = .paused
         endDate = nil
+        if mode == .stopwatch && isStudyTime {
+            stopwatchElapsedAtRunStart = stopwatchElapsedSeconds
+            stopwatchRunStartDate = nil
+        }
         persistSession(at: now())
     }
 
@@ -82,9 +123,20 @@ final class TimerViewModel {
         guard state != .running else { return }
         hasHandledCurrentSessionCompletion = false
         let currentDate = now()
-        endDate = currentDate.addingTimeInterval(TimeInterval(timeRemaining))
+        if mode == .stopwatch && isStudyTime {
+            stopwatchElapsedAtRunStart = stopwatchElapsedSeconds
+            stopwatchRunStartDate = currentDate
+            endDate = nil
+        } else {
+            endDate = currentDate.addingTimeInterval(TimeInterval(timeRemaining))
+        }
         state = .running
         persistSession(at: currentDate)
+    }
+
+    func beginPomodoroBreak() {
+        guard mode == .pomodoro, !isStudyTime, state == .completed else { return }
+        resumeTimer()
     }
 
     @discardableResult
@@ -110,6 +162,9 @@ final class TimerViewModel {
         endDate = nil
         hasHandledCurrentSessionCompletion = false
         lastHeartbeatDate = nil
+        stopwatchElapsedSeconds = 0
+        stopwatchElapsedAtRunStart = 0
+        stopwatchRunStartDate = nil
         sessionStore.clearSession()
     }
     
@@ -143,7 +198,16 @@ final class TimerViewModel {
 
     /// Timer.publishの受信回数ではなく、終了予定時刻との差から残り時間を補正する。
     func synchronizeTime() {
-        guard isRunning, let endDate else { return }
+        guard isRunning else { return }
+
+        if mode == .stopwatch && isStudyTime {
+            guard let stopwatchRunStartDate else { return }
+            let currentRunSeconds = max(0, Int(now().timeIntervalSince(stopwatchRunStartDate).rounded(.down)))
+            stopwatchElapsedSeconds = stopwatchElapsedAtRunStart + currentRunSeconds
+            return
+        }
+
+        guard let endDate else { return }
 
         let interval = endDate.timeIntervalSince(now())
         guard interval > 0 else {
@@ -156,11 +220,23 @@ final class TimerViewModel {
 
     private func restore(_ session: PersistedTimerSession, at currentDate: Date) {
         isStudyTime = session.isStudyTime
+        mode = TimerMode(rawValue: session.timerModeRawValue ?? "") ?? .pomodoro
         state = session.isRunning ? .running : .paused
         timeRemaining = session.timeRemaining
-        endDate = session.isRunning ? session.endDate : nil
+        let savedElapsed = max(0, session.elapsedStudySeconds ?? 0)
+        stopwatchElapsedSeconds = mode == .stopwatch ? savedElapsed : 0
+        stopwatchElapsedAtRunStart = stopwatchElapsedSeconds
+        stopwatchRunStartDate = nil
+        endDate = session.isRunning && mode != .stopwatch ? session.endDate : nil
         lastHeartbeatDate = session.lastHeartbeatDate
         hasHandledCurrentSessionCompletion = false
+
+        if isRunning && mode == .stopwatch {
+            let elapsedSinceHeartbeat = max(0, Int(currentDate.timeIntervalSince(session.lastHeartbeatDate).rounded(.down)))
+            stopwatchElapsedSeconds += elapsedSinceHeartbeat
+            stopwatchElapsedAtRunStart = stopwatchElapsedSeconds
+            stopwatchRunStartDate = currentDate
+        }
 
         if isRunning {
             synchronizeTime()
@@ -180,6 +256,7 @@ final class TimerViewModel {
         }
 
         isStudyTime = session.isStudyTime
+        mode = TimerMode(rawValue: session.timerModeRawValue ?? "") ?? .pomodoro
         state = .paused
         endDate = nil
         lastHeartbeatDate = session.lastHeartbeatDate
@@ -195,8 +272,16 @@ final class TimerViewModel {
         let elapsedAtTermination = session.isRunning
             ? savedElapsed + allowedBackgroundTime
             : savedElapsed
-        let creditedElapsed = min(elapsedAtTermination, studyTime * 60)
-        timeRemaining = max(0, studyTime * 60 - creditedElapsed)
+        let creditedElapsed: Int
+        if mode == .stopwatch {
+            creditedElapsed = elapsedAtTermination
+            stopwatchElapsedSeconds = creditedElapsed
+            stopwatchElapsedAtRunStart = creditedElapsed
+            stopwatchRunStartDate = nil
+        } else {
+            creditedElapsed = min(elapsedAtTermination, studyTime * 60)
+            timeRemaining = max(0, studyTime * 60 - creditedElapsed)
+        }
 
         _ = endCurrentSession()
     }
@@ -225,6 +310,7 @@ final class TimerViewModel {
             isRunning: isRunning,
             timeRemaining: timeRemaining,
             elapsedStudySeconds: elapsedStudySeconds,
+            timerModeRawValue: mode.rawValue,
             lastHeartbeatDate: date,
             studyTime: studyTime,
             breakTime: breakTime
@@ -239,12 +325,24 @@ final class TimerViewModel {
         lastHeartbeatDate = nil
         sessionStore.clearSession()
 
-        if isStudyTime {
+        let completedStudySession = isStudyTime
+        if completedStudySession {
             lastCompletedStudyMinutes = completedStudyMinutes ?? studyTime
             onStudyFinished?()
         }
 
-        isStudyTime.toggle()
-        timeRemaining = isStudyTime ? studyTime * 60 : breakTime * 60
+        if completedStudySession && mode == .pomodoro {
+            isStudyTime = false
+            timeRemaining = breakTime * 60
+        } else {
+            isStudyTime = true
+            timeRemaining = studyTime * 60
+            if !completedStudySession {
+                onBreakFinished?()
+            }
+        }
+        stopwatchElapsedSeconds = 0
+        stopwatchElapsedAtRunStart = 0
+        stopwatchRunStartDate = nil
     }
 }
