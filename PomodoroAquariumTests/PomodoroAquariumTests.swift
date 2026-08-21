@@ -12,6 +12,61 @@ import Testing
 
 struct PomodoroAquariumTests {
 
+    @Test func pomodoroConfigurationUpdatesStudyAndBreakDurationsBeforeStart() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore()
+        )
+
+        viewModel.updateConfiguration(studyTime: 40, breakTime: 9)
+        #expect(viewModel.displayedSeconds == 40 * 60)
+
+        viewModel.resumeTimer()
+        clock.advance(by: 40 * 60)
+        viewModel.tick()
+
+        #expect(!viewModel.isStudyTime)
+        #expect(viewModel.displayedSeconds == 9 * 60)
+    }
+
+    @Test func countdownConfigurationUpdatesOnlyItsDisplayedStudyDuration() {
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            sessionStore: makeTimerStore()
+        )
+        viewModel.selectMode(.countdown)
+
+        viewModel.updateConfiguration(studyTime: 60, breakTime: 5)
+
+        #expect(viewModel.mode == .countdown)
+        #expect(viewModel.displayedSeconds == 60 * 60)
+    }
+
+    @Test func stopwatchDoesNotOfferTimeSettings() {
+        #expect(TimerMode.pomodoro.showsTimeSettings)
+        #expect(TimerMode.countdown.showsTimeSettings)
+        #expect(!TimerMode.stopwatch.showsTimeSettings)
+    }
+
+    @Test func timerConfigurationValuesPersistAcrossDefaultsReaders() throws {
+        let suiteName = "PomodoroAquariumTimerConfigurationTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set("40", forKey: TimerConfigurationStorageKey.studyTime)
+        defaults.set("9", forKey: TimerConfigurationStorageKey.breakTime)
+        defaults.set(4, forKey: TimerConfigurationStorageKey.pomodoroSetCount)
+
+        let relaunchedDefaults = try #require(UserDefaults(suiteName: suiteName))
+        #expect(relaunchedDefaults.string(forKey: TimerConfigurationStorageKey.studyTime) == "40")
+        #expect(relaunchedDefaults.string(forKey: TimerConfigurationStorageKey.breakTime) == "9")
+        #expect(relaunchedDefaults.integer(forKey: TimerConfigurationStorageKey.pomodoroSetCount) == 4)
+    }
+
     @Test func runningTimerUsesElapsedTimeForTenSeconds() {
         let clock = TestClock()
         let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: makeTimerStore())

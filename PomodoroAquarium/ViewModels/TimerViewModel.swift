@@ -29,13 +29,17 @@ enum TimerMode: String, CaseIterable, Identifiable {
         case .stopwatch: "ストップウォッチ"
         }
     }
+
+    var showsTimeSettings: Bool {
+        self != .stopwatch
+    }
 }
 
 @Observable
 final class TimerViewModel {
     
-    private let studyTime : Int
-    private let breakTime : Int
+    private var studyTime: Int
+    private var breakTime: Int
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private let sessionStore: TimerSessionStore
 
@@ -71,6 +75,18 @@ final class TimerViewModel {
 
     var displayedSeconds: Int {
         isStudyTime && mode == .stopwatch ? stopwatchElapsedSeconds : timeRemaining
+    }
+
+    var canConfigureSession: Bool {
+        isStudyTime && (state == .idle || state == .completed)
+    }
+
+    /// 開始前の設定変更を現在の表示へ反映する。実行中・一時停止中のセッションは変更しない。
+    func updateConfiguration(studyTime: Int, breakTime: Int) {
+        guard canConfigureSession else { return }
+        self.studyTime = studyTime
+        self.breakTime = breakTime
+        timeRemaining = studyTime * 60
     }
 
     func selectMode(_ newMode: TimerMode) {

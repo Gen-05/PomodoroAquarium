@@ -9,6 +9,12 @@ import SwiftUI
 import Combine
 import SwiftData
 
+enum TimerConfigurationStorageKey {
+    static let studyTime = "studyTime"
+    static let breakTime = "breakTime"
+    static let pomodoroSetCount = "pomodoroSetCount"
+}
+
 struct TimerView: View {
     
     let studyTime: Int
@@ -17,6 +23,9 @@ struct TimerView: View {
 
     @AppStorage(AquariumThemeStore.storageKey)
     private var backgroundThemeRawValue = AquariumBackgroundTheme.aquarium.rawValue
+    @AppStorage(TimerConfigurationStorageKey.studyTime) private var storedStudyTime = "25"
+    @AppStorage(TimerConfigurationStorageKey.breakTime) private var storedBreakTime = "5"
+    @AppStorage(TimerConfigurationStorageKey.pomodoroSetCount) private var pomodoroSetCount = 3
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.modelContext) private var modelContext
@@ -50,6 +59,7 @@ struct TimerView: View {
     @State private var studyFinishedMinutes: Int?
     @State private var showsEndConfirmation = false
     @State private var showsNextSetConfirmation = false
+    @State private var showsTimeSettings = false
     
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -85,11 +95,26 @@ struct TimerView: View {
                     .padding(.vertical, 8)
                     .background(.black.opacity(0.16), in: Capsule())
 
-                Text(formatTime(viewModel.displayedSeconds))
-                    .font(.system(size: 72, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
+                HStack(spacing: 12) {
+                    Text(formatTime(viewModel.displayedSeconds))
+                        .font(.system(size: 72, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
+
+                    if viewModel.canConfigureSession && viewModel.mode.showsTimeSettings {
+                        Button {
+                            showsTimeSettings = true
+                        } label: {
+                            Image(systemName: "gearshape.fill")
+                                .font(.title3)
+                                .foregroundStyle(.white)
+                                .frame(width: 42, height: 42)
+                                .background(.black.opacity(0.18), in: Circle())
+                        }
+                        .accessibilityLabel("時間設定")
+                    }
+                }
 
                 Text(sessionDescription)
                     .font(.headline)
@@ -117,7 +142,6 @@ struct TimerView: View {
             .padding(.horizontal, 32)
             .padding(.vertical, 24)
         }
-        .navigationTitle("タイマー")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
@@ -156,6 +180,17 @@ struct TimerView: View {
             }
         } message: {
             Text("休憩が終了しました。")
+        }
+        .sheet(
+            isPresented: $showsTimeSettings
+        ) {
+            TimerTimeSettingsSheet(
+                mode: viewModel.mode,
+                studyMinutes: Int(storedStudyTime) ?? studyTime,
+                breakMinutes: Int(storedBreakTime) ?? breakTime,
+                setCount: pomodoroSetCount,
+                onSave: saveTimeSettings
+            )
         }
         .sheet(
             isPresented: Binding(
@@ -250,6 +285,18 @@ struct TimerView: View {
         }
     }
 
+    private func saveTimeSettings(studyMinutes: Int, breakMinutes: Int, setCount: Int) {
+        storedStudyTime = String(studyMinutes)
+        if viewModel.mode == .pomodoro {
+            storedBreakTime = String(breakMinutes)
+            pomodoroSetCount = setCount
+        }
+        viewModel.updateConfiguration(
+            studyTime: studyMinutes,
+            breakTime: viewModel.mode == .pomodoro ? breakMinutes : (Int(storedBreakTime) ?? breakTime)
+        )
+    }
+
     private var sessionDescription: String {
         if !viewModel.isStudyTime {
             return "☕️ 休憩時間"
@@ -281,6 +328,113 @@ struct TimerView: View {
         } else {
             dismiss()
         }
+    }
+}
+
+private struct TimerTimeSettingsSheet: View {
+    let mode: TimerMode
+    let onSave: (Int, Int, Int) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var studyMinutes: Int
+    @State private var breakMinutes: Int
+    @State private var setCount: Int
+
+    init(
+        mode: TimerMode,
+        studyMinutes: Int,
+        breakMinutes: Int,
+        setCount: Int,
+        onSave: @escaping (Int, Int, Int) -> Void
+    ) {
+        self.mode = mode
+        self.onSave = onSave
+        _studyMinutes = State(initialValue: studyMinutes)
+        _breakMinutes = State(initialValue: breakMinutes)
+        _setCount = State(initialValue: setCount)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack {
+                if mode == .pomodoro {
+                    HStack(alignment: .top, spacing: 4) {
+                        pickerColumn(
+                            title: "勉強時間",
+                            selection: $studyMinutes,
+                            values: 1...180,
+                            suffix: "分"
+                        )
+
+                        pickerColumn(
+                            title: "休憩時間",
+                            selection: $breakMinutes,
+                            values: 1...60,
+                            suffix: "分"
+                        )
+
+                        pickerColumn(
+                            title: "セット数",
+                            selection: $setCount,
+                            values: 1...10,
+                            suffix: "セット"
+                        )
+                    }
+                } else {
+                    pickerColumn(
+                        title: "勉強時間",
+                        selection: $studyMinutes,
+                        values: 1...180,
+                        suffix: "分"
+                    )
+                    .frame(maxWidth: 180)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 14)
+            .navigationTitle(mode == .pomodoro ? "ポモドーロ設定" : "タイマー設定")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        onSave(studyMinutes, breakMinutes, setCount)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.height(300)])
+    }
+
+    private func pickerColumn(
+        title: String,
+        selection: Binding<Int>,
+        values: ClosedRange<Int>,
+        suffix: String
+    ) -> some View {
+        VStack(spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Picker(title, selection: selection) {
+                ForEach(values, id: \.self) { value in
+                    Text("\(value)\(suffix)").tag(value)
+                }
+            }
+            .pickerStyle(.wheel)
+            .labelsHidden()
+            .frame(height: 170)
+            .clipped()
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
