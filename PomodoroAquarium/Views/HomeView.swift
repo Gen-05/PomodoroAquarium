@@ -67,24 +67,39 @@ struct HomeView: View {
                         decorationRestoreRequestID = nil
                     }
                 )
-                
+
+                VStack {
+                    HStack {
+                        Spacer()
+
+                        HStack(spacing: 6) {
+                            Image(systemName: "circle.hexagongrid.fill")
+                            Text("\(CurrencyService.balance(of: player))")
+                                .monospacedDigit()
+                        }
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.yellow)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("所持コイン \(CurrencyService.balance(of: player))枚")
+                        .allowsHitTesting(false)
+
+                        Color.clear
+                            .frame(width: 76, height: 1)
+                    }
+                    .padding(.trailing, 16)
+
+                    Spacer()
+                }
+                .padding(.top, 8)
+                .offset(y: -52)
+                .zIndex(10)
+
                 VStack(spacing: 20) {
                     if showsInterruptionBanner {
                         interruptionBanner
                             .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-
-                    HStack {
-                        Spacer()
-                        Label(
-                            "\(CurrencyService.balance(of: player))",
-                            systemImage: "circle.hexagongrid.fill"
-                        )
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.yellow)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .aquariumGlass(cornerRadius: 16)
                     }
 
                     Spacer()
@@ -171,7 +186,6 @@ struct HomeView: View {
                         .zIndex(21)
                 }
             }
-            .navigationTitle("ポモドーロ水族館")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
@@ -198,6 +212,7 @@ struct HomeView: View {
                             .padding(10)
                             .background(.black.opacity(0.16), in: Circle())
                     }
+                    .accessibilityLabel("設定")
                 }
             }
             .navigationDestination(isPresented: $resumesPersistedTimer) {
