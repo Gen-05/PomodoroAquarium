@@ -1747,6 +1747,66 @@ struct PomodoroAquariumTests {
         #expect(StudyCompletionReward.shouldPresent(forStudyMinutes: 25))
     }
 
+    @Test @MainActor func dailyStudyMinutesArePersistedAndSameDaySessionsAreCombined() throws {
+        let container = try makeStudyHistoryContainer()
+        let date = streakDate(year: 2026, month: 8, day: 22)
+
+        try StudyHistoryService.addStudyMinutes(25, on: date, calendar: streakCalendar, in: container.mainContext)
+        try StudyHistoryService.addStudyMinutes(50, on: date, calendar: streakCalendar, in: container.mainContext)
+
+        let records = try container.mainContext.fetch(FetchDescriptor<StudyDailyRecord>())
+        #expect(records.count == 1)
+        #expect(StudyHistoryService.minutes(on: date, from: records, calendar: streakCalendar) == 75)
+    }
+
+    @Test @MainActor func dailyStudyMinutesSeparateCalendarDaysAndReturnZeroForMissingDays() throws {
+        let container = try makeStudyHistoryContainer()
+        let today = streakDate(year: 2026, month: 8, day: 22)
+        let yesterday = streakDate(year: 2026, month: 8, day: 21)
+        let noStudyDay = streakDate(year: 2026, month: 8, day: 20)
+
+        try StudyHistoryService.addStudyMinutes(50, on: today, calendar: streakCalendar, in: container.mainContext)
+        try StudyHistoryService.addStudyMinutes(75, on: yesterday, calendar: streakCalendar, in: container.mainContext)
+
+        let records = try container.mainContext.fetch(FetchDescriptor<StudyDailyRecord>())
+        #expect(StudyHistoryService.minutes(on: today, from: records, calendar: streakCalendar) == 50)
+        #expect(StudyHistoryService.minutes(on: yesterday, from: records, calendar: streakCalendar) == 75)
+        #expect(StudyHistoryService.minutes(on: noStudyDay, from: records, calendar: streakCalendar) == 0)
+    }
+
+    @Test func recentStudyHistoryAlwaysContainsThirtyChronologicalDays() {
+        let today = streakDate(year: 2026, month: 8, day: 22)
+        let summaries = StudyHistoryService.recentDays(
+            count: 30,
+            endingAt: today,
+            from: [],
+            calendar: streakCalendar
+        )
+
+        #expect(summaries.count == 30)
+        #expect(summaries.last?.date == streakCalendar.startOfDay(for: today))
+        #expect(summaries.allSatisfy { $0.minutes == 0 })
+        #expect(zip(summaries, summaries.dropFirst()).allSatisfy { pair in
+            pair.0.date < pair.1.date
+        })
+    }
+
+    @Test @MainActor func existingTodayTotalSeedsFirstDailyHistoryRecord() throws {
+        let container = try makeStudyHistoryContainer()
+        let today = streakDate(year: 2026, month: 8, day: 22)
+
+        try StudyHistoryService.addStudyMinutes(
+            25,
+            on: today,
+            existingTodayMinutesBeforeCompletion: 50,
+            calendar: streakCalendar,
+            in: container.mainContext
+        )
+
+        let records = try container.mainContext.fetch(FetchDescriptor<StudyDailyRecord>())
+        #expect(StudyHistoryService.minutes(on: today, from: records, calendar: streakCalendar) == 75)
+    }
+
 }
 
 private final class TestClock {
@@ -1777,6 +1837,14 @@ private func makePlayerContainer() throws -> ModelContainer {
     let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
     return try ModelContainer(
         for: Player.self, PlayerFish.self,
+        configurations: configuration
+    )
+}
+
+private func makeStudyHistoryContainer() throws -> ModelContainer {
+    let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+    return try ModelContainer(
+        for: StudyDailyRecord.self,
         configurations: configuration
     )
 }

@@ -24,13 +24,29 @@ final class PomodoroAquariumUITests: XCTestCase {
 
     @MainActor
     func testExample() throws {
-        // UI tests must launch the application that they test.
         let app = XCUIApplication()
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        XCTAssertTrue(app.staticTexts["ポモドーロ水族館"].waitForExistence(timeout: 5))
+
+        let startButton = app.buttons["startButton"]
+        XCTAssertTrue(startButton.exists)
+        startButton.tap()
+
+        let studyButton = app.buttons["勉強をはじめる"]
+        XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
+
+        let statisticsLink = app.buttons["statisticsLink"]
+        XCTAssertTrue(statisticsLink.exists)
+        statisticsLink.tap()
+        XCTAssertTrue(app.navigationBars["統計"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.otherElements["studyHistoryChart"].exists)
+        app.navigationBars["統計"].buttons.firstMatch.tap()
+
+        XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
+        studyButton.tap()
+
+        XCTAssertTrue(app.buttons["ポモドーロ"].waitForExistence(timeout: 5))
     }
 
     @MainActor

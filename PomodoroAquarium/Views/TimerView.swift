@@ -249,8 +249,14 @@ struct TimerView: View {
                 for: completedStudyMinutes,
                 todayStudyMinutesBeforeCompletion: player.todayStudyMinutes
             )
+            let todayMinutesBeforeCompletion = player.todayStudyMinutes
             player.todayStudyMinutes += completedStudyMinutes
             player.totalStudyMinutes += completedStudyMinutes
+            try? StudyHistoryService.addStudyMinutes(
+                completedStudyMinutes,
+                existingTodayMinutesBeforeCompletion: todayMinutesBeforeCompletion,
+                in: modelContext
+            )
 
             guard StudyCompletionReward.shouldPresent(forStudyMinutes: completedStudyMinutes) else {
                 return

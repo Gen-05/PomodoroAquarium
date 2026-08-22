@@ -8,8 +8,22 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var hasStarted = false
+
     var body: some View {
-        HomeView()
+        Group {
+            if hasStarted {
+                HomeView()
+                    .transition(.opacity)
+            } else {
+                StartView {
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        hasStarted = true
+                    }
+                }
+                .transition(.opacity)
+            }
+        }
     }
 }
 #Preview {

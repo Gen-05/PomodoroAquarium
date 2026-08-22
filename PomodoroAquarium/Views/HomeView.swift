@@ -142,17 +142,23 @@ struct HomeView: View {
                             .transition(.opacity)
                         }
                     } else {
-                        VStack(spacing: 8) {
-                            Text("今日の勉強時間")
-                                .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.8))
-                            Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
-                                .font(.title2.weight(.semibold))
-                                .foregroundStyle(.white)
+                        NavigationLink {
+                            StatisticsView(player: player)
+                        } label: {
+                            VStack(spacing: 8) {
+                                Text("今日の勉強時間")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white.opacity(0.8))
+                                Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
+                                    .font(.title2.weight(.semibold))
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 14)
+                            .aquariumGlass(cornerRadius: 18)
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 14)
-                        .aquariumGlass(cornerRadius: 18)
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("statisticsLink")
 
                         Button {
                             withAnimation { isEditingAquarium = true }
@@ -202,10 +208,7 @@ struct HomeView: View {
                 
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
-                        SettingsView(
-                            studyTime: $studyTime,
-                            breakTime: $breakTime
-                        )
+                        SettingsView()
                     } label: {
                         Image(systemName: "gearshape.fill")
                             .foregroundStyle(.white)
