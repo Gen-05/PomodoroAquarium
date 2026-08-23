@@ -46,6 +46,11 @@ final class PomodoroAquariumUITests: XCTestCase {
         bookTab.tap()
         XCTAssertTrue(app.navigationBars["魚図鑑"].waitForExistence(timeout: 5))
 
+        let shopTab = app.tabBars.buttons["ショップ"]
+        shopTab.tap()
+        XCTAssertTrue(app.navigationBars["ショップ"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["100コイン"].exists)
+
         app.tabBars.buttons["水槽"].tap()
 
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))

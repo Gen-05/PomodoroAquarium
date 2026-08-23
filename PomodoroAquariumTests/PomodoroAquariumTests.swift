@@ -1879,6 +1879,76 @@ struct PomodoroAquariumTests {
         #expect(streakCalendar.component(.day, from: next) == 1)
     }
 
+    @Test func shopCatalogKeepsPricesAndCategoriesInOneDefinition() throws {
+        let seaweed = try #require(ShopCatalog.items.first { $0.id == "decoration-seaweed" })
+        let rock = try #require(ShopCatalog.items.first { $0.id == "decoration-rock" })
+
+        #expect(seaweed.price == 100)
+        #expect(rock.price == 120)
+        #expect(ShopCatalog.items(in: .decoration).count == 2)
+        #expect(ShopCatalog.items(in: .background).count == AquariumBackgroundTheme.allCases.count)
+    }
+
+    @Test @MainActor func affordableDecorationPurchaseConsumesCoinsAndAddsStoredPlacement() throws {
+        let container = try makeShopContainer()
+        let player = Player(coins: 250)
+        container.mainContext.insert(player)
+        let seaweed = try #require(ShopCatalog.items.first { $0.id == "decoration-seaweed" })
+
+        let placement = try ShopService.purchaseDecoration(
+            seaweed,
+            for: player,
+            in: container.mainContext
+        )
+
+        #expect(CurrencyService.balance(of: player) == 150)
+        #expect(placement.kind == .seaweed)
+        #expect(!placement.isPlaced)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AquariumDecorationPlacement>()).count == 1)
+    }
+
+    @Test @MainActor func sameDecorationCanBePurchasedMultipleTimesAsSeparateItems() throws {
+        let container = try makeShopContainer()
+        let player = Player(coins: 300)
+        container.mainContext.insert(player)
+        let seaweed = try #require(ShopCatalog.items.first { $0.id == "decoration-seaweed" })
+
+        let first = try ShopService.purchaseDecoration(seaweed, for: player, in: container.mainContext)
+        let second = try ShopService.purchaseDecoration(seaweed, for: player, in: container.mainContext)
+        let placements = try container.mainContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+
+        #expect(first.decorationID != second.decorationID)
+        #expect(placements.count == 2)
+        #expect(placements.allSatisfy { $0.kind == .seaweed && !$0.isPlaced })
+        #expect(CurrencyService.balance(of: player) == 100)
+    }
+
+    @Test @MainActor func insufficientCoinsDoNotPurchaseDecorationOrChangeBalance() throws {
+        let container = try makeShopContainer()
+        let player = Player(coins: 99)
+        container.mainContext.insert(player)
+        let seaweed = try #require(ShopCatalog.items.first { $0.id == "decoration-seaweed" })
+
+        #expect(!CurrencyService.canAfford(seaweed.price, player: player))
+        #expect(throws: ShopPurchaseError.insufficientCoins) {
+            try ShopService.purchaseDecoration(seaweed, for: player, in: container.mainContext)
+        }
+        #expect(CurrencyService.balance(of: player) == 99)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AquariumDecorationPlacement>()).isEmpty)
+    }
+
+    @Test @MainActor func backgroundProductIsDisplayedButNotPurchasedYet() throws {
+        let container = try makeShopContainer()
+        let player = Player(coins: 1_000)
+        container.mainContext.insert(player)
+        let background = try #require(ShopCatalog.items.first { $0.category == .background })
+
+        #expect(throws: ShopPurchaseError.unsupportedProduct) {
+            try ShopService.purchaseDecoration(background, for: player, in: container.mainContext)
+        }
+        #expect(CurrencyService.balance(of: player) == 1_000)
+    }
+
 }
 
 private final class TestClock {
@@ -1917,6 +1987,14 @@ private func makeStudyHistoryContainer() throws -> ModelContainer {
     let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
     return try ModelContainer(
         for: StudyDailyRecord.self,
+        configurations: configuration
+    )
+}
+
+private func makeShopContainer() throws -> ModelContainer {
+    let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+    return try ModelContainer(
+        for: Player.self, PlayerFish.self, AquariumDecorationPlacement.self,
         configurations: configuration
     )
 }

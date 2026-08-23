@@ -64,4 +64,17 @@ enum CurrencyService {
     static func canAfford(_ amount: Int, player: Player?) -> Bool {
         amount >= 0 && balance(of: player) >= amount
     }
+
+    /// ショップ等から共通利用する安全なコイン消費。報酬計算には影響しない。
+    @discardableResult
+    static func spendCoins(
+        _ amount: Int,
+        from player: Player,
+        in context: ModelContext
+    ) throws -> Bool {
+        guard amount > 0, canAfford(amount, player: player) else { return false }
+        player.coins = balance(of: player) - amount
+        try context.save()
+        return true
+    }
 }

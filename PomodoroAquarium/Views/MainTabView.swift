@@ -18,6 +18,12 @@ struct MainTabView: View {
                 }
             }
 
+            Tab("ショップ", systemImage: "storefront.fill") {
+                NavigationStack {
+                    ShopView()
+                }
+            }
+
             Tab("統計", systemImage: "chart.bar.fill") {
                 NavigationStack {
                     StatisticsView(player: player)
