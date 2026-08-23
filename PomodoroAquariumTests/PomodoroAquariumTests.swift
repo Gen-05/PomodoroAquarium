@@ -1212,6 +1212,50 @@ struct PomodoroAquariumTests {
         #expect(player.ownedFish.count { $0.species == .clownfish } == 2)
     }
 
+    @Test @MainActor func firstFishAcquisitionIsMarkedNewWithOneOwnedFish() throws {
+        let player = Player()
+        let result = try #require(FishAcquisitionResult.capture(for: player) {
+            let fish = PlayerFish(species: .clownfish)
+            player.ownedFish.append(fish)
+            return fish
+        })
+
+        #expect(result.isNewFish)
+        #expect(result.showsNewBadge)
+        #expect(result.previousOwnedCount == 0)
+        #expect(result.currentOwnedCount == 1)
+        #expect(player.ownedFish.count { $0.species == .clownfish } == 1)
+        #expect(result.species.rarity == .common)
+    }
+
+    @Test @MainActor func duplicateFishAcquisitionShowsExactCountChangeWithoutNewBadge() throws {
+        let player = Player(ownedFish: (0..<4).map { _ in
+            PlayerFish(species: .clownfish)
+        })
+        let result = try #require(FishAcquisitionResult.capture(for: player) {
+            let fish = PlayerFish(species: .clownfish)
+            player.ownedFish.append(fish)
+            return fish
+        })
+
+        #expect(!result.isNewFish)
+        #expect(!result.showsNewBadge)
+        #expect(result.previousOwnedCount == 4)
+        #expect(result.currentOwnedCount == 5)
+        #expect(player.ownedFish.count { $0.species == .clownfish } == 5)
+        #expect(result.species.rarity.rawValue == FishRarity.common.rawValue)
+    }
+
+    @Test @MainActor func ineligibleStudyDoesNotCreateFishAcquisitionResult() {
+        let player = Player()
+        let result = FishAcquisitionResult.capture(for: player) {
+            FishRewardService.awardFish(for: 24, to: player)
+        }
+
+        #expect(result == nil)
+        #expect(player.ownedFish.isEmpty)
+    }
+
     @Test func bookOwnedCountCountsOnlyMatchingSpecies() {
         let player = Player(ownedFish: [
             PlayerFish(species: .clownfish),

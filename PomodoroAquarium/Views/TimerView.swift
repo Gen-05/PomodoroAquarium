@@ -45,15 +45,15 @@ struct TimerView: View {
             breakTime: breakTime
         )
         self._viewModel = State(initialValue: tempViewModel)
-        self._awardedFish = State(initialValue: nil)
-        self._pendingAwardedFish = State(initialValue: nil)
+        self._fishAcquisition = State(initialValue: nil)
+        self._pendingFishAcquisition = State(initialValue: nil)
         self._completionReward = State(initialValue: nil)
         self._pendingCompletionReward = State(initialValue: nil)
     }
     
     @State private var viewModel: TimerViewModel
-    @State private var awardedFish: PlayerFish?
-    @State private var pendingAwardedFish: PlayerFish?
+    @State private var fishAcquisition: FishAcquisitionResult?
+    @State private var pendingFishAcquisition: FishAcquisitionResult?
     @State private var completionReward: StudyCompletionReward?
     @State private var pendingCompletionReward: StudyCompletionReward?
     @State private var studyFinishedMinutes: Int?
@@ -224,17 +224,17 @@ struct TimerView: View {
         }
         .sheet(
             isPresented: Binding(
-                get: { awardedFish != nil },
+                get: { fishAcquisition != nil },
                 set: { isPresented in
                     if !isPresented {
-                        awardedFish = nil
+                        fishAcquisition = nil
                     }
                 }
             ),
             onDismiss: finishStudyFlow
         ) {
-            if let awardedFish {
-                FishRewardView(fish: awardedFish)
+            if let fishAcquisition {
+                FishRewardView(result: fishAcquisition)
             }
         }
     }
@@ -262,7 +262,9 @@ struct TimerView: View {
                 return
             }
 
-            pendingAwardedFish = FishRewardService.awardFish(for: completedStudyMinutes, to: player)
+            pendingFishAcquisition = FishAcquisitionResult.capture(for: player) {
+                FishRewardService.awardFish(for: completedStudyMinutes, to: player)
+            }
 
             var awardedStudyReward = 0
             if coinReward > 0 {
@@ -320,9 +322,9 @@ struct TimerView: View {
     }
 
     private func presentPendingFishReward() {
-        if let pendingAwardedFish {
-            awardedFish = pendingAwardedFish
-            self.pendingAwardedFish = nil
+        if let pendingFishAcquisition {
+            fishAcquisition = pendingFishAcquisition
+            self.pendingFishAcquisition = nil
         } else {
             finishStudyFlow()
         }
