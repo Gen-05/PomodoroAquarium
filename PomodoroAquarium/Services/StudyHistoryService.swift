@@ -62,4 +62,50 @@ enum StudyHistoryService {
             )
         }
     }
+
+    static func monthlyCalendar(
+        containing date: Date,
+        from records: [StudyDailyRecord],
+        calendar: Calendar = .current
+    ) -> [MonthlyStudyDay] {
+        let components = calendar.dateComponents([.year, .month], from: date)
+        guard let firstDay = calendar.date(from: components),
+              let dayRange = calendar.range(of: .day, in: .month, for: firstDay) else {
+            return []
+        }
+
+        let weekday = calendar.component(.weekday, from: firstDay)
+        let leadingEmptyCount = (weekday - calendar.firstWeekday + 7) % 7
+        var cells = (0..<leadingEmptyCount).map {
+            MonthlyStudyDay(id: $0, date: nil, minutes: 0)
+        }
+
+        for dayNumber in dayRange {
+            guard let day = calendar.date(byAdding: .day, value: dayNumber - 1, to: firstDay) else {
+                continue
+            }
+            cells.append(MonthlyStudyDay(
+                id: cells.count,
+                date: day,
+                minutes: minutes(on: day, from: records, calendar: calendar)
+            ))
+        }
+
+        let trailingEmptyCount = (7 - cells.count % 7) % 7
+        cells.append(contentsOf: (0..<trailingEmptyCount).map {
+            MonthlyStudyDay(id: cells.count + $0, date: nil, minutes: 0)
+        })
+        return cells
+    }
+
+    static func adjacentMonth(
+        from date: Date,
+        offset: Int,
+        calendar: Calendar = .current
+    ) -> Date {
+        let startOfMonth = calendar.date(
+            from: calendar.dateComponents([.year, .month], from: date)
+        ) ?? date
+        return calendar.date(byAdding: .month, value: offset, to: startOfMonth) ?? startOfMonth
+    }
 }

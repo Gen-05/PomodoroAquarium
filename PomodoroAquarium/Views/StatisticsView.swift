@@ -1,4 +1,3 @@
-import Charts
 import SwiftData
 import SwiftUI
 
@@ -6,6 +5,9 @@ struct StatisticsView: View {
     let player: Player?
 
     @Query(sort: \StudyDailyRecord.day) private var dailyRecords: [StudyDailyRecord]
+    @State private var selectedMonth = Date()
+
+    private let weekdaySymbols = ["日", "月", "火", "水", "木", "金", "土"]
 
     private var todayMinutes: Int {
         let historyMinutes = StudyHistoryService.minutes(on: Date(), from: dailyRecords)
@@ -24,8 +26,8 @@ struct StatisticsView: View {
             : max(0, player?.yesterdayStudyMinutes ?? 0)
     }
 
-    private var recentThirtyDays: [DailyStudySummary] {
-        StudyHistoryService.recentDays(count: 30, from: dailyRecords)
+    private var monthCells: [MonthlyStudyDay] {
+        StudyHistoryService.monthlyCalendar(containing: selectedMonth, from: dailyRecords)
     }
 
     var body: some View {
@@ -37,29 +39,43 @@ struct StatisticsView: View {
                     statisticCard(title: "連続", value: "\(max(0, player?.studyStreakDays ?? 0))日", icon: "flame.fill")
                 }
 
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("過去30日")
-                        .font(.headline)
+                VStack(spacing: 12) {
+                    HStack {
+                        Button {
+                            selectedMonth = StudyHistoryService.adjacentMonth(from: selectedMonth, offset: -1)
+                        } label: {
+                            Image(systemName: "chevron.left")
+                        }
+                        .accessibilityLabel("前月")
 
-                    Chart(recentThirtyDays) { summary in
-                        BarMark(
-                            x: .value("日付", summary.date, unit: .day),
-                            y: .value("勉強時間", summary.minutes)
-                        )
-                        .foregroundStyle(.cyan.gradient)
+                        Spacer()
+                        Text(selectedMonth, format: .dateTime.year().month(.wide))
+                            .font(.headline)
+                            .accessibilityIdentifier("selectedMonthLabel")
+                        Spacer()
+
+                        Button {
+                            selectedMonth = StudyHistoryService.adjacentMonth(from: selectedMonth, offset: 1)
+                        } label: {
+                            Image(systemName: "chevron.right")
+                        }
+                        .accessibilityLabel("翌月")
                     }
-                    .chartYAxisLabel("分")
-                    .chartXAxis {
-                        AxisMarks(values: .stride(by: .day, count: 5)) { value in
-                            AxisGridLine()
-                            AxisTick()
-                            AxisValueLabel(format: .dateTime.month().day())
+
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 6) {
+                        ForEach(weekdaySymbols, id: \.self) { symbol in
+                            Text(symbol)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ForEach(monthCells) { cell in
+                            calendarCell(cell)
                         }
                     }
-                    .frame(height: 260)
-                    .accessibilityIdentifier("studyHistoryChart")
+                    .accessibilityIdentifier("monthlyStudyCalendar")
                 }
-                .padding(18)
+                .padding(14)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20))
             }
             .padding()
@@ -69,16 +85,30 @@ struct StatisticsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    private func calendarCell(_ cell: MonthlyStudyDay) -> some View {
+        VStack(spacing: 4) {
+            if let date = cell.date {
+                Text(date, format: .dateTime.day())
+                    .font(.subheadline.weight(.semibold))
+                Text("\(cell.minutes)分")
+                    .font(.caption2)
+                    .foregroundStyle(cell.minutes > 0 ? .primary : .secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 50)
+        .background(
+            cell.date == nil ? Color.clear : Color.cyan.opacity(cell.minutes > 0 ? 0.18 : 0.05),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+    }
+
     private func statisticCard(title: String, value: String, icon: String) -> some View {
         VStack(spacing: 8) {
-            Image(systemName: icon)
-                .foregroundStyle(.cyan)
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.headline)
-                .monospacedDigit()
+            Image(systemName: icon).foregroundStyle(.cyan)
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.headline).monospacedDigit()
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)

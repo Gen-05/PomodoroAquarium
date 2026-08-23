@@ -1807,6 +1807,78 @@ struct PomodoroAquariumTests {
         #expect(StudyHistoryService.minutes(on: today, from: records, calendar: streakCalendar) == 75)
     }
 
+    @Test func monthlyCalendarUsesCorrectDayCountsIncludingLeapYear() {
+        let cases = [
+            (2024, 2, 29),
+            (2026, 2, 28),
+            (2026, 4, 30),
+            (2026, 8, 31)
+        ]
+
+        for (year, month, expectedDayCount) in cases {
+            let date = streakDate(year: year, month: month, day: 15)
+            let cells = StudyHistoryService.monthlyCalendar(
+                containing: date,
+                from: [],
+                calendar: streakCalendar
+            )
+            #expect(cells.compactMap(\.date).count == expectedDayCount)
+            #expect(cells.count.isMultiple(of: 7))
+        }
+    }
+
+    @Test func monthlyCalendarAlignsFirstDayWithItsWeekday() {
+        let august2026 = streakDate(year: 2026, month: 8, day: 15)
+        let cells = StudyHistoryService.monthlyCalendar(
+            containing: august2026,
+            from: [],
+            calendar: streakCalendar
+        )
+        let firstDateIndex = cells.firstIndex { $0.date != nil }
+
+        // 2026年8月1日は土曜日。日曜始まりでは7列目（index 6）。
+        #expect(firstDateIndex == 6)
+    }
+
+    @Test @MainActor func monthlyCalendarIncludesRecordedMinutesAndZeroForMissingDays() {
+        let august2026 = streakDate(year: 2026, month: 8, day: 15)
+        let recordedDay = streakDate(year: 2026, month: 8, day: 22)
+        let record = StudyDailyRecord(day: recordedDay, studyMinutes: 50)
+        let cells = StudyHistoryService.monthlyCalendar(
+            containing: august2026,
+            from: [record],
+            calendar: streakCalendar
+        )
+
+        #expect(cells.first { cell in
+            guard let date = cell.date else { return false }
+            return streakCalendar.component(.day, from: date) == 22
+        }?.minutes == 50)
+        #expect(cells.first { cell in
+            guard let date = cell.date else { return false }
+            return streakCalendar.component(.day, from: date) == 21
+        }?.minutes == 0)
+    }
+
+    @Test func adjacentMonthMovesBackwardAndForwardFromMonthStart() {
+        let august2026 = streakDate(year: 2026, month: 8, day: 22)
+        let previous = StudyHistoryService.adjacentMonth(
+            from: august2026,
+            offset: -1,
+            calendar: streakCalendar
+        )
+        let next = StudyHistoryService.adjacentMonth(
+            from: august2026,
+            offset: 1,
+            calendar: streakCalendar
+        )
+
+        #expect(streakCalendar.component(.month, from: previous) == 7)
+        #expect(streakCalendar.component(.month, from: next) == 9)
+        #expect(streakCalendar.component(.day, from: previous) == 1)
+        #expect(streakCalendar.component(.day, from: next) == 1)
+    }
+
 }
 
 private final class TestClock {

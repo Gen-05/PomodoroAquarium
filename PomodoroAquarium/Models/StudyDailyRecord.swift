@@ -18,3 +18,9 @@ struct DailyStudySummary: Identifiable, Equatable {
 
     var id: Date { date }
 }
+
+struct MonthlyStudyDay: Identifiable, Equatable {
+    let id: Int
+    let date: Date?
+    let minutes: Int
+}

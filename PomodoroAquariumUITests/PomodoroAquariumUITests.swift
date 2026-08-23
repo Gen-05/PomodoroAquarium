@@ -36,12 +36,17 @@ final class PomodoroAquariumUITests: XCTestCase {
         let studyButton = app.buttons["勉強をはじめる"]
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
 
-        let statisticsLink = app.buttons["statisticsLink"]
-        XCTAssertTrue(statisticsLink.exists)
-        statisticsLink.tap()
+        let statisticsTab = app.tabBars.buttons["統計"]
+        XCTAssertTrue(statisticsTab.exists)
+        statisticsTab.tap()
         XCTAssertTrue(app.navigationBars["統計"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.otherElements["studyHistoryChart"].exists)
-        app.navigationBars["統計"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.otherElements["monthlyStudyCalendar"].exists)
+
+        let bookTab = app.tabBars.buttons["図鑑"]
+        bookTab.tap()
+        XCTAssertTrue(app.navigationBars["魚図鑑"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["水槽"].tap()
 
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         studyButton.tap()
