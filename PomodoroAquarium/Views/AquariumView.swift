@@ -158,20 +158,19 @@ struct AquariumView: View {
 
     // 魚の配置と泳ぎは、背景装飾とは独立したレイヤーで管理する。
     private func fishLayer(in size: CGSize) -> some View {
-        ZStack {
-            ForEach(Array(displayedFish.enumerated()), id: \.element.id) { index, playerFish in
-                let isFavorite = playerFish.id == favoriteFish?.id
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { timeline in
+            ZStack {
+                ForEach(displayedFish) { playerFish in
+                    let isFavorite = playerFish.id == favoriteFish?.id
 
-                SwimmingFishView(
-                    species: playerFish.species,
-                    isFavorite: isFavorite,
-                    index: index,
-                    swimmingDistance: swimmingDistance(in: size, isFavorite: isFavorite)
-                )
-                .position(
-                    x: size.width / 2,
-                    y: verticalPosition(for: index, count: displayedFish.count, in: size)
-                )
+                    SwimmingFishView(
+                        fishID: playerFish.id,
+                        species: playerFish.species,
+                        isFavorite: isFavorite,
+                        aquariumSize: size,
+                        updateDate: timeline.date
+                    )
+                }
             }
         }
     }
@@ -190,18 +189,6 @@ struct AquariumView: View {
         .padding(.horizontal, 32)
     }
 
-    private func swimmingDistance(in size: CGSize, isFavorite: Bool) -> CGFloat {
-        let fishWidth: CGFloat = isFavorite ? 130 : 90
-        return max(0, (size.width - fishWidth) / 2)
-    }
-
-    private func verticalPosition(for index: Int, count: Int, in size: CGSize) -> CGFloat {
-        let top = size.height * 0.18
-        let bottom = size.height * 0.62
-
-        guard count > 1 else { return size.height * 0.34 }
-        return top + (bottom - top) * CGFloat(index) / CGFloat(count - 1)
-    }
 }
 
 private struct EditableAquariumDecorationView: View {
@@ -378,40 +365,61 @@ struct AquariumDecorationView: View {
 }
 
 private struct SwimmingFishView: View {
+    let fishID: UUID
     let species: FishSpecies
     let isFavorite: Bool
-    let index: Int
-    let swimmingDistance: CGFloat
+    let aquariumSize: CGSize
+    let updateDate: Date
 
-    @State private var isSwimmingToRight: Bool
+    @State private var motion: AquariumFishMotion.State
+    @State private var lastUpdateDate: Date?
+    @State private var elapsedTime: TimeInterval = 0
 
     init(
+        fishID: UUID,
         species: FishSpecies,
         isFavorite: Bool,
-        index: Int,
-        swimmingDistance: CGFloat
+        aquariumSize: CGSize,
+        updateDate: Date
     ) {
+        self.fishID = fishID
         self.species = species
         self.isFavorite = isFavorite
-        self.index = index
-        self.swimmingDistance = swimmingDistance
-        self._isSwimmingToRight = State(initialValue: index.isMultiple(of: 2))
+        self.aquariumSize = aquariumSize
+        self.updateDate = updateDate
+
+        self._motion = State(initialValue: AquariumFishMotion.initialState(for: fishID))
     }
 
     var body: some View {
         fishImage
-            .offset(x: isSwimmingToRight ? swimmingDistance : -swimmingDistance)
-            .onAppear {
-                withAnimation(
-                    .linear(duration: animationDuration)
-                    .delay(Double(index % 4) * 0.3)
-                    .repeatForever(autoreverses: true)
-                ) {
-                    isSwimmingToRight.toggle()
-                }
+            // 分離された尾びれ素材がないため、1枚絵へ速度連動の微細な変形を加える。
+            .rotationEffect(.degrees(swimRotation))
+            .scaleEffect(
+                x: motion.facingSign * motion.facingWidth,
+                y: swimVerticalScale
+            )
+            .offset(y: swimVerticalOffset)
+            .position(
+                x: aquariumSize.width * motion.position.x,
+                y: aquariumSize.height * motion.position.y
+            )
+            .onChange(of: updateDate) { _, newDate in
+                updateMotion(at: newDate)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(isFavorite ? "お気に入りの\(species.name)" : species.name)
+    }
+
+    private func updateMotion(at date: Date) {
+        guard let lastUpdateDate else {
+            self.lastUpdateDate = date
+            return
+        }
+        let deltaTime = date.timeIntervalSince(lastUpdateDate)
+        self.lastUpdateDate = date
+        elapsedTime += min(max(deltaTime, 0), AquariumFishMotion.maximumDeltaTime)
+        motion.advance(deltaTime: deltaTime, elapsedTime: elapsedTime)
     }
 
     @ViewBuilder
@@ -431,9 +439,22 @@ private struct SwimmingFishView: View {
         isFavorite ? 120 : 78
     }
 
-    private var animationDuration: Double {
-        8 + Double(index % 3)
+    private var swimIntensity: CGFloat {
+        min(max(motion.currentSpeed / max(motion.baseSpeed, 0.001), 0.15), 2.4)
     }
+
+    private var swimRotation: Double {
+        Double(sin(motion.swimPhase) * min(0.8 + swimIntensity * 0.45, 1.8))
+    }
+
+    private var swimVerticalScale: CGFloat {
+        1 + cos(motion.swimPhase * 1.07) * min(0.008 + swimIntensity * 0.005, 0.02)
+    }
+
+    private var swimVerticalOffset: CGFloat {
+        sin(motion.swimPhase * 0.53) * min(0.7 + swimIntensity * 0.45, 1.8)
+    }
+
 }
 
 extension View {

@@ -1256,6 +1256,108 @@ struct PomodoroAquariumTests {
         #expect(player.ownedFish.isEmpty)
     }
 
+    @Test func fishInitialPositionIsStablePerIndividualAndIndependentAcrossIDs() {
+        let firstID = UUID(uuid: (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16))
+        let secondID = UUID(uuid: (21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36))
+
+        let firstPosition = AquariumFishMotion.initialPosition(for: firstID)
+        #expect(AquariumFishMotion.initialPosition(for: firstID) == firstPosition)
+        #expect(AquariumFishMotion.initialPosition(for: secondID) != firstPosition)
+    }
+
+    @Test func fishSwimmingPointsStayInsideAquariumSafeBounds() {
+        let lowerPoint = AquariumFishMotion.point(xFraction: -1, yFraction: -1)
+        let upperPoint = AquariumFishMotion.point(xFraction: 2, yFraction: 2)
+
+        #expect(AquariumFishMotion.horizontalRange.contains(lowerPoint.x))
+        #expect(AquariumFishMotion.verticalRange.contains(lowerPoint.y))
+        #expect(AquariumFishMotion.horizontalRange.contains(upperPoint.x))
+        #expect(AquariumFishMotion.verticalRange.contains(upperPoint.y))
+    }
+
+    @Test func fishVelocitySteersGraduallyTowardDesiredDirection() {
+        let id = UUID(uuid: (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16))
+        var motion = AquariumFishMotion.initialState(for: id)
+        motion.position = CGPoint(x: 0.5, y: 0.4)
+        motion.behavior = .cruising
+        motion.behaviorTimeRemaining = 100
+        motion.velocity = CGVector(dx: motion.baseSpeed, dy: 0)
+        motion.desiredDirection = CGVector(dx: 0, dy: 1)
+        motion.currentSpeed = motion.baseSpeed
+        motion.targetSpeed = motion.baseSpeed
+        motion.directionChangeTimeRemaining = 100
+
+        motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
+
+        #expect(motion.velocity.dx > 0)
+        #expect(motion.velocity.dy > 0)
+        #expect(motion.velocity.dy < motion.baseSpeed)
+    }
+
+    @Test func fishNearAquariumEdgesReceiveGradualInwardSteering() {
+        let leftForce = AquariumFishMotion.wallSteering(at: CGPoint(x: 0.19, y: 0.4))
+        let rightForce = AquariumFishMotion.wallSteering(at: CGPoint(x: 0.81, y: 0.4))
+        let centerForce = AquariumFishMotion.wallSteering(at: CGPoint(x: 0.5, y: 0.4))
+
+        #expect(leftForce.dx > 0)
+        #expect(rightForce.dx < 0)
+        #expect(abs(centerForce.dx) < 0.0001)
+    }
+
+    @Test func fishFacingUsesHysteresisAndDoesNotFlipInstantly() {
+        let id = UUID(uuid: (1, 2, 3, 4, 255, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16))
+        var motion = AquariumFishMotion.initialState(for: id)
+        motion.position = CGPoint(x: 0.5, y: 0.4)
+        motion.behavior = .cruising
+        motion.behaviorTimeRemaining = 100
+        motion.facingSign = -1
+        motion.pendingFacingSign = -1
+        motion.velocity = CGVector(dx: -motion.baseSpeed, dy: 0)
+        motion.desiredDirection = CGVector(dx: -1, dy: 0)
+        motion.currentSpeed = motion.baseSpeed
+        motion.targetSpeed = motion.baseSpeed
+        motion.directionChangeTimeRemaining = 100
+
+        motion.advance(deltaTime: 0.1, elapsedTime: 1)
+        #expect(motion.facingSign == -1)
+        #expect(motion.facingWidth == 1)
+
+        for step in 2...10 {
+            motion.advance(deltaTime: 0.1, elapsedTime: Double(step))
+        }
+        #expect(motion.visualTurnTargetSign == 1)
+        #expect(motion.facingWidth < 1)
+        #expect(motion.facingWidth >= 0.55)
+    }
+
+    @Test func fishDartAlwaysTransitionsIntoBraking() {
+        let id = UUID(uuid: (31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46))
+        var motion = AquariumFishMotion.initialState(for: id)
+        motion.behavior = .darting
+        motion.behaviorTimeRemaining = 0
+
+        motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
+
+        #expect(motion.behavior == .braking)
+        #expect(motion.targetSpeed < motion.baseSpeed)
+    }
+
+    @Test func fishDartAndBrakeChangeSpeedThroughAcceleration() {
+        let id = UUID(uuid: (51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66))
+        var motion = AquariumFishMotion.initialState(for: id)
+        motion.behavior = .darting
+        motion.behaviorTimeRemaining = 10
+        motion.targetSpeed = motion.baseSpeed * 2.5
+        motion.currentSpeed = motion.baseSpeed
+        let initialSpeed = motion.currentSpeed
+
+        motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
+
+        #expect(motion.currentSpeed > initialSpeed)
+        #expect(motion.currentSpeed < motion.targetSpeed)
+        #expect(motion.accelerationMagnitude > 0)
+    }
+
     @Test func bookOwnedCountCountsOnlyMatchingSpecies() {
         let player = Player(ownedFish: [
             PlayerFish(species: .clownfish),
