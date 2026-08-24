@@ -52,6 +52,146 @@ struct PomodoroAquariumTests {
         #expect(!TimerMode.stopwatch.showsTimeSettings)
     }
 
+    @Test func countdownStudyModesScheduleEndNotificationsButStopwatchDoesNot() {
+        let clock = TestClock()
+
+        let pomodoroNotifications = TestNotificationService()
+        let pomodoro = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: pomodoroNotifications
+        )
+        pomodoro.resumeTimer()
+        #expect(pomodoroNotifications.scheduled == .study(clock.now.addingTimeInterval(25 * 60)))
+
+        let countdownNotifications = TestNotificationService()
+        let countdown = TimerViewModel(
+            studyTime: 60,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: countdownNotifications
+        )
+        countdown.selectMode(.countdown)
+        countdown.resumeTimer()
+        #expect(countdownNotifications.scheduled == .study(clock.now.addingTimeInterval(60 * 60)))
+
+        let stopwatchNotifications = TestNotificationService()
+        let stopwatch = TimerViewModel(
+            studyTime: 60,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: stopwatchNotifications
+        )
+        stopwatch.selectMode(.stopwatch)
+        stopwatch.resumeTimer()
+        #expect(stopwatchNotifications.scheduled == nil)
+        #expect(stopwatchNotifications.history.isEmpty)
+    }
+
+    @Test func pauseCancelsAndResumeReschedulesAtTheNewEndDate() {
+        let clock = TestClock()
+        let notifications = TestNotificationService()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: notifications
+        )
+
+        viewModel.resumeTimer()
+        clock.advance(by: 5 * 60)
+        viewModel.pauseTimer()
+        #expect(notifications.scheduled == nil)
+
+        clock.advance(by: 2 * 60)
+        viewModel.resumeTimer()
+        #expect(notifications.scheduled == .study(clock.now.addingTimeInterval(20 * 60)))
+        #expect(notifications.history.count == 2)
+    }
+
+    @Test func manualAndRecoveryExpiredStudyEndCancelNotifications() {
+        let manualClock = TestClock()
+        let manualNotifications = TestNotificationService()
+        let manual = TimerViewModel(
+            studyTime: 60,
+            breakTime: 5,
+            now: { manualClock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: manualNotifications
+        )
+        manual.resumeTimer()
+        manualClock.advance(by: 50 * 60)
+        manual.pauseTimer()
+        _ = manual.endCurrentSession()
+        #expect(manualNotifications.scheduled == nil)
+        #expect(manual.lastStudySessionEndReason == .userEnded)
+
+        let recoveryClock = TestClock()
+        let defaults = makeTimerDefaults()
+        let notifications = TestNotificationService()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "notification-old")
+        let original = TimerViewModel(
+            studyTime: 60,
+            breakTime: 5,
+            now: { recoveryClock.now },
+            sessionStore: oldStore,
+            notificationService: notifications
+        )
+        original.resumeTimer()
+        recoveryClock.advance(by: 30 * 60)
+        original.recordLastActiveTime()
+        recoveryClock.advance(by: TimerSessionStore.gracePeriod + 1)
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "notification-new")
+        let restored = TimerViewModel(
+            studyTime: 60,
+            breakTime: 5,
+            now: { recoveryClock.now },
+            sessionStore: newStore,
+            notificationService: notifications
+        )
+        restored.restorePersistedSessionIfNeeded()
+        #expect(notifications.scheduled == nil)
+        #expect(restored.lastStudySessionEndReason == .recoveryExpired)
+    }
+
+    @Test func pomodoroBreakNotificationFollowsStartPauseResumeAndCompletion() {
+        let clock = TestClock()
+        let notifications = TestNotificationService()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: notifications
+        )
+        var completionCount = 0
+        viewModel.onStudyFinished = { completionCount += 1 }
+
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        viewModel.synchronizeTime()
+        #expect(completionCount == 1)
+        #expect(notifications.scheduled == nil)
+
+        viewModel.beginPomodoroBreak()
+        #expect(notifications.scheduled == .breakTime(clock.now.addingTimeInterval(5 * 60)))
+
+        clock.advance(by: 60)
+        viewModel.pauseTimer()
+        #expect(notifications.scheduled == nil)
+
+        clock.advance(by: 30)
+        viewModel.resumeTimer()
+        #expect(notifications.scheduled == .breakTime(clock.now.addingTimeInterval(4 * 60)))
+    }
+
     @Test func timerConfigurationValuesPersistAcrossDefaultsReaders() throws {
         let suiteName = "PomodoroAquariumTimerConfigurationTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -2118,6 +2258,39 @@ private final class TestClock {
 
     func advance(by interval: TimeInterval) {
         now = now.addingTimeInterval(interval)
+    }
+}
+
+private final class TestNotificationService: TimerNotificationScheduling {
+    enum Scheduled: Equatable {
+        case study(Date)
+        case breakTime(Date)
+    }
+
+    private(set) var scheduled: Scheduled?
+    private(set) var history: [Scheduled] = []
+    private(set) var authorizationRequestCount = 0
+    private(set) var cancellationCount = 0
+
+    func requestAuthorizationIfNeeded() {
+        authorizationRequestCount += 1
+    }
+
+    func scheduleStudyEnd(at date: Date) {
+        let notification = Scheduled.study(date)
+        scheduled = notification
+        history.append(notification)
+    }
+
+    func scheduleBreakEnd(at date: Date) {
+        let notification = Scheduled.breakTime(date)
+        scheduled = notification
+        history.append(notification)
+    }
+
+    func cancelCurrentSessionNotification() {
+        cancellationCount += 1
+        scheduled = nil
     }
 }
 

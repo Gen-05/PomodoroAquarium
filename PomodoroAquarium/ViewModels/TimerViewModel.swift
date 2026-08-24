@@ -50,6 +50,7 @@ final class TimerViewModel {
     private var breakTime: Int
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private let sessionStore: TimerSessionStore
+    @ObservationIgnored private let notificationService: TimerNotificationScheduling
 
     private var hasHandledCurrentSessionCompletion = false
     private var hasAttemptedRestore = false
@@ -114,16 +115,33 @@ final class TimerViewModel {
         timeRemaining = studyTime * 60
     }
     
-    init(
+    convenience init(
         studyTime: Int,
         breakTime: Int,
         now: @escaping () -> Date = Date.init,
         sessionStore: TimerSessionStore = .shared
     ) {
+        self.init(
+            studyTime: studyTime,
+            breakTime: breakTime,
+            now: now,
+            sessionStore: sessionStore,
+            notificationService: NotificationService.appDefault
+        )
+    }
+
+    init(
+        studyTime: Int,
+        breakTime: Int,
+        now: @escaping () -> Date,
+        sessionStore: TimerSessionStore,
+        notificationService: TimerNotificationScheduling
+    ) {
         self.studyTime = studyTime
         self.breakTime = breakTime
         self.now = now
         self.sessionStore = sessionStore
+        self.notificationService = notificationService
         timeRemaining = studyTime * 60
     }
     
@@ -142,6 +160,9 @@ final class TimerViewModel {
         // 同期時に終了した場合は、既に次のセッションへ切り替わっている。
         guard isRunning else { return }
 
+        if mode != .stopwatch {
+            notificationService.cancelCurrentSessionNotification()
+        }
         state = .paused
         endDate = nil
         if mode == .stopwatch && isStudyTime {
@@ -163,6 +184,7 @@ final class TimerViewModel {
             endDate = currentDate.addingTimeInterval(TimeInterval(timeRemaining))
         }
         state = .running
+        scheduleCurrentSessionNotificationIfNeeded()
         persistSession(at: currentDate)
     }
 
@@ -201,6 +223,7 @@ final class TimerViewModel {
         stopwatchElapsedAtRunStart = 0
         stopwatchRunStartDate = nil
         lastStudySessionEndReason = nil
+        notificationService.cancelCurrentSessionNotification()
         sessionStore.clearSession()
     }
     
@@ -277,6 +300,7 @@ final class TimerViewModel {
         if isRunning {
             synchronizeTime()
             if isRunning {
+                scheduleCurrentSessionNotificationIfNeeded()
                 // 復元した状態を現在のプロセス所有として直ちに保存する。
                 persistSession(at: currentDate)
             }
@@ -286,6 +310,7 @@ final class TimerViewModel {
     }
 
     private func finishExpiredSession(_ session: PersistedTimerSession) {
+        notificationService.cancelCurrentSessionNotification()
         guard session.isStudyTime else {
             sessionStore.clearSession()
             return
@@ -365,6 +390,7 @@ final class TimerViewModel {
         state = .completed
         endDate = nil
         lastHeartbeatDate = nil
+        notificationService.cancelCurrentSessionNotification()
         sessionStore.clearSession()
 
         let completedStudySession = isStudyTime
@@ -387,5 +413,14 @@ final class TimerViewModel {
         stopwatchElapsedSeconds = 0
         stopwatchElapsedAtRunStart = 0
         stopwatchRunStartDate = nil
+    }
+
+    private func scheduleCurrentSessionNotificationIfNeeded() {
+        guard mode != .stopwatch, let endDate else { return }
+        if isStudyTime {
+            notificationService.scheduleStudyEnd(at: endDate)
+        } else {
+            notificationService.scheduleBreakEnd(at: endDate)
+        }
     }
 }
