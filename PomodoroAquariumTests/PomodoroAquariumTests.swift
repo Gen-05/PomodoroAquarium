@@ -177,6 +177,8 @@ struct PomodoroAquariumTests {
         #expect(!viewModel.isStudyTime)
         #expect(viewModel.state == .completed)
         #expect(!viewModel.isRunning)
+        #expect(viewModel.lastStudySessionEndReason == .completed)
+        #expect(viewModel.shouldBeginPomodoroBreak)
 
         viewModel.beginPomodoroBreak()
         #expect(viewModel.isRunning)
@@ -373,7 +375,13 @@ struct PomodoroAquariumTests {
         #expect(viewModel.lastCompletedStudyMinutes == 50)
         #expect(completionCount == 1)
         #expect(viewModel.state == .completed)
-        #expect(!viewModel.isStudyTime)
+        #expect(viewModel.isStudyTime)
+        #expect(viewModel.lastStudySessionEndReason == .userEnded)
+        #expect(!viewModel.shouldBeginPomodoroBreak)
+        #expect(CurrencyService.studyCompletionReward(
+            for: viewModel.lastCompletedStudyMinutes,
+            todayStudyMinutesBeforeCompletion: 0
+        ) == 20)
         #expect(CurrencyService.studyCompletionReward(
             for: viewModel.lastCompletedStudyMinutes,
             todayStudyMinutesBeforeCompletion: 0
@@ -465,6 +473,8 @@ struct PomodoroAquariumTests {
         #expect(!viewModel.endCurrentSession())
         #expect(completionCount == 1)
         #expect(viewModel.lastCompletedStudyMinutes == 25)
+        #expect(viewModel.lastStudySessionEndReason == .userEnded)
+        #expect(!viewModel.shouldBeginPomodoroBreak)
     }
 
     @Test func pausedBreakCanBeEndedWithoutCallingStudyCompletion() {
@@ -677,6 +687,9 @@ struct PomodoroAquariumTests {
 
         #expect(completionCount == 1)
         #expect(restored.lastCompletedStudyMinutes == 40)
+        #expect(restored.lastStudySessionEndReason == .recoveryExpired)
+        #expect(restored.isStudyTime)
+        #expect(!restored.shouldBeginPomodoroBreak)
         #expect(CurrencyService.studyCompletionReward(
             for: restored.lastCompletedStudyMinutes,
             todayStudyMinutesBeforeCompletion: 0
@@ -779,6 +792,9 @@ struct PomodoroAquariumTests {
         restored.restorePersistedSessionIfNeeded()
 
         #expect(restored.lastCompletedStudyMinutes == 20)
+        #expect(restored.lastStudySessionEndReason == .recoveryExpired)
+        #expect(restored.isStudyTime)
+        #expect(!restored.shouldBeginPomodoroBreak)
         #expect(CurrencyService.studyCompletionReward(
             for: restored.lastCompletedStudyMinutes,
             todayStudyMinutesBeforeCompletion: 0

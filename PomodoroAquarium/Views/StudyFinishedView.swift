@@ -4,6 +4,7 @@ import UIKit
 
 struct StudyFinishedView: View {
     let studyMinutes: Int
+    var endReason: StudySessionEndReason = .completed
 
     @Environment(\.dismiss) private var dismiss
     @State private var isVisible = false
@@ -27,8 +28,9 @@ struct StudyFinishedView: View {
                     .foregroundStyle(.cyan)
                     .shadow(color: .cyan.opacity(0.35), radius: 14)
 
-                Text("🎉 勉強終了！")
+                Text(endReason.isNormalCompletion ? "🎉 勉強終了！" : "勉強が途中で終了しました")
                     .font(.largeTitle.bold())
+                    .multilineTextAlignment(.center)
 
                 VStack(spacing: 6) {
                     Text("集中時間")
@@ -38,6 +40,13 @@ struct StudyFinishedView: View {
                     Text("\(studyMinutes)分")
                         .font(.system(size: 38, weight: .bold, design: .rounded))
                         .monospacedDigit()
+                }
+
+                if !endReason.isNormalCompletion {
+                    Text("終了地点までの勉強時間で報酬を計算します")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
 
                 Button("報酬を見る") {

@@ -57,6 +57,7 @@ struct TimerView: View {
     @State private var completionReward: StudyCompletionReward?
     @State private var pendingCompletionReward: StudyCompletionReward?
     @State private var studyFinishedMinutes: Int?
+    @State private var studyFinishedEndReason: StudySessionEndReason = .completed
     @State private var showsEndConfirmation = false
     @State private var showsNextSetConfirmation = false
     @State private var showsTimeSettings = false
@@ -204,7 +205,10 @@ struct TimerView: View {
             onDismiss: presentPendingCompletionReward
         ) {
             if let studyFinishedMinutes {
-                StudyFinishedView(studyMinutes: studyFinishedMinutes)
+                StudyFinishedView(
+                    studyMinutes: studyFinishedMinutes,
+                    endReason: studyFinishedEndReason
+                )
             }
         }
         .sheet(
@@ -242,6 +246,7 @@ struct TimerView: View {
     private func configureStudyCompletion() {
         viewModel.onStudyFinished = {
             let completedStudyMinutes = viewModel.lastCompletedStudyMinutes
+            studyFinishedEndReason = viewModel.lastStudySessionEndReason ?? .completed
             studyFinishedMinutes = completedStudyMinutes
             guard let player else { return }
 
@@ -331,7 +336,7 @@ struct TimerView: View {
     }
 
     private func finishStudyFlow() {
-        if viewModel.mode == .pomodoro {
+        if viewModel.shouldBeginPomodoroBreak {
             viewModel.beginPomodoroBreak()
         } else {
             dismiss()

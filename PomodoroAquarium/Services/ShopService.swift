@@ -30,7 +30,7 @@ enum ShopService {
             )
         } catch {
             // 装飾追加に失敗した場合は、消費済みコインを戻して残高だけ失う状態を防ぐ。
-            try? CurrencyService.addCoins(item.price, to: player, in: context)
+            _ = try? CurrencyService.addCoins(item.price, to: player, in: context)
             throw error
         }
     }

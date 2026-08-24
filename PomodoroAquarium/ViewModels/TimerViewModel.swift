@@ -35,6 +35,14 @@ enum TimerMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum StudySessionEndReason: Equatable {
+    case completed
+    case userEnded
+    case recoveryExpired
+
+    var isNormalCompletion: Bool { self == .completed }
+}
+
 @Observable
 final class TimerViewModel {
     
@@ -60,6 +68,14 @@ final class TimerViewModel {
     var isStudyTime = true
     private(set) var endDate: Date?
     private(set) var lastCompletedStudyMinutes = 0
+    private(set) var lastStudySessionEndReason: StudySessionEndReason?
+
+    var shouldBeginPomodoroBreak: Bool {
+        mode == .pomodoro &&
+            !isStudyTime &&
+            state == .completed &&
+            lastStudySessionEndReason?.isNormalCompletion == true
+    }
 
     var elapsedStudySeconds: Int {
         guard isStudyTime else { return 0 }
@@ -151,7 +167,7 @@ final class TimerViewModel {
     }
 
     func beginPomodoroBreak() {
-        guard mode == .pomodoro, !isStudyTime, state == .completed else { return }
+        guard shouldBeginPomodoroBreak else { return }
         resumeTimer()
     }
 
@@ -167,7 +183,10 @@ final class TimerViewModel {
         guard state == .paused, !hasHandledCurrentSessionCompletion else {
             return false
         }
-        finishCurrentSession(completedStudyMinutes: isStudyTime ? elapsedStudyMinutes : nil)
+        finishCurrentSession(
+            completedStudyMinutes: isStudyTime ? elapsedStudyMinutes : nil,
+            studyEndReason: .userEnded
+        )
         return true
     }
     
@@ -181,6 +200,7 @@ final class TimerViewModel {
         stopwatchElapsedSeconds = 0
         stopwatchElapsedAtRunStart = 0
         stopwatchRunStartDate = nil
+        lastStudySessionEndReason = nil
         sessionStore.clearSession()
     }
     
@@ -227,7 +247,7 @@ final class TimerViewModel {
 
         let interval = endDate.timeIntervalSince(now())
         guard interval > 0 else {
-            finishCurrentSession()
+            finishCurrentSession(studyEndReason: .completed)
             return
         }
 
@@ -299,7 +319,10 @@ final class TimerViewModel {
             timeRemaining = max(0, studyTime * 60 - creditedElapsed)
         }
 
-        _ = endCurrentSession()
+        finishCurrentSession(
+            completedStudyMinutes: elapsedStudyMinutes,
+            studyEndReason: .recoveryExpired
+        )
     }
 
     private func updateHeartbeatIfNeeded() {
@@ -333,7 +356,10 @@ final class TimerViewModel {
         ))
     }
 
-    private func finishCurrentSession(completedStudyMinutes: Int? = nil) {
+    private func finishCurrentSession(
+        completedStudyMinutes: Int? = nil,
+        studyEndReason: StudySessionEndReason = .completed
+    ) {
         guard !hasHandledCurrentSessionCompletion else { return }
         hasHandledCurrentSessionCompletion = true
         state = .completed
@@ -344,10 +370,11 @@ final class TimerViewModel {
         let completedStudySession = isStudyTime
         if completedStudySession {
             lastCompletedStudyMinutes = completedStudyMinutes ?? studyTime
+            lastStudySessionEndReason = studyEndReason
             onStudyFinished?()
         }
 
-        if completedStudySession && mode == .pomodoro {
+        if completedStudySession && mode == .pomodoro && studyEndReason.isNormalCompletion {
             isStudyTime = false
             timeRemaining = breakTime * 60
         } else {
