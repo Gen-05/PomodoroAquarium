@@ -52,6 +52,95 @@ struct PomodoroAquariumTests {
         #expect(!TimerMode.stopwatch.showsTimeSettings)
     }
 
+    @Test func notificationIntroductionAppearsOnlyForFirstCountdownStudyStart() {
+        #expect(NotificationIntroductionSettings.shouldPresent(for: .pomodoro, hasShown: false))
+        #expect(NotificationIntroductionSettings.shouldPresent(for: .countdown, hasShown: false))
+        #expect(!NotificationIntroductionSettings.shouldPresent(for: .stopwatch, hasShown: false))
+        #expect(!NotificationIntroductionSettings.shouldPresent(for: .pomodoro, hasShown: true))
+    }
+
+    @Test func deniedNotificationsDoNotPreventStudyOrScheduleStudyOrBreak() {
+        let clock = TestClock()
+        let notifications = TestNotificationService()
+        notifications.authorizationState = .denied
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: notifications
+        )
+
+        viewModel.resumeTimer()
+        #expect(notifications.scheduled == nil)
+        #expect(notifications.history.isEmpty)
+        #expect(viewModel.isRunning)
+
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        viewModel.beginPomodoroBreak()
+        #expect(notifications.scheduled == nil)
+        #expect(notifications.history.isEmpty)
+    }
+
+    @Test func explicitNotificationPermissionActionRequestsSystemAuthorization() {
+        let notifications = TestNotificationService()
+        notifications.authorizationState = .notDetermined
+
+        var granted = false
+        notifications.requestAuthorization { granted = $0 }
+
+        #expect(notifications.authorizationRequestCount == 1)
+        #expect(granted)
+        #expect(notifications.authorizationState == .authorized)
+    }
+
+    @Test func inAppNotificationSettingDefaultsOffAndPersists() {
+        let suiteName = "PomodoroAquariumTests.notifications.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+
+        #expect(!NotificationSettings.isEnabled(in: defaults))
+        defaults.set(true, forKey: NotificationSettings.enabledKey)
+        #expect(NotificationSettings.isEnabled(in: UserDefaults(suiteName: suiteName)!))
+    }
+
+    @Test func authorizedSystemNotificationsStillRequireInAppSetting() {
+        let clock = TestClock()
+        let notifications = TestNotificationService()
+        notifications.authorizationState = .authorized
+        notifications.notificationsEnabled = false
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: notifications
+        )
+
+        viewModel.resumeTimer()
+        #expect(notifications.scheduled == nil)
+
+        viewModel.pauseTimer()
+        notifications.notificationsEnabled = true
+        viewModel.resumeTimer()
+        #expect(notifications.scheduled == .study(clock.now.addingTimeInterval(25 * 60)))
+    }
+
+    @Test func turningInAppNotificationsOffCancelsPendingSessionNotification() {
+        let notifications = TestNotificationService()
+        notifications.scheduleStudyEnd(at: Date().addingTimeInterval(60))
+        #expect(notifications.scheduled != nil)
+
+        notifications.notificationsEnabled = false
+        NotificationSettings.handleChange(
+            isEnabled: false,
+            notificationService: notifications
+        )
+
+        #expect(notifications.scheduled == nil)
+        #expect(notifications.cancellationCount == 1)
+    }
+
     @Test func countdownStudyModesScheduleEndNotificationsButStopwatchDoesNot() {
         let clock = TestClock()
 
@@ -2271,18 +2360,32 @@ private final class TestNotificationService: TimerNotificationScheduling {
     private(set) var history: [Scheduled] = []
     private(set) var authorizationRequestCount = 0
     private(set) var cancellationCount = 0
+    var authorizationState: NotificationAuthorizationState = .authorized
+    var notificationsEnabled = true
 
-    func requestAuthorizationIfNeeded() {
+    func authorizationStatus(
+        _ completion: @escaping @Sendable (NotificationAuthorizationState) -> Void
+    ) {
+        completion(authorizationState)
+    }
+
+    func requestAuthorization(_ completion: @escaping @Sendable (Bool) -> Void) {
         authorizationRequestCount += 1
+        if authorizationState == .notDetermined {
+            authorizationState = .authorized
+        }
+        completion(authorizationState == .authorized)
     }
 
     func scheduleStudyEnd(at date: Date) {
+        guard notificationsEnabled, authorizationState == .authorized else { return }
         let notification = Scheduled.study(date)
         scheduled = notification
         history.append(notification)
     }
 
     func scheduleBreakEnd(at date: Date) {
+        guard notificationsEnabled, authorizationState == .authorized else { return }
         let notification = Scheduled.breakTime(date)
         scheduled = notification
         history.append(notification)

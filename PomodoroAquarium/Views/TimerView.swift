@@ -26,6 +26,10 @@ struct TimerView: View {
     @AppStorage(TimerConfigurationStorageKey.studyTime) private var storedStudyTime = "25"
     @AppStorage(TimerConfigurationStorageKey.breakTime) private var storedBreakTime = "5"
     @AppStorage(TimerConfigurationStorageKey.pomodoroSetCount) private var pomodoroSetCount = 3
+    @AppStorage(NotificationIntroductionSettings.hasShownKey)
+    private var hasShownNotificationIntroduction = false
+    @AppStorage(NotificationSettings.enabledKey)
+    private var notificationsEnabled = false
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.modelContext) private var modelContext
@@ -61,6 +65,7 @@ struct TimerView: View {
     @State private var showsEndConfirmation = false
     @State private var showsNextSetConfirmation = false
     @State private var showsTimeSettings = false
+    @State private var showsNotificationIntroduction = false
     
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -133,7 +138,7 @@ struct TimerView: View {
                     .buttonStyle(AquariumSecondaryButtonStyle())
                 } else {
                     Button(viewModel.isRunning ? "一時停止" : (viewModel.isStudyTime ? "勉強開始" : "休憩開始")) {
-                        viewModel.startStopTimer()
+                        handlePrimaryTimerAction()
                     }
                     .buttonStyle(AquariumPrimaryButtonStyle())
                 }
@@ -171,6 +176,25 @@ struct TimerView: View {
             } else {
                 Text("現在の休憩を終了して、次の勉強へ進みます。")
             }
+        }
+        .alert("勉強終了をお知らせ", isPresented: $showsNotificationIntroduction) {
+            Button("あとで", role: .cancel) {
+                notificationsEnabled = false
+                viewModel.resumeTimer()
+            }
+            Button("通知を許可する") {
+                viewModel.resumeTimer()
+                NotificationService.shared.requestAuthorization { granted in
+                    Task { @MainActor in
+                        notificationsEnabled = granted
+                        if granted {
+                            viewModel.rescheduleCurrentSessionNotification()
+                        }
+                    }
+                }
+            }
+        } message: {
+            Text("勉強や休憩が終わった時に通知でお知らせできます。")
         }
         .alert("次のセットを開始しますか？", isPresented: $showsNextSetConfirmation) {
             Button("終了する", role: .cancel) {
@@ -240,6 +264,26 @@ struct TimerView: View {
             if let fishAcquisition {
                 FishRewardView(result: fishAcquisition)
             }
+        }
+    }
+
+    private func handlePrimaryTimerAction() {
+        if viewModel.isRunning {
+            viewModel.pauseTimer()
+            return
+        }
+
+        let isInitialStudyStart = viewModel.isStudyTime &&
+            (viewModel.state == .idle || viewModel.state == .completed)
+        if isInitialStudyStart,
+           NotificationIntroductionSettings.shouldPresent(
+               for: viewModel.mode,
+               hasShown: hasShownNotificationIntroduction
+           ) {
+            hasShownNotificationIntroduction = true
+            showsNotificationIntroduction = true
+        } else {
+            viewModel.resumeTimer()
         }
     }
 

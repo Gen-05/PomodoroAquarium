@@ -193,6 +193,12 @@ final class TimerViewModel {
         resumeTimer()
     }
 
+    /// 許可ダイアログの完了後などに、現在の終了予定時刻へ通知を合わせ直す。
+    func rescheduleCurrentSessionNotification() {
+        guard isRunning else { return }
+        scheduleCurrentSessionNotificationIfNeeded()
+    }
+
     @discardableResult
     func endCurrentStudySession() -> Bool {
         guard isStudyTime else { return false }
@@ -416,7 +422,9 @@ final class TimerViewModel {
     }
 
     private func scheduleCurrentSessionNotificationIfNeeded() {
-        guard mode != .stopwatch, let endDate else { return }
+        guard notificationService.notificationsEnabled,
+              mode != .stopwatch,
+              let endDate else { return }
         if isStudyTime {
             notificationService.scheduleStudyEnd(at: endDate)
         } else {

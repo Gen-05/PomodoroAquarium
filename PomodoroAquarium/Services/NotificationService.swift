@@ -2,10 +2,55 @@ import Foundation
 import UserNotifications
 
 protocol TimerNotificationScheduling {
-    func requestAuthorizationIfNeeded()
+    var notificationsEnabled: Bool { get }
+    func authorizationStatus(_ completion: @escaping @Sendable (NotificationAuthorizationState) -> Void)
+    func requestAuthorization(_ completion: @escaping @Sendable (Bool) -> Void)
     func scheduleStudyEnd(at date: Date)
     func scheduleBreakEnd(at date: Date)
     func cancelCurrentSessionNotification()
+}
+
+enum NotificationSettings {
+    static let enabledKey = "notificationsEnabled"
+
+    static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: enabledKey)
+    }
+
+    static func handleChange(
+        isEnabled: Bool,
+        notificationService: TimerNotificationScheduling = NotificationService.shared
+    ) {
+        guard !isEnabled else { return }
+        notificationService.cancelCurrentSessionNotification()
+    }
+}
+
+enum NotificationAuthorizationState: Equatable {
+    case notDetermined
+    case authorized
+    case denied
+
+    init(_ status: UNAuthorizationStatus) {
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            self = .authorized
+        case .denied:
+            self = .denied
+        case .notDetermined:
+            self = .notDetermined
+        @unknown default:
+            self = .denied
+        }
+    }
+}
+
+enum NotificationIntroductionSettings {
+    static let hasShownKey = "hasShownNotificationIntroduction"
+
+    static func shouldPresent(for mode: TimerMode, hasShown: Bool) -> Bool {
+        !hasShown && mode != .stopwatch
+    }
 }
 
 final class NotificationService: TimerNotificationScheduling, @unchecked Sendable {
@@ -27,13 +72,41 @@ final class NotificationService: TimerNotificationScheduling, @unchecked Sendabl
     }
 
     private let center: UNUserNotificationCenter
+    private let defaults: UserDefaults
 
-    init(center: UNUserNotificationCenter = .current()) {
-        self.center = center
+    var notificationsEnabled: Bool {
+        NotificationSettings.isEnabled(in: defaults)
     }
 
-    func requestAuthorizationIfNeeded() {
-        withAuthorization { _ in }
+    init(
+        center: UNUserNotificationCenter = .current(),
+        defaults: UserDefaults = .standard
+    ) {
+        self.center = center
+        self.defaults = defaults
+    }
+
+    func authorizationStatus(
+        _ completion: @escaping @Sendable (NotificationAuthorizationState) -> Void
+    ) {
+        center.getNotificationSettings { settings in
+            completion(NotificationAuthorizationState(settings.authorizationStatus))
+        }
+    }
+
+    func requestAuthorization(_ completion: @escaping @Sendable (Bool) -> Void) {
+        center.getNotificationSettings { [center] settings in
+            switch NotificationAuthorizationState(settings.authorizationStatus) {
+            case .authorized:
+                completion(true)
+            case .denied:
+                completion(false)
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                    completion(granted)
+                }
+            }
+        }
     }
 
     func scheduleStudyEnd(at date: Date) {
@@ -61,10 +134,10 @@ final class NotificationService: TimerNotificationScheduling, @unchecked Sendabl
 
     private func schedule(identifier: String, title: String, body: String, at date: Date) {
         cancelCurrentSessionNotification()
-        guard date > Date() else { return }
+        guard notificationsEnabled, date > Date() else { return }
 
-        withAuthorization { [center] isAuthorized in
-            guard isAuthorized else { return }
+        authorizationStatus { [center] status in
+            guard case .authorized = status else { return }
 
             let content = UNMutableNotificationContent()
             content.title = title
@@ -86,28 +159,19 @@ final class NotificationService: TimerNotificationScheduling, @unchecked Sendabl
         }
     }
 
-    private func withAuthorization(_ completion: @escaping @Sendable (Bool) -> Void) {
-        center.getNotificationSettings { [center] settings in
-            switch settings.authorizationStatus {
-            case .authorized, .provisional, .ephemeral:
-                completion(true)
-            case .notDetermined:
-                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-                    completion(granted)
-                }
-            case .denied:
-                completion(false)
-            @unknown default:
-                completion(false)
-            }
-        }
-    }
 }
 
 private final class DisabledTimerNotificationService: TimerNotificationScheduling {
     static let shared = DisabledTimerNotificationService()
 
-    func requestAuthorizationIfNeeded() {}
+    var notificationsEnabled: Bool { false }
+
+    func authorizationStatus(_ completion: @escaping @Sendable (NotificationAuthorizationState) -> Void) {
+        completion(.denied)
+    }
+    func requestAuthorization(_ completion: @escaping @Sendable (Bool) -> Void) {
+        completion(false)
+    }
     func scheduleStudyEnd(at date: Date) {}
     func scheduleBreakEnd(at date: Date) {}
     func cancelCurrentSessionNotification() {}
