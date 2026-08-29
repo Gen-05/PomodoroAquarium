@@ -91,11 +91,7 @@ struct FishRewardView: View {
             withAnimation(.spring(response: 0.55, dampingFraction: 0.72)) {
                 isRevealed = true
             }
-            if result.isNewFish {
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-            } else {
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            }
+            AppFeedbackService.shared.playFishAcquisition(isNewFish: result.isNewFish)
         }
     }
 

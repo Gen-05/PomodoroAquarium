@@ -11,11 +11,47 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @State private var notificationStatus: NotificationAuthorizationState = .notDetermined
     @AppStorage(NotificationSettings.enabledKey) private var notificationsEnabled = false
+    @AppStorage(AppPreferenceSettings.soundEnabledKey) private var soundEnabled = true
+    @AppStorage(AppPreferenceSettings.soundEffectsVolumeKey) private var soundEffectsVolume = 1.0
+    @AppStorage(AppPreferenceSettings.hapticsEnabledKey) private var hapticsEnabled = true
+    @AppStorage(AppPreferenceSettings.hapticsIntensityKey) private var hapticsIntensity = 1.0
 
     var body: some View {
         Form {
             Section("通知") {
                 notificationSettingsContent
+            }
+
+            Section("サウンド") {
+                Toggle("効果音", isOn: $soundEnabled)
+                settingSlider(
+                    title: "音量",
+                    systemImage: "speaker.wave.2.fill",
+                    value: $soundEffectsVolume,
+                    isEnabled: soundEnabled,
+                    onEditingEnded: {
+                        AppFeedbackService.shared.playSoundPreview()
+                    }
+                )
+            }
+
+            Section("触覚") {
+                Toggle("触覚フィードバック", isOn: $hapticsEnabled)
+                settingSlider(
+                    title: "強さ",
+                    systemImage: "waveform",
+                    value: $hapticsIntensity,
+                    isEnabled: hapticsEnabled,
+                    onEditingEnded: {
+                        AppFeedbackService.shared.playHapticPreview()
+                    }
+                )
+            }
+
+            Section("アプリ情報") {
+                LabeledContent("バージョン", value: AppInformation.version())
+                appLinkRow("プライバシーポリシー", url: AppLinks.privacyPolicy)
+                appLinkRow("利用規約", url: AppLinks.termsOfService)
             }
         }
         .navigationTitle("設定")
@@ -27,6 +63,60 @@ struct SettingsView: View {
         }
         .onChange(of: notificationsEnabled) { _, isEnabled in
             NotificationSettings.handleChange(isEnabled: isEnabled)
+        }
+        .onChange(of: soundEnabled) { _, isEnabled in
+            if isEnabled {
+                AppFeedbackService.shared.playSoundPreview()
+            }
+        }
+        .onChange(of: hapticsEnabled) { _, isEnabled in
+            if isEnabled {
+                AppFeedbackService.shared.playHapticPreview()
+            }
+        }
+    }
+
+    private func settingSlider(
+        title: String,
+        systemImage: String,
+        value: Binding<Double>,
+        isEnabled: Bool,
+        onEditingEnded: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("\(Int((value.wrappedValue * 100).rounded()))%")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            HStack {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.secondary)
+                Slider(value: value, in: 0...1) { isEditing in
+                    if !isEditing && isEnabled {
+                        onEditingEnded()
+                    }
+                }
+            }
+        }
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.45)
+    }
+
+    @ViewBuilder
+    private func appLinkRow(_ title: String, url: URL?) -> some View {
+        if let url {
+            Link(title, destination: url)
+        } else {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("準備中")
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
         }
     }
 

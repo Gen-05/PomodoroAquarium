@@ -1,6 +1,4 @@
-import AudioToolbox
 import SwiftUI
-import UIKit
 
 struct StudyFinishedView: View {
     let studyMinutes: Int
@@ -70,8 +68,7 @@ struct StudyFinishedView: View {
     }
 
     private func playCompletionFeedback() {
-        AudioServicesPlaySystemSound(1005)
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        AppFeedbackService.shared.playStudyCompletion()
     }
 }
 

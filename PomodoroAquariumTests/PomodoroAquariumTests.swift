@@ -104,6 +104,118 @@ struct PomodoroAquariumTests {
         #expect(NotificationSettings.isEnabled(in: UserDefaults(suiteName: suiteName)!))
     }
 
+    @Test func soundAndHapticsSettingsDefaultOnAndPersist() {
+        let suiteName = "PomodoroAquariumTests.feedback.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+
+        #expect(AppPreferenceSettings.isSoundEnabled(in: defaults))
+        #expect(AppPreferenceSettings.soundEffectsVolume(in: defaults) == 1)
+        #expect(AppPreferenceSettings.isHapticsEnabled(in: defaults))
+        #expect(AppPreferenceSettings.hapticsIntensity(in: defaults) == 1)
+
+        defaults.set(false, forKey: AppPreferenceSettings.soundEnabledKey)
+        defaults.set(0.42, forKey: AppPreferenceSettings.soundEffectsVolumeKey)
+        defaults.set(false, forKey: AppPreferenceSettings.hapticsEnabledKey)
+        defaults.set(0.28, forKey: AppPreferenceSettings.hapticsIntensityKey)
+        let reloaded = UserDefaults(suiteName: suiteName)!
+        #expect(!AppPreferenceSettings.isSoundEnabled(in: reloaded))
+        #expect(AppPreferenceSettings.soundEffectsVolume(in: reloaded) == 0.42)
+        #expect(!AppPreferenceSettings.isHapticsEnabled(in: reloaded))
+        #expect(AppPreferenceSettings.hapticsIntensity(in: reloaded) == 0.28)
+    }
+
+    @Test func disabledSoundAndHapticsSuppressExistingFeedback() {
+        let defaults = makeTimerDefaults()
+        defaults.set(false, forKey: AppPreferenceSettings.soundEnabledKey)
+        defaults.set(false, forKey: AppPreferenceSettings.hapticsEnabledKey)
+        let performer = TestFeedbackPerformer()
+        let service = AppFeedbackService(defaults: defaults, performer: performer)
+
+        service.playStudyCompletion()
+        service.playFishAcquisition(isNewFish: true)
+        service.playFishAcquisition(isNewFish: false)
+
+        #expect(performer.completionSoundCount == 0)
+        #expect(performer.successHapticCount == 0)
+        #expect(performer.impactHapticCount == 0)
+    }
+
+    @Test func enabledSoundAndHapticsPlayExistingFeedback() {
+        let defaults = makeTimerDefaults()
+        let performer = TestFeedbackPerformer()
+        let service = AppFeedbackService(defaults: defaults, performer: performer)
+
+        service.playStudyCompletion()
+        service.playFishAcquisition(isNewFish: true)
+        service.playFishAcquisition(isNewFish: false)
+
+        #expect(performer.completionSoundCount == 1)
+        #expect(performer.successHapticCount == 2)
+        #expect(performer.impactHapticCount == 1)
+    }
+
+    @Test func feedbackAppliesStoredSoundVolumeAndHapticIntensity() {
+        let defaults = makeTimerDefaults()
+        defaults.set(0.36, forKey: AppPreferenceSettings.soundEffectsVolumeKey)
+        defaults.set(0.52, forKey: AppPreferenceSettings.hapticsIntensityKey)
+        let performer = TestFeedbackPerformer()
+        let service = AppFeedbackService(defaults: defaults, performer: performer)
+
+        service.playStudyCompletion()
+        service.playFishAcquisition(isNewFish: false)
+
+        #expect(abs((performer.lastSoundVolume ?? 0) - 0.36) < 0.001)
+        #expect(performer.lastSuccessHapticLevel == .medium)
+        #expect(performer.lastImpactHapticLevel == .medium)
+    }
+
+    @Test func togglingFeedbackDoesNotEraseStoredVolumeOrIntensity() {
+        let defaults = makeTimerDefaults()
+        defaults.set(0.73, forKey: AppPreferenceSettings.soundEffectsVolumeKey)
+        defaults.set(0.31, forKey: AppPreferenceSettings.hapticsIntensityKey)
+        defaults.set(false, forKey: AppPreferenceSettings.soundEnabledKey)
+        defaults.set(false, forKey: AppPreferenceSettings.hapticsEnabledKey)
+        defaults.set(true, forKey: AppPreferenceSettings.soundEnabledKey)
+        defaults.set(true, forKey: AppPreferenceSettings.hapticsEnabledKey)
+
+        #expect(AppPreferenceSettings.soundEffectsVolume(in: defaults) == 0.73)
+        #expect(AppPreferenceSettings.hapticsIntensity(in: defaults) == 0.31)
+    }
+
+    @Test func feedbackPreviewsUseSavedVolumeAndIntensityOncePerCall() {
+        let defaults = makeTimerDefaults()
+        defaults.set(0.64, forKey: AppPreferenceSettings.soundEffectsVolumeKey)
+        defaults.set(0.82, forKey: AppPreferenceSettings.hapticsIntensityKey)
+        let performer = TestFeedbackPerformer()
+        let service = AppFeedbackService(defaults: defaults, performer: performer)
+
+        service.playSoundPreview()
+        service.playHapticPreview()
+
+        #expect(performer.completionSoundCount == 1)
+        #expect(abs((performer.lastSoundVolume ?? 0) - 0.64) < 0.001)
+        #expect(performer.impactHapticCount == 1)
+        #expect(performer.lastImpactHapticLevel == .strong)
+    }
+
+    @Test func disabledFeedbackDoesNotPlaySettingsPreviews() {
+        let defaults = makeTimerDefaults()
+        defaults.set(false, forKey: AppPreferenceSettings.soundEnabledKey)
+        defaults.set(false, forKey: AppPreferenceSettings.hapticsEnabledKey)
+        let performer = TestFeedbackPerformer()
+        let service = AppFeedbackService(defaults: defaults, performer: performer)
+
+        service.playSoundPreview()
+        service.playHapticPreview()
+
+        #expect(performer.completionSoundCount == 0)
+        #expect(performer.impactHapticCount == 0)
+    }
+
+    @Test func appVersionIsReadFromTheApplicationBundle() {
+        #expect(!AppInformation.version().isEmpty)
+    }
+
     @Test func authorizedSystemNotificationsStillRequireInAppSetting() {
         let clock = TestClock()
         let notifications = TestNotificationService()
@@ -2394,6 +2506,28 @@ private final class TestNotificationService: TimerNotificationScheduling {
     func cancelCurrentSessionNotification() {
         cancellationCount += 1
         scheduled = nil
+    }
+}
+
+private final class TestFeedbackPerformer: FeedbackPerforming {
+    private(set) var completionSoundCount = 0
+    private(set) var successHapticCount = 0
+    private(set) var impactHapticCount = 0
+    private(set) var lastSoundVolume: Float?
+    private(set) var lastSuccessHapticLevel: HapticIntensityLevel?
+    private(set) var lastImpactHapticLevel: HapticIntensityLevel?
+
+    func playCompletionSound(volume: Float) {
+        completionSoundCount += 1
+        lastSoundVolume = volume
+    }
+    func playSuccessHaptic(level: HapticIntensityLevel) {
+        successHapticCount += 1
+        lastSuccessHapticLevel = level
+    }
+    func playImpactHaptic(level: HapticIntensityLevel) {
+        impactHapticCount += 1
+        lastImpactHapticLevel = level
     }
 }
 
