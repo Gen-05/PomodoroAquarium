@@ -11,6 +11,18 @@ import Testing
 @testable import PomodoroAquarium
 
 struct PomodoroAquariumTests {
+    @Test func clownfishUsesOfficialSideImageAndDefaultDisplayScale() {
+        #expect(FishSpecies.clownfish.imageName == "fish_clownfish_side")
+        #expect(FishSpecies.clownfish.displayScale == 1)
+    }
+
+    @Test func fishWithoutOfficialArtworkUsesFallbackContract() {
+        #expect(FishSpecies.pufferfish.imageName == nil)
+        #expect(FishSpecies.seahorse.imageName == nil)
+        #expect(FishSpecies.manta.imageName == nil)
+        #expect(FishSpecies.whaleShark.imageName == nil)
+    }
+
 
     @Test func pomodoroConfigurationUpdatesStudyAndBreakDurationsBeforeStart() {
         let clock = TestClock()
@@ -1556,6 +1568,166 @@ struct PomodoroAquariumTests {
         #expect(player.ownedFish.count == 3)
     }
 
+    @Test func jellyfishParticipatesAsACommonSpeciesWithOfficialArtwork() {
+        #expect(FishSpecies.allCases.contains(.jellyfish))
+        #expect(FishSpecies.jellyfish.rawValue == "jellyfish")
+        #expect(FishSpecies.jellyfish.name == "ミズクラゲ")
+        #expect(FishSpecies.jellyfish.rarity == .common)
+        #expect(FishSpecies.jellyfish.imageName == "fish_moon_jellyfish")
+        #expect(FishSpecies.jellyfish.swimmingImageNames == [
+            "fish_moon_jellyfish_1",
+            "fish_moon_jellyfish_2",
+            "fish_moon_jellyfish_3",
+            "fish_moon_jellyfish_4",
+            "fish_moon_jellyfish_5"
+        ])
+        #expect(FishSpecies.allCases.filter { $0.rarity == .common }.contains(.jellyfish))
+    }
+
+    @Test func jellyfishUsesTheSameFramesForEveryDirectionWithoutMirroring() {
+        let frames = FishSpecies.jellyfish.swimmingImageNames
+
+        for direction in FishFacingDirection.allCases {
+            #expect(FishSpecies.jellyfish.swimmingImageNames(for: direction) == frames)
+        }
+        #expect(FishSpecies.jellyfish.swimmingImageNames(
+            for: .sideToDiagonalUp15(isLeftFacing: true)
+        ) == frames)
+        #expect(FishSpecies.jellyfish.swimmingImageNames(
+            for: .sideToDiagonalDown15(isLeftFacing: true)
+        ) == frames)
+        #expect(!FishSpecies.jellyfish.usesDirectionalSwimmingSprites)
+        #expect(FishSpecies.clownfish.usesDirectionalSwimmingSprites)
+    }
+
+    @Test func renamedMoonJellyfishKeepsExistingStoredSpeciesValue() throws {
+        let storedValue = Data("\"jellyfish\"".utf8)
+        let decoded = try JSONDecoder().decode(FishSpecies.self, from: storedValue)
+
+        #expect(decoded == .jellyfish)
+        #expect(decoded.name == "ミズクラゲ")
+    }
+
+    @Test func jellyfishAnimationIsSlowerThanClownfishAndUsesPingPongOrder() {
+        let jellyfishDuration = AquariumFishMotion.spriteFrameDuration(
+            for: .jellyfish,
+            behavior: .cruising,
+            currentSpeed: 0.01,
+            baseSpeed: 0.01
+        )
+        let clownfishDuration = AquariumFishMotion.spriteFrameDuration(
+            for: .clownfish,
+            behavior: .cruising,
+            currentSpeed: 0.025,
+            baseSpeed: 0.025
+        )
+        let indices = (0...9).map { step in
+            FishSpriteAnimation.pingPongFrameIndex(
+                frameCount: 5,
+                elapsedTime: Double(step) * jellyfishDuration,
+                frameDuration: jellyfishDuration
+            )
+        }
+
+        #expect(jellyfishDuration == 0.30)
+        #expect(jellyfishDuration > clownfishDuration)
+        #expect(indices == [0, 1, 2, 3, 4, 3, 2, 1, 0, 1])
+    }
+
+    @Test @MainActor func jellyfishAcquisitionSupportsFirstAndDuplicateCounts() throws {
+        let player = Player()
+        let firstResult = try #require(FishAcquisitionResult.capture(for: player) {
+            let fish = PlayerFish(species: .jellyfish)
+            player.ownedFish.append(fish)
+            return fish
+        })
+
+        #expect(firstResult.isNewFish)
+        #expect(firstResult.previousOwnedCount == 0)
+        #expect(firstResult.currentOwnedCount == 1)
+        #expect(BookView.ownedCount(for: .jellyfish, in: player) == 1)
+
+        let duplicateResult = try #require(FishAcquisitionResult.capture(for: player) {
+            let fish = PlayerFish(species: .jellyfish)
+            player.ownedFish.append(fish)
+            return fish
+        })
+
+        #expect(!duplicateResult.isNewFish)
+        #expect(duplicateResult.previousOwnedCount == 1)
+        #expect(duplicateResult.currentOwnedCount == 2)
+        #expect(BookView.ownedCount(for: .jellyfish, in: player) == 2)
+    }
+
+    @Test func jellyfishCanUseExistingFavoriteAndDriftingMovementSystems() {
+        let jellyfish = PlayerFish(species: .jellyfish)
+        let player = Player(ownedFish: [jellyfish])
+
+        #expect(BookView.setFavorite(.jellyfish, for: player))
+        #expect(player.favoriteFish?.id == jellyfish.id)
+        #expect(AquariumFishMotion.movementProfile(for: .jellyfish).baseSpeedRange
+            == FishMovementProfile.jellyfish.baseSpeedRange)
+    }
+
+    @Test func jellyfishProfileIsSlowVerticalAndBurstFree() {
+        let jellyfish = FishMovementProfile.jellyfish
+        let clownfish = FishMovementProfile.clownfish
+
+        #expect(jellyfish.baseSpeedRange.upperBound
+            < clownfish.baseSpeedRange.lowerBound)
+        #expect(jellyfish.wanderingRadiusY.lowerBound
+            > jellyfish.wanderingRadiusX.lowerBound)
+        #expect(jellyfish.wanderingRadiusY.upperBound
+            > jellyfish.wanderingRadiusX.upperBound)
+        #expect(jellyfish.directionHoldDurationRange == 5.0...10.0)
+        #expect(jellyfish.hoverProbability == 0.55)
+        #expect(jellyfish.hoverDurationRange == 2.0...5.0)
+        #expect(jellyfish.burstProbability == 0)
+        #expect(jellyfish.steeringNoiseMultiplier == 0.30)
+        #expect(jellyfish.swimPhaseSpeedMultiplier == 0.55)
+        #expect(jellyfish.depthScaleRange == 1.0...1.0)
+    }
+
+    @Test func jellyfishNeverTransitionsIntoBurst() {
+        let id = UUID(uuid: (22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7))
+        var motion = AquariumFishMotion.initialState(for: id, profile: .jellyfish)
+
+        for frame in 1...1_800 {
+            motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: Double(frame) / 30)
+            #expect(motion.behavior != .burst)
+        }
+    }
+
+    @Test func jellyfishHoveringDriftsWithoutStoppingCompletely() {
+        let id = UUID(uuid: (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22))
+        var motion = AquariumFishMotion.initialState(for: id, profile: .jellyfish)
+        motion.position = CGPoint(x: 0.5, y: 0.4)
+        motion.anchorPosition = motion.position
+        motion.localTarget = motion.position
+        motion.behavior = .hovering
+        motion.behaviorTimeRemaining = 5
+        motion.currentSpeed = motion.baseSpeed * 0.12
+        motion.targetSpeed = motion.baseSpeed * 0.12
+        let initialPosition = motion.position
+
+        for frame in 1...90 {
+            motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: Double(frame) / 30)
+        }
+
+        #expect(motion.position != initialPosition)
+        #expect(hypot(motion.position.x - 0.5, motion.position.y - 0.4)
+            < motion.hoverRadius * 1.4)
+    }
+
+    @Test func existingNonJellyfishSpeciesKeepTheirCurrentMovementProfile() {
+        let clownfish = FishMovementProfile.clownfish
+
+        #expect(AquariumFishMotion.movementProfile(for: .clownfish).baseSpeedRange
+            == clownfish.baseSpeedRange)
+        #expect(AquariumFishMotion.movementProfile(for: .seahorse).baseSpeedRange
+            == clownfish.baseSpeedRange)
+    }
+
     @Test func playerCanOwnMultipleFishOfTheSameSpecies() {
         let firstClownfish = PlayerFish(species: .clownfish)
         let secondClownfish = PlayerFish(species: .clownfish)
@@ -1665,11 +1837,12 @@ struct PomodoroAquariumTests {
         let id = UUID(uuid: (1, 2, 3, 4, 255, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16))
         var motion = AquariumFishMotion.initialState(for: id)
         motion.position = CGPoint(x: 0.5, y: 0.4)
-        motion.behavior = .cruising
+        motion.behavior = .turning
         motion.behaviorTimeRemaining = 100
         motion.facingSign = -1
-        motion.pendingFacingSign = -1
-        motion.velocity = CGVector(dx: -motion.baseSpeed, dy: 0)
+        motion.facingDirection = .right
+        motion.pendingFacingDirection = .right
+        motion.velocity = CGVector(dx: motion.baseSpeed, dy: 0)
         motion.desiredDirection = CGVector(dx: -1, dy: 0)
         motion.currentSpeed = motion.baseSpeed
         motion.targetSpeed = motion.baseSpeed
@@ -1678,19 +1851,210 @@ struct PomodoroAquariumTests {
         motion.advance(deltaTime: 0.1, elapsedTime: 1)
         #expect(motion.facingSign == -1)
         #expect(motion.facingWidth == 1)
+        #expect(motion.facingDirection == .right)
 
-        for step in 2...10 {
+        var intermediateDirections: [FishFacingDirection] = []
+        for step in 2...45 {
             motion.advance(deltaTime: 0.1, elapsedTime: Double(step))
+            intermediateDirections.append(motion.facingDirection)
         }
-        #expect(motion.visualTurnTargetSign == 1)
-        #expect(motion.facingWidth < 1)
-        #expect(motion.facingWidth >= 0.55)
+        #expect(intermediateDirections.contains(.upRight) || intermediateDirections.contains(.downRight))
+        #expect(intermediateDirections.contains(.up) || intermediateDirections.contains(.down))
+        #expect(motion.facingDirection != .right)
+    }
+
+    @Test func fishFacingQuantizesMovementIntoEightDirections() {
+        #expect(FishFacingDirection.quantized(velocity: CGVector(dx: 1, dy: 0)) == .right)
+        #expect(FishFacingDirection.quantized(velocity: CGVector(dx: 1, dy: -1)) == .upRight)
+        #expect(FishFacingDirection.quantized(velocity: CGVector(dx: 0, dy: -1)) == .up)
+        #expect(FishFacingDirection.quantized(velocity: CGVector(dx: -1, dy: -1)) == .upLeft)
+        #expect(FishFacingDirection.quantized(velocity: CGVector(dx: -1, dy: 0)) == .left)
+        #expect(FishFacingDirection.quantized(velocity: CGVector(dx: -1, dy: 1)) == .downLeft)
+        #expect(FishFacingDirection.quantized(velocity: CGVector(dx: 0, dy: 1)) == .down)
+        #expect(FishFacingDirection.quantized(velocity: CGVector(dx: 1, dy: 1)) == .downRight)
+    }
+
+    @Test func depthDominantMovementDoesNotSelectFrontFacing() {
+        let direction = FishFacingDirection.quantized(
+            velocity: CGVector(dx: 0.001, dy: 0.001),
+            depthVelocity: 0.02,
+            frontPlanarSpeedThreshold: 0.01
+        )
+        #expect(direction != .front)
+        #expect(direction == .downRight)
+    }
+
+    @Test func facingDirectionUsesAnAngularDeadBandNearSectorBoundaries() {
+        let nearBoundary = CGFloat(28) * .pi / 180
+        let beyondDeadBand = CGFloat(40) * .pi / 180
+
+        #expect(FishFacingDirection.quantized(
+            velocity: CGVector(dx: cos(nearBoundary), dy: sin(nearBoundary)),
+            depthVelocity: 0,
+            frontPlanarSpeedThreshold: 0,
+            retaining: .right
+        ) == .right)
+        #expect(FishFacingDirection.quantized(
+            velocity: CGVector(dx: cos(beyondDeadBand), dy: sin(beyondDeadBand)),
+            depthVelocity: 0,
+            frontPlanarSpeedThreshold: 0,
+            retaining: .right
+        ) == .downRight)
+    }
+
+    @Test func frontSpriteFallsBackToSideFramesWhileFrontDisplayIsDisabled() {
+        #expect(FishSpecies.clownfish.swimmingImageNames(for: .front) == [
+            "fish_clownfish_side_1",
+            "fish_clownfish_side_2",
+            "fish_clownfish_side_3"
+        ])
+    }
+
+    @Test func directionScaleNormalizesClownfishAssetFootprints() {
+        for direction in FishFacingDirection.allCases {
+            #expect(direction.directionScale == 1)
+        }
+    }
+
+    @Test func sideToDiagonalUpUsesIntermediateSpriteBeforeTarget() {
+        var transition = FishSpriteDirectionTransition(direction: .right)
+
+        transition.update(toward: .upRight, deltaTime: 1.0 / 30.0)
+        #expect(transition.pose == .sideToDiagonalUp15(isLeftFacing: false))
+        #expect(transition.targetDirection == .upRight)
+
+        transition.update(toward: .right, deltaTime: 0.08)
+        #expect(transition.pose == .sideToDiagonalUp15(isLeftFacing: false))
+        transition.update(toward: .right, deltaTime: 0.10)
+        #expect(transition.pose == .facing(.upRight))
+    }
+
+    @Test func diagonalUpToSideUsesTheSameIntermediateSprite() {
+        var transition = FishSpriteDirectionTransition(direction: .upRight)
+
+        transition.update(toward: .right, deltaTime: 1.0 / 30.0)
+        #expect(transition.pose == .sideToDiagonalUp15(isLeftFacing: false))
+        transition.update(
+            toward: .upRight,
+            deltaTime: FishSpriteDirectionTransition.intermediateDuration
+        )
+        #expect(transition.pose == .facing(.right))
+    }
+
+    @Test func leftTurnReusesTheIntermediateSpriteWithHorizontalFlip() {
+        var transition = FishSpriteDirectionTransition(direction: .left)
+
+        transition.update(toward: .upLeft, deltaTime: 1.0 / 30.0)
+        #expect(transition.pose == .sideToDiagonalUp15(isLeftFacing: true))
+        #expect(FishSpriteDirectionTransition.intermediatePose(from: .upLeft, to: .left)
+            == .sideToDiagonalUp15(isLeftFacing: true))
+    }
+
+    @Test func clownfishIntermediatePoseUsesExistingPingPongFrames() {
+        #expect(FishSpecies.clownfish.swimmingImageNames(
+            for: .sideToDiagonalUp15(isLeftFacing: false)
+        ) == [
+            "fish_clownfish_side_to_diagonal_up_15_1",
+            "fish_clownfish_side_to_diagonal_up_15_2",
+            "fish_clownfish_side_to_diagonal_up_15_3"
+        ])
+        #expect(!FishSpecies.clownfish.swimmingImageNames(
+            for: .sideToDiagonalUp15(isLeftFacing: false)
+        ).contains(where: { $0.contains("_30_") }))
+    }
+
+    @Test func sideToDiagonalDownUsesIntermediateSpriteBeforeTarget() {
+        var transition = FishSpriteDirectionTransition(direction: .right)
+
+        transition.update(toward: .downRight, deltaTime: 1.0 / 30.0)
+        #expect(transition.pose == .sideToDiagonalDown15(isLeftFacing: false))
+        #expect(transition.targetDirection == .downRight)
+
+        transition.update(toward: .right, deltaTime: 0.08)
+        #expect(transition.pose == .sideToDiagonalDown15(isLeftFacing: false))
+        transition.update(toward: .right, deltaTime: 0.10)
+        #expect(transition.pose == .facing(.downRight))
+    }
+
+    @Test func diagonalDownToSideUsesTheSameIntermediateSprite() {
+        var transition = FishSpriteDirectionTransition(direction: .downRight)
+
+        transition.update(toward: .right, deltaTime: 1.0 / 30.0)
+        #expect(transition.pose == .sideToDiagonalDown15(isLeftFacing: false))
+        transition.update(
+            toward: .downRight,
+            deltaTime: FishSpriteDirectionTransition.intermediateDuration
+        )
+        #expect(transition.pose == .facing(.right))
+    }
+
+    @Test func leftDownTurnReusesTheIntermediateSpriteWithHorizontalFlip() {
+        var transition = FishSpriteDirectionTransition(direction: .left)
+
+        transition.update(toward: .downLeft, deltaTime: 1.0 / 30.0)
+        #expect(transition.pose == .sideToDiagonalDown15(isLeftFacing: true))
+        #expect(FishSpriteDirectionTransition.intermediatePose(from: .downLeft, to: .left)
+            == .sideToDiagonalDown15(isLeftFacing: true))
+    }
+
+    @Test func clownfishDownIntermediatePoseUsesExistingPingPongFrames() {
+        #expect(FishSpecies.clownfish.swimmingImageNames(
+            for: .sideToDiagonalDown15(isLeftFacing: false)
+        ) == [
+            "fish_clownfish_side_to_diagonal_down_15_1",
+            "fish_clownfish_side_to_diagonal_down_15_2",
+            "fish_clownfish_side_to_diagonal_down_15_3"
+        ])
+    }
+
+    @Test func fishPositionKeepsUpdatingDuringIntermediateSpriteTransition() {
+        let id = UUID(uuid: (13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 14, 15, 16))
+        var motion = AquariumFishMotion.initialState(for: id)
+        motion.position = CGPoint(x: 0.5, y: 0.4)
+        motion.behavior = .burst
+        motion.behaviorTimeRemaining = 10
+        motion.directionChangeTimeRemaining = 10
+        motion.velocity = CGVector(dx: motion.baseSpeed, dy: 0)
+        motion.desiredDirection = CGVector(dx: 1, dy: 0)
+        motion.currentSpeed = motion.baseSpeed
+        motion.targetSpeed = motion.baseSpeed
+        var transition = FishSpriteDirectionTransition(direction: .right)
+        transition.update(toward: .upRight, deltaTime: 0)
+        let initialPosition = motion.position
+
+        for frame in 1...5 {
+            motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: Double(frame) / 30)
+            transition.update(toward: .upRight, deltaTime: 1.0 / 30.0)
+        }
+
+        #expect(transition.isTransitioning)
+        #expect(motion.position != initialPosition)
+    }
+
+    @Test func turningReducesPresentationMotionWithoutStoppingPositionUpdates() {
+        let id = UUID(uuid: (19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4))
+        var motion = AquariumFishMotion.initialState(for: id)
+        motion.position = CGPoint(x: 0.5, y: 0.4)
+        motion.behavior = .turning
+        motion.behaviorTimeRemaining = 10
+        motion.directionChangeTimeRemaining = 10
+        motion.depthChangeTimeRemaining = 10
+        motion.presentationMotionIntensity = 1
+        motion.desiredDirection = CGVector(dx: -1, dy: 0)
+        let initialPosition = motion.position
+
+        for step in 1...20 {
+            motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: Double(step) / 30)
+        }
+
+        #expect(motion.presentationMotionIntensity < 0.8)
+        #expect(motion.position != initialPosition)
     }
 
     @Test func fishDartAlwaysTransitionsIntoBraking() {
         let id = UUID(uuid: (31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46))
         var motion = AquariumFishMotion.initialState(for: id)
-        motion.behavior = .darting
+        motion.behavior = .burst
         motion.behaviorTimeRemaining = 0
 
         motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
@@ -1702,7 +2066,7 @@ struct PomodoroAquariumTests {
     @Test func fishDartAndBrakeChangeSpeedThroughAcceleration() {
         let id = UUID(uuid: (51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66))
         var motion = AquariumFishMotion.initialState(for: id)
-        motion.behavior = .darting
+        motion.behavior = .burst
         motion.behaviorTimeRemaining = 10
         motion.targetSpeed = motion.baseSpeed * 2.5
         motion.currentSpeed = motion.baseSpeed
@@ -1713,6 +2077,277 @@ struct PomodoroAquariumTests {
         #expect(motion.currentSpeed > initialSpeed)
         #expect(motion.currentSpeed < motion.targetSpeed)
         #expect(motion.accelerationMagnitude > 0)
+    }
+
+    @Test func clownfishProfileCreatesIndividualMovementTraits() {
+        let first = AquariumFishMotion.initialState(
+            for: UUID(uuid: (1, 2, 3, 4, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110)),
+            profile: .clownfish
+        )
+        let second = AquariumFishMotion.initialState(
+            for: UUID(uuid: (2, 3, 4, 5, 6, 200, 180, 160, 140, 120, 100, 80, 60, 40, 20, 10)),
+            profile: .clownfish
+        )
+
+        #expect(first.baseSpeed != second.baseSpeed)
+        #expect(first.turnResponsiveness != second.turnResponsiveness)
+        #expect(first.wanderingRadiusX != second.wanderingRadiusX)
+    }
+
+    @Test func clownfishProfileKeepsDirectionLongerAndDefinesOccasionalBurst() {
+        let profile = FishMovementProfile.clownfish
+
+        #expect(profile.directionHoldDurationRange == 4.0...8.0)
+        #expect(profile.wanderingRadiusX == 0.16...0.35)
+        #expect(profile.wanderingRadiusY == 0.13...0.30)
+        #expect(profile.burstSpeedMultiplierRange == 1.8...2.6)
+        #expect(profile.burstDurationRange == 0.4...0.9)
+        #expect(profile.burstCooldownRange == 8.0...20.0)
+    }
+
+    @Test func burstKeepsItsCourseUntilBraking() {
+        let id = UUID(uuid: (14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 15, 16))
+        var motion = AquariumFishMotion.initialState(for: id)
+        motion.behavior = .burst
+        motion.behaviorTimeRemaining = 1
+        motion.directionChangeTimeRemaining = 0
+        motion.depthChangeTimeRemaining = 10
+        motion.position = CGPoint(x: 0.5, y: 0.4)
+        motion.desiredDirection = CGVector(dx: 0.9, dy: 0.1)
+        let initialDirection = motion.desiredDirection
+
+        for frame in 1...10 {
+            motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: Double(frame) / 30)
+        }
+
+        #expect(motion.behavior == .burst)
+        #expect(motion.desiredDirection == initialDirection)
+    }
+
+    @Test func hoveringKeepsFishNearItsAnchorWithoutFullyStopping() {
+        let id = UUID(uuid: (8, 7, 6, 5, 4, 3, 2, 1, 9, 10, 11, 12, 13, 14, 15, 16))
+        var motion = AquariumFishMotion.initialState(for: id)
+        motion.position = CGPoint(x: 0.5, y: 0.4)
+        motion.anchorPosition = motion.position
+        motion.localTarget = motion.position
+        motion.behavior = .hovering
+        motion.behaviorTimeRemaining = 100
+        motion.currentSpeed = motion.baseSpeed * 0.12
+        motion.targetSpeed = motion.baseSpeed * 0.12
+
+        for frame in 1...150 {
+            motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: Double(frame) / 30)
+        }
+
+        #expect(hypot(motion.position.x - 0.5, motion.position.y - 0.4) < motion.hoverRadius * 1.4)
+        #expect(motion.currentSpeed > 0)
+    }
+
+    @Test func wanderingChoosesANearbyTargetInsteadOfAcrossTheAquarium() {
+        let id = UUID(uuid: (21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36))
+        var motion = AquariumFishMotion.initialState(for: id)
+        motion.position = CGPoint(x: 0.5, y: 0.4)
+        motion.behavior = .wandering
+        motion.chooseLocalTarget(neighborPositions: [], permitsGathering: false)
+
+        #expect(abs(motion.localTarget.x - motion.position.x) <= motion.wanderingRadiusX)
+        #expect(abs(motion.localTarget.y - motion.position.y) <= motion.wanderingRadiusY)
+    }
+
+    @Test func gatheringTargetUsesNeighborAreaWithSeparation() {
+        let gatheringProfile = FishMovementProfile(
+            baseSpeedRange: 0.02...0.03,
+            hoverProbability: 0.3,
+            burstProbability: 0.1,
+            gatheringProbability: 1,
+            wanderingRadiusX: 0.1...0.1,
+            wanderingRadiusY: 0.08...0.08,
+            turnResponsivenessRange: 0.8...0.8,
+            depthRange: 0.1...0.9,
+            depthScaleRange: 1...1,
+            depthOpacityRange: 0.75...1,
+            depthSpeedRange: 0.82...1.1,
+            depthChangeProbability: 0.5,
+            depthChangeResponse: 0.34,
+            directionHoldDurationRange: 2...5,
+            burstSpeedMultiplierRange: 1.8...2.6,
+            burstDurationRange: 0.4...0.9,
+            burstCooldownRange: 8...20,
+            hoverDurationRange: 1...5,
+            steeringNoiseMultiplier: 1,
+            verticalDirectionBias: 0.5,
+            accelerationResponseRange: 5.2...7.4,
+            brakingResponseRange: 3.2...5.0,
+            swimPhaseSpeedMultiplier: 1.0
+        )
+        var motion = AquariumFishMotion.initialState(for: UUID(), profile: gatheringProfile)
+        motion.position = CGPoint(x: 0.25, y: 0.25)
+        motion.behavior = .wandering
+        let neighbor = CGPoint(x: 0.55, y: 0.4)
+        motion.chooseLocalTarget(neighborPositions: [neighbor], permitsGathering: true)
+
+        #expect(abs(motion.localTarget.x - neighbor.x) >= 0.09)
+        #expect(abs(motion.localTarget.x - neighbor.x) <= 0.17)
+        #expect(abs(motion.localTarget.y - neighbor.y) <= motion.wanderingRadiusY)
+    }
+
+    @Test func fishIndividualsStartAtDifferentStableDepths() {
+        let firstID = UUID(uuid: (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 20, 16))
+        let secondID = UUID(uuid: (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 220, 16))
+        let first = AquariumFishMotion.initialState(for: firstID)
+        let firstAgain = AquariumFishMotion.initialState(for: firstID)
+        let second = AquariumFishMotion.initialState(for: secondID)
+
+        #expect(first.currentDepth == firstAgain.currentDepth)
+        #expect(first.currentDepth != second.currentDepth)
+        #expect((0...1).contains(first.currentDepth))
+        #expect((0...1).contains(second.currentDepth))
+    }
+
+    @Test func depthControlsScaleOpacityAndPerceivedSpeedWithoutBlur() {
+        let profile = FishMovementProfile.clownfish
+
+        #expect(profile.depthScale(at: 0) == 1)
+        #expect(profile.depthScale(at: 1) == 1)
+        #expect(profile.depthOpacity(at: 0) < profile.depthOpacity(at: 1))
+        #expect(profile.depthSpeedMultiplier(at: 0) < profile.depthSpeedMultiplier(at: 1))
+    }
+
+    @Test func clownfishDefinesFutureSwimmingSpriteFrameNames() {
+        #expect(FishSpecies.clownfish.swimmingImageNames == [
+            "fish_clownfish_side_1",
+            "fish_clownfish_side_2",
+            "fish_clownfish_side_3"
+        ])
+        #expect(FishSpecies.clownfish.swimmingImageNames(for: .upRight) == [
+            "fish_clownfish_diagonal_up_1",
+            "fish_clownfish_diagonal_up_2",
+            "fish_clownfish_diagonal_up_3"
+        ])
+        #expect(FishSpecies.clownfish.swimmingImageNames(for: .down) == [
+            "fish_clownfish_down_1",
+            "fish_clownfish_down_2",
+            "fish_clownfish_down_3"
+        ])
+        #expect(FishSpecies.pufferfish.swimmingImageNames.isEmpty)
+    }
+
+    @Test func spriteFramesPlayForwardAndBackward() {
+        let duration = 0.2
+        let indices = (0...4).map { step in
+            FishSpriteAnimation.pingPongFrameIndex(
+                frameCount: 3,
+                elapsedTime: Double(step) * duration,
+                frameDuration: duration
+            )
+        }
+
+        #expect(indices == [0, 1, 2, 1, 0])
+        #expect(FishSpriteAnimation.pingPongFrameIndex(
+            frameCount: 1,
+            elapsedTime: 10,
+            frameDuration: duration
+        ) == 0)
+    }
+
+    @Test func spriteFrameDurationFollowsFishBehavior() {
+        let baseSpeed: CGFloat = 0.03
+        let hover = AquariumFishMotion.spriteFrameDuration(
+            for: .hovering,
+            currentSpeed: baseSpeed * 0.1,
+            baseSpeed: baseSpeed
+        )
+        let wander = AquariumFishMotion.spriteFrameDuration(
+            for: .wandering,
+            currentSpeed: baseSpeed * 0.6,
+            baseSpeed: baseSpeed
+        )
+        let cruise = AquariumFishMotion.spriteFrameDuration(
+            for: .cruising,
+            currentSpeed: baseSpeed,
+            baseSpeed: baseSpeed
+        )
+        let burst = AquariumFishMotion.spriteFrameDuration(
+            for: .burst,
+            currentSpeed: baseSpeed * 2,
+            baseSpeed: baseSpeed
+        )
+        let turning = AquariumFishMotion.spriteFrameDuration(
+            for: .turning,
+            currentSpeed: baseSpeed * 0.4,
+            baseSpeed: baseSpeed
+        )
+
+        #expect(hover > wander)
+        #expect(wander > cruise)
+        #expect(cruise > burst)
+        #expect(turning > cruise)
+    }
+
+    @Test func fishIndividualsUseDifferentSpritePhaseAndTempo() {
+        let firstID = UUID(uuid: (1, 2, 3, 4, 5, 6, 10, 20, 9, 10, 11, 12, 13, 14, 15, 16))
+        let secondID = UUID(uuid: (1, 2, 3, 4, 5, 6, 210, 220, 9, 10, 11, 12, 13, 14, 15, 16))
+
+        #expect(AquariumFishMotion.spriteAnimationPhase(for: firstID)
+            != AquariumFishMotion.spriteAnimationPhase(for: secondID))
+        #expect(AquariumFishMotion.spriteTempoMultiplier(for: firstID)
+            != AquariumFishMotion.spriteTempoMultiplier(for: secondID))
+    }
+
+    @Test func depthApproachesTargetGraduallyWithoutJumping() {
+        let id = UUID(uuid: (41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56))
+        var motion = AquariumFishMotion.initialState(for: id)
+        motion.behavior = .wandering
+        motion.behaviorTimeRemaining = 100
+        motion.depthChangeTimeRemaining = 100
+        motion.currentDepth = 0.2
+        motion.targetDepth = 0.8
+
+        motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
+
+        #expect(motion.currentDepth > 0.2)
+        #expect(motion.currentDepth < 0.8)
+    }
+
+    @Test func hoveringChangesDepthLessThanWandering() {
+        let id = UUID(uuid: (61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76))
+        var hovering = AquariumFishMotion.initialState(for: id)
+        hovering.behavior = .hovering
+        hovering.behaviorTimeRemaining = 100
+        hovering.depthChangeTimeRemaining = 100
+        hovering.currentDepth = 0.2
+        hovering.targetDepth = 0.8
+        var wandering = hovering
+        wandering.behavior = .wandering
+
+        hovering.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
+        wandering.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
+
+        #expect(hovering.currentDepth - 0.2 < wandering.currentDepth - 0.2)
+    }
+
+    @Test func foregroundDepthMovesFartherThanBackgroundAtTheSameSwimSpeed() {
+        let id = UUID(uuid: (81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96))
+        var background = AquariumFishMotion.initialState(for: id)
+        background.position = CGPoint(x: 0.5, y: 0.4)
+        background.velocity = CGVector(dx: background.baseSpeed, dy: 0)
+        background.desiredDirection = CGVector(dx: 1, dy: 0)
+        background.currentSpeed = background.baseSpeed
+        background.targetSpeed = background.baseSpeed
+        background.behavior = .burst
+        background.behaviorTimeRemaining = 100
+        background.directionChangeTimeRemaining = 100
+        background.depthChangeTimeRemaining = 100
+        background.currentDepth = 0
+        background.targetDepth = 0
+        var foreground = background
+        foreground.currentDepth = 1
+        foreground.targetDepth = 1
+
+        background.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
+        foreground.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
+
+        #expect(foreground.position.x - 0.5 > background.position.x - 0.5)
     }
 
     @Test func bookOwnedCountCountsOnlyMatchingSpecies() {

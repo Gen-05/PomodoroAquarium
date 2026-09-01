@@ -20,6 +20,7 @@ struct AquariumView: View {
     @State private var editingDecorationID: String?
     @State private var originalPosition: CGPoint?
     @State private var previewPosition: CGPoint?
+    @State private var fishPositions: [UUID: CGPoint] = [:]
 
     private var favoriteFish: PlayerFish? {
         player?.favoriteFish
@@ -168,7 +169,11 @@ struct AquariumView: View {
                         species: playerFish.species,
                         isFavorite: isFavorite,
                         aquariumSize: size,
-                        updateDate: timeline.date
+                        updateDate: timeline.date,
+                        neighborPositions: fishPositions
+                            .filter { $0.key != playerFish.id }
+                            .map { $0.value },
+                        reportPosition: { fishPositions[playerFish.id] = $0 }
                     )
                 }
             }
@@ -370,40 +375,58 @@ private struct SwimmingFishView: View {
     let isFavorite: Bool
     let aquariumSize: CGSize
     let updateDate: Date
+    let neighborPositions: [CGPoint]
+    let reportPosition: (CGPoint) -> Void
+    let spriteAnimationPhase: TimeInterval
+    let spriteTempoMultiplier: TimeInterval
 
     @State private var motion: AquariumFishMotion.State
+    @State private var spriteDirectionTransition: FishSpriteDirectionTransition
     @State private var lastUpdateDate: Date?
     @State private var elapsedTime: TimeInterval = 0
+    @State private var positionReportTimeRemaining: TimeInterval = 0
 
     init(
         fishID: UUID,
         species: FishSpecies,
         isFavorite: Bool,
         aquariumSize: CGSize,
-        updateDate: Date
+        updateDate: Date,
+        neighborPositions: [CGPoint],
+        reportPosition: @escaping (CGPoint) -> Void
     ) {
         self.fishID = fishID
         self.species = species
         self.isFavorite = isFavorite
         self.aquariumSize = aquariumSize
         self.updateDate = updateDate
+        self.neighborPositions = neighborPositions
+        self.reportPosition = reportPosition
+        self.spriteAnimationPhase = AquariumFishMotion.spriteAnimationPhase(for: fishID)
+        self.spriteTempoMultiplier = AquariumFishMotion.spriteTempoMultiplier(for: fishID)
 
-        self._motion = State(initialValue: AquariumFishMotion.initialState(for: fishID))
+        let initialMotion = AquariumFishMotion.initialState(
+            for: fishID,
+            profile: AquariumFishMotion.movementProfile(for: species)
+        )
+        self._motion = State(initialValue: initialMotion)
+        self._spriteDirectionTransition = State(
+            initialValue: FishSpriteDirectionTransition(direction: initialMotion.facingDirection)
+        )
     }
 
     var body: some View {
         fishImage
             // 分離された尾びれ素材がないため、1枚絵へ速度連動の微細な変形を加える。
             .rotationEffect(.degrees(swimRotation))
-            .scaleEffect(
-                x: motion.facingSign * motion.facingWidth,
-                y: swimVerticalScale
-            )
+            .scaleEffect(x: 1, y: swimVerticalScale)
             .offset(y: swimVerticalOffset)
+            .opacity(motion.depthOpacity)
             .position(
                 x: aquariumSize.width * motion.position.x,
                 y: aquariumSize.height * motion.position.y
             )
+            .zIndex(Double(motion.currentDepth))
             .onChange(of: updateDate) { _, newDate in
                 updateMotion(at: newDate)
             }
@@ -419,40 +442,70 @@ private struct SwimmingFishView: View {
         let deltaTime = date.timeIntervalSince(lastUpdateDate)
         self.lastUpdateDate = date
         elapsedTime += min(max(deltaTime, 0), AquariumFishMotion.maximumDeltaTime)
-        motion.advance(deltaTime: deltaTime, elapsedTime: elapsedTime)
-    }
-
-    @ViewBuilder
-    private var fishImage: some View {
-        if let image = UIImage(named: species.imageName) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(width: fishSize, height: fishSize)
-        } else {
-            Image(systemName: "fish")
-                .font(.system(size: isFavorite ? 70 : 48))
+        motion.advance(
+            deltaTime: deltaTime,
+            elapsedTime: elapsedTime,
+            neighborPositions: neighborPositions
+        )
+        spriteDirectionTransition.update(
+            toward: motion.facingDirection,
+            deltaTime: deltaTime
+        )
+        positionReportTimeRemaining -= deltaTime
+        if positionReportTimeRemaining <= 0 {
+            reportPosition(motion.position)
+            positionReportTimeRemaining = 0.45
         }
     }
 
+    private var fishImage: some View {
+        FishImageView(
+            species: species,
+            facingDirection: motion.facingDirection,
+            spritePose: spriteDirectionTransition.pose,
+            facingHorizontalScale: motion.facingHorizontalScale,
+            animationTime: updateDate.timeIntervalSinceReferenceDate,
+            animationFrameDuration: spriteFrameDuration,
+            animationPhase: spriteAnimationPhase
+        )
+        .frame(width: fishSize, height: fishSize)
+    }
+
     private var fishSize: CGFloat {
-        isFavorite ? 120 : 78
+        (isFavorite ? 120 : 78) * species.displayScale
     }
 
     private var swimIntensity: CGFloat {
         min(max(motion.currentSpeed / max(motion.baseSpeed, 0.001), 0.15), 2.4)
     }
 
+    private var spriteFrameDuration: TimeInterval {
+        AquariumFishMotion.spriteFrameDuration(
+            for: species,
+            behavior: motion.behavior,
+            currentSpeed: motion.currentSpeed,
+            baseSpeed: motion.baseSpeed
+        ) * spriteTempoMultiplier
+    }
+
     private var swimRotation: Double {
-        Double(sin(motion.swimPhase) * min(0.8 + swimIntensity * 0.45, 1.8))
+        Double(
+            sin(motion.swimPhase)
+                * min(0.8 + swimIntensity * 0.45, 1.8)
+                * motion.presentationMotionIntensity
+        )
     }
 
     private var swimVerticalScale: CGFloat {
-        1 + cos(motion.swimPhase * 1.07) * min(0.008 + swimIntensity * 0.005, 0.02)
+        1 + cos(motion.swimPhase * 1.07)
+            * min(0.008 + swimIntensity * 0.005, 0.02)
+            * motion.presentationMotionIntensity
     }
 
     private var swimVerticalOffset: CGFloat {
-        sin(motion.swimPhase * 0.53) * min(0.7 + swimIntensity * 0.45, 1.8)
+        sin(motion.swimPhase * 0.53)
+            * min(0.7 + swimIntensity * 0.45, 1.8)
+            * motion.presentationMotionIntensity
     }
 
 }

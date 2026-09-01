@@ -95,18 +95,13 @@ struct FishRewardView: View {
         }
     }
 
-    @ViewBuilder
     private var fishImage: some View {
-        if let image = UIImage(named: species.imageName) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .padding(24)
-        } else {
-            Image(systemName: "fish.fill")
-                .font(.system(size: 110))
-                .foregroundStyle(.cyan, .blue)
-        }
+        FishImageView(
+            species: species,
+            fallbackSystemName: "fish.fill",
+            fallbackColor: .cyan
+        )
+        .padding(24)
     }
 
     private var rarityColor: Color {

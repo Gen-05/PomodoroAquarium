@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import UIKit
 
 struct FishDetailView: View {
     let species: FishSpecies
@@ -21,7 +20,8 @@ struct FishDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 28) {
-                fishImage
+                FishImageView(species: species)
+                    .padding(24)
                     .frame(maxWidth: .infinity)
                     .frame(height: 240)
                     .background(Color.cyan.opacity(0.12), in: RoundedRectangle(cornerRadius: 24))
@@ -61,20 +61,6 @@ struct FishDetailView: View {
         }
         .navigationTitle(species.name)
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    @ViewBuilder
-    private var fishImage: some View {
-        if let image = UIImage(named: species.imageName) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .padding(24)
-        } else {
-            Image(systemName: "fish")
-                .font(.system(size: 100))
-                .foregroundStyle(.blue)
-        }
     }
 
     private func detailRow(title: String, value: String) -> some View {

@@ -24,8 +24,14 @@ struct BookView: View {
                 FishDetailView(species: species, player: player)
             } label: {
                 HStack {
-                    Image(systemName: "fish")
-                        .font(.title2)
+                    if ownedCount > 0 {
+                        FishImageView(species: species)
+                            .frame(width: 48, height: 38)
+                    } else {
+                        Image(systemName: "fish")
+                            .font(.title2)
+                            .frame(width: 48, height: 38)
+                    }
 
                     VStack(alignment: .leading) {
                         Text(ownedCount > 0 ? species.name : "？？？")
