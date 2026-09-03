@@ -13,7 +13,7 @@ import Testing
 struct PomodoroAquariumTests {
     @Test func clownfishUsesOfficialSideImageAndDefaultDisplayScale() {
         #expect(FishSpecies.clownfish.imageName == "fish_clownfish_side")
-        #expect(FishSpecies.clownfish.displayScale == 1)
+        #expect(FishSpecies.clownfish.displayScale == 0.60)
     }
 
     @Test func fishWithoutOfficialArtworkUsesFallbackContract() {
@@ -1637,12 +1637,12 @@ struct PomodoroAquariumTests {
         let expectedFrames = (1...7).map { "fish_reef_manta_side_\($0)" }
 
         #expect(FishSpecies.manta.imageName == "fish_reef_manta")
-        #expect(FishSpecies.manta.displayScale == 4.05)
-        #expect(FishSpecies.clownfish.displayScale == 1)
-        #expect(FishSpecies.jellyfish.displayScale == 1)
-        #expect(FishSpecies.pufferfish.displayScale == 1)
-        #expect(FishSpecies.seahorse.displayScale == 1)
-        #expect(FishSpecies.whaleShark.displayScale == 1)
+        #expect(FishSpecies.manta.displayScale == 4.0)
+        #expect(FishSpecies.clownfish.displayScale == 0.60)
+        #expect(FishSpecies.jellyfish.displayScale == 0.90)
+        #expect(FishSpecies.pufferfish.displayScale == 0.75)
+        #expect(FishSpecies.seahorse.displayScale == 0.75)
+        #expect(FishSpecies.whaleShark.displayScale == 2.50)
         #expect(FishSpecies.manta.swimmingImageNames == expectedFrames)
         #expect(!FishSpecies.manta.usesDirectionalSwimmingSprites)
         #expect(FishSpecies.manta.usesHorizontalSwimmingFlip)
@@ -1766,7 +1766,7 @@ struct PomodoroAquariumTests {
         #expect(WingSwimmingProfile.manta.glideDecelerationResponseMultiplier == 0.20)
         #expect(WingSwimmingProfile.manta.glideMinimumSpeedMultiplier == 1.10)
         #expect(WingSwimmingProfile.manta.neutralFrameIndex == 3)
-        #expect(FishSpecies.manta.displayScale == 4.05)
+        #expect(FishSpecies.manta.displayScale == 4.0)
     }
 
     @Test @MainActor func jellyfishAcquisitionSupportsFirstAndDuplicateCounts() throws {

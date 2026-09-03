@@ -132,11 +132,15 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     var displayScale: CGFloat {
         switch self {
         case .clownfish:
-            1
+            0.60
+        case .pufferfish, .seahorse:
+            0.75
+        case .jellyfish:
+            0.90
         case .manta:
-            4.05
-        case .jellyfish, .pufferfish, .seahorse, .whaleShark:
-            1
+            4.0
+        case .whaleShark:
+            2.50
         }
     }
 
