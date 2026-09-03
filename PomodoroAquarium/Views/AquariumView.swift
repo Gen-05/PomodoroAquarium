@@ -382,6 +382,7 @@ private struct SwimmingFishView: View {
 
     @State private var motion: AquariumFishMotion.State
     @State private var spriteDirectionTransition: FishSpriteDirectionTransition
+    @State private var wingCycle: AquariumFishMotion.WingCycle?
     @State private var lastUpdateDate: Date?
     @State private var elapsedTime: TimeInterval = 0
     @State private var positionReportTimeRemaining: TimeInterval = 0
@@ -413,6 +414,9 @@ private struct SwimmingFishView: View {
         self._spriteDirectionTransition = State(
             initialValue: FishSpriteDirectionTransition(direction: initialMotion.facingDirection)
         )
+        self._wingCycle = State(initialValue: AquariumFishMotion
+            .wingSwimmingProfile(for: species)
+            .map { _ in AquariumFishMotion.WingCycle(id: fishID, profile: .manta) })
     }
 
     var body: some View {
@@ -442,10 +446,23 @@ private struct SwimmingFishView: View {
         let deltaTime = date.timeIntervalSince(lastUpdateDate)
         self.lastUpdateDate = date
         elapsedTime += min(max(deltaTime, 0), AquariumFishMotion.maximumDeltaTime)
+        if var wingCycle, let wingProfile {
+            wingCycle.advance(
+                deltaTime: deltaTime,
+                frameCount: species.swimmingImageNames.count,
+                frameDuration: spriteFrameDuration,
+                profile: wingProfile
+            )
+            self.wingCycle = wingCycle
+        }
         motion.advance(
             deltaTime: deltaTime,
             elapsedTime: elapsedTime,
-            neighborPositions: neighborPositions
+            neighborPositions: neighborPositions,
+            speedMultiplier: wingSpeedMultiplier,
+            speedResponseMultiplier: wingSpeedResponseMultiplier,
+            minimumSpeedMultiplier: wingMinimumSpeedMultiplier,
+            steeringNoiseMultiplier: wingSteeringMultiplier
         )
         spriteDirectionTransition.update(
             toward: motion.facingDirection,
@@ -464,9 +481,10 @@ private struct SwimmingFishView: View {
             facingDirection: motion.facingDirection,
             spritePose: spriteDirectionTransition.pose,
             facingHorizontalScale: motion.facingHorizontalScale,
-            animationTime: updateDate.timeIntervalSinceReferenceDate,
+            animationTime: spriteAnimationTime,
             animationFrameDuration: spriteFrameDuration,
-            animationPhase: spriteAnimationPhase
+            animationPhase: species == .manta ? 0 : spriteAnimationPhase,
+            fixedAnimationFrameIndex: fixedSpriteFrameIndex
         )
         .frame(width: fishSize, height: fishSize)
     }
@@ -488,11 +506,54 @@ private struct SwimmingFishView: View {
         ) * spriteTempoMultiplier
     }
 
+    private var wingProfile: WingSwimmingProfile? {
+        AquariumFishMotion.wingSwimmingProfile(for: species)
+    }
+
+    private var spriteAnimationTime: TimeInterval? {
+        guard species == .manta else { return updateDate.timeIntervalSinceReferenceDate }
+        guard wingCycle?.phase == .flapping else { return nil }
+        return wingCycle?.flapElapsedTime
+    }
+
+    private var fixedSpriteFrameIndex: Int? {
+        guard wingCycle?.phase == .gliding else { return nil }
+        return wingProfile?.neutralFrameIndex
+    }
+
+    private var wingSpeedMultiplier: CGFloat {
+        guard let wingProfile, let phase = wingCycle?.phase else { return 1 }
+        return phase == .flapping
+            ? wingProfile.flapSpeedMultiplier
+            : wingProfile.glideSpeedMultiplier
+    }
+
+    private var wingSteeringMultiplier: CGFloat {
+        guard let wingProfile, wingCycle?.phase == .gliding else { return 1 }
+        return wingProfile.glideSteeringMultiplier
+    }
+
+    private var wingSpeedResponseMultiplier: CGFloat {
+        guard let wingProfile, wingCycle?.phase == .gliding else { return 1 }
+        return wingProfile.glideDecelerationResponseMultiplier
+    }
+
+    private var wingMinimumSpeedMultiplier: CGFloat {
+        guard let wingProfile, wingCycle?.phase == .gliding else { return 0 }
+        return wingProfile.glideMinimumSpeedMultiplier
+    }
+
+    private var wingPresentationMultiplier: CGFloat {
+        guard let wingProfile, wingCycle?.phase == .gliding else { return 1 }
+        return wingProfile.glidePresentationMultiplier
+    }
+
     private var swimRotation: Double {
         Double(
             sin(motion.swimPhase)
                 * min(0.8 + swimIntensity * 0.45, 1.8)
                 * motion.presentationMotionIntensity
+                * wingPresentationMultiplier
         )
     }
 
@@ -500,12 +561,14 @@ private struct SwimmingFishView: View {
         1 + cos(motion.swimPhase * 1.07)
             * min(0.008 + swimIntensity * 0.005, 0.02)
             * motion.presentationMotionIntensity
+            * wingPresentationMultiplier
     }
 
     private var swimVerticalOffset: CGFloat {
         sin(motion.swimPhase * 0.53)
             * min(0.7 + swimIntensity * 0.45, 1.8)
             * motion.presentationMotionIntensity
+            * wingPresentationMultiplier
     }
 
 }

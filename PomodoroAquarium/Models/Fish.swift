@@ -52,7 +52,9 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
             "fish_clownfish_side"
         case .jellyfish:
             "fish_moon_jellyfish"
-        case .pufferfish, .seahorse, .manta, .whaleShark:
+        case .manta:
+            "fish_reef_manta"
+        case .pufferfish, .seahorse, .whaleShark:
             nil
         }
     }
@@ -60,6 +62,11 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     /// 移動方向に応じた画像切替・左右反転を行う魚種かどうか。
     var usesDirectionalSwimmingSprites: Bool {
         self == .clownfish
+    }
+
+    /// 右向きのside素材を、水平方向の進行に合わせて左右反転する魚種。
+    var usesHorizontalSwimmingFlip: Bool {
+        self == .clownfish || self == .manta
     }
 
     /// side方向の泳ぎフレーム候補。実在する画像が2枚以上ある時だけアニメーションする。
@@ -90,7 +97,9 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
             return (1...3).map { "\(stem)_\($0)" }
         case .jellyfish:
             return (1...5).map { "fish_moon_jellyfish_\($0)" }
-        case .pufferfish, .seahorse, .manta, .whaleShark:
+        case .manta:
+            return (1...7).map { "fish_reef_manta_side_\($0)" }
+        case .pufferfish, .seahorse, .whaleShark:
             return []
         }
     }
@@ -124,7 +133,9 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .clownfish:
             1
-        case .jellyfish, .pufferfish, .seahorse, .manta, .whaleShark:
+        case .manta:
+            4.05
+        case .jellyfish, .pufferfish, .seahorse, .whaleShark:
             1
         }
     }

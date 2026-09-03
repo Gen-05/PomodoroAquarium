@@ -19,7 +19,6 @@ struct PomodoroAquariumTests {
     @Test func fishWithoutOfficialArtworkUsesFallbackContract() {
         #expect(FishSpecies.pufferfish.imageName == nil)
         #expect(FishSpecies.seahorse.imageName == nil)
-        #expect(FishSpecies.manta.imageName == nil)
         #expect(FishSpecies.whaleShark.imageName == nil)
     }
 
@@ -1632,6 +1631,142 @@ struct PomodoroAquariumTests {
         #expect(jellyfishDuration == 0.30)
         #expect(jellyfishDuration > clownfishDuration)
         #expect(indices == [0, 1, 2, 3, 4, 3, 2, 1, 0, 1])
+    }
+
+    @Test func reefMantaUsesOfficialSideArtworkAndSevenSwimmingFrames() {
+        let expectedFrames = (1...7).map { "fish_reef_manta_side_\($0)" }
+
+        #expect(FishSpecies.manta.imageName == "fish_reef_manta")
+        #expect(FishSpecies.manta.displayScale == 4.05)
+        #expect(FishSpecies.clownfish.displayScale == 1)
+        #expect(FishSpecies.jellyfish.displayScale == 1)
+        #expect(FishSpecies.pufferfish.displayScale == 1)
+        #expect(FishSpecies.seahorse.displayScale == 1)
+        #expect(FishSpecies.whaleShark.displayScale == 1)
+        #expect(FishSpecies.manta.swimmingImageNames == expectedFrames)
+        #expect(!FishSpecies.manta.usesDirectionalSwimmingSprites)
+        #expect(FishSpecies.manta.usesHorizontalSwimmingFlip)
+        for direction in FishFacingDirection.allCases {
+            #expect(FishSpecies.manta.swimmingImageNames(for: direction) == expectedFrames)
+        }
+    }
+
+    @Test func reefMantaUsesSharedSevenFramePingPongAtItsOwnTempo() {
+        let duration = AquariumFishMotion.spriteFrameDuration(
+            for: .manta,
+            behavior: .cruising,
+            currentSpeed: 0.025,
+            baseSpeed: 0.025
+        )
+        let indices = (0...13).map { step in
+            FishSpriteAnimation.pingPongFrameIndex(
+                frameCount: FishSpecies.manta.swimmingImageNames.count,
+                elapsedTime: Double(step) * duration,
+                frameDuration: duration
+            )
+        }
+
+        #expect(duration == 0.36)
+        #expect(indices == [0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1, 0, 1])
+    }
+
+    @Test func mantaWingSwimmingProfileIsLongRangeSlowTurningAndBurstFree() {
+        let manta = FishMovementProfile.manta
+        let clownfish = FishMovementProfile.clownfish
+
+        #expect(AquariumFishMotion.movementProfile(for: .manta).baseSpeedRange
+            == manta.baseSpeedRange)
+        #expect(manta.baseSpeedRange == 0.042...0.066)
+        #expect(manta.baseSpeedRange.lowerBound > clownfish.baseSpeedRange.upperBound)
+        #expect(manta.baseSpeedRange.upperBound > FishMovementProfile.jellyfish.baseSpeedRange.upperBound)
+        #expect(manta.directionHoldDurationRange == 7.0...11.0)
+        #expect(manta.wanderingRadiusX == 0.30...0.55)
+        #expect(manta.wanderingRadiusY == 0.16...0.30)
+        #expect(manta.turnResponsivenessRange.upperBound
+            < clownfish.turnResponsivenessRange.lowerBound)
+        #expect(manta.hoverProbability == 0.08)
+        #expect(manta.burstProbability == 0)
+        #expect(manta.steeringNoiseMultiplier == 0.20)
+        #expect(manta.depthScaleRange == 1.0...1.0)
+    }
+
+    @Test func mantaNeverTransitionsIntoBurst() {
+        let id = UUID(uuid: (90, 89, 88, 87, 86, 85, 84, 83, 82, 81, 80, 79, 78, 77, 76, 75))
+        var motion = AquariumFishMotion.initialState(for: id, profile: .manta)
+
+        for frame in 1...1_800 {
+            motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: Double(frame) / 30)
+            #expect(motion.behavior != .burst)
+        }
+    }
+
+    @Test func mantaWingCycleAlternatesOneOrTwoFlapsWithRandomGliding() {
+        let profile = WingSwimmingProfile.manta
+        var cycle = AquariumFishMotion.WingCycle(
+            id: UUID(uuid: (1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31)),
+            profile: profile
+        )
+
+        #expect(profile.flapCycleCountRange.contains(cycle.flapCycleCount))
+        #expect(cycle.phase == .flapping)
+
+        for _ in 0..<1_000 where cycle.phase == .flapping {
+            cycle.advance(
+                deltaTime: 1.0 / 30.0,
+                frameCount: 7,
+                frameDuration: 0.36,
+                profile: profile
+            )
+        }
+
+        #expect(cycle.phase == .gliding)
+        #expect(profile.glideDurationRange.contains(cycle.glideTimeRemaining))
+
+        for _ in 0..<200 where cycle.phase == .gliding {
+            cycle.advance(
+                deltaTime: 1.0 / 30.0,
+                frameCount: 7,
+                frameDuration: 0.36,
+                profile: profile
+            )
+        }
+
+        #expect(cycle.phase == .flapping)
+    }
+
+    @Test func mantaWingProfileAcceleratesForFlappingAndDeceleratesForGliding() {
+        let id = UUID(uuid: (2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32))
+        var flapping = AquariumFishMotion.initialState(for: id, profile: .manta)
+        flapping.behavior = .cruising
+        flapping.behaviorTimeRemaining = 10
+        flapping.directionChangeTimeRemaining = 10
+        flapping.currentSpeed = flapping.baseSpeed
+        flapping.targetSpeed = flapping.baseSpeed
+        var gliding = flapping
+
+        flapping.advance(
+            deltaTime: 1.0 / 30.0,
+            elapsedTime: 1,
+            speedMultiplier: WingSwimmingProfile.manta.flapSpeedMultiplier
+        )
+        gliding.advance(
+            deltaTime: 1.0 / 30.0,
+            elapsedTime: 1,
+            speedMultiplier: WingSwimmingProfile.manta.glideSpeedMultiplier,
+            speedResponseMultiplier: WingSwimmingProfile.manta.glideDecelerationResponseMultiplier,
+            minimumSpeedMultiplier: WingSwimmingProfile.manta.glideMinimumSpeedMultiplier,
+            steeringNoiseMultiplier: WingSwimmingProfile.manta.glideSteeringMultiplier
+        )
+
+        #expect(flapping.currentSpeed > flapping.baseSpeed)
+        #expect(gliding.currentSpeed > gliding.baseSpeed)
+        #expect(WingSwimmingProfile.manta.flapSpeedMultiplier == 2.20)
+        #expect(WingSwimmingProfile.manta.glideSpeedMultiplier == 2.00)
+        #expect(WingSwimmingProfile.manta.glideDurationRange == 4.0...8.0)
+        #expect(WingSwimmingProfile.manta.glideDecelerationResponseMultiplier == 0.20)
+        #expect(WingSwimmingProfile.manta.glideMinimumSpeedMultiplier == 1.10)
+        #expect(WingSwimmingProfile.manta.neutralFrameIndex == 3)
+        #expect(FishSpecies.manta.displayScale == 4.05)
     }
 
     @Test @MainActor func jellyfishAcquisitionSupportsFirstAndDuplicateCounts() throws {

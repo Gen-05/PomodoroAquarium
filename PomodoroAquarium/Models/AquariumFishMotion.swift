@@ -79,6 +79,33 @@ struct FishMovementProfile {
         swimPhaseSpeedMultiplier: 0.55
     )
 
+    /// マンタなど、大きな翼で長距離をゆっくり巡航する魚種向けの基準profile。
+    static let manta = FishMovementProfile(
+        baseSpeedRange: 0.042...0.066,
+        hoverProbability: 0.08,
+        burstProbability: 0,
+        gatheringProbability: 0.04,
+        wanderingRadiusX: 0.30...0.55,
+        wanderingRadiusY: 0.16...0.30,
+        turnResponsivenessRange: 0.22...0.42,
+        depthRange: 0.20...0.82,
+        depthScaleRange: 1.0...1.0,
+        depthOpacityRange: 0.84...1.0,
+        depthSpeedRange: 0.92...1.04,
+        depthChangeProbability: 0.28,
+        depthChangeResponse: 0.16,
+        directionHoldDurationRange: 7.0...11.0,
+        burstSpeedMultiplierRange: 1.0...1.0,
+        burstDurationRange: 0.4...0.4,
+        burstCooldownRange: 20.0...20.0,
+        hoverDurationRange: 0.8...2.0,
+        steeringNoiseMultiplier: 0.20,
+        verticalDirectionBias: 0.55,
+        accelerationResponseRange: 1.0...1.7,
+        brakingResponseRange: 0.9...1.5,
+        swimPhaseSpeedMultiplier: 0.70
+    )
+
     func depthScale(at depth: CGFloat) -> CGFloat {
         interpolate(depthScaleRange, at: depth)
     }
@@ -101,6 +128,30 @@ struct FishMovementProfile {
     }
 }
 
+struct WingSwimmingProfile {
+    let flapCycleCountRange: ClosedRange<Int>
+    let glideDurationRange: ClosedRange<TimeInterval>
+    let flapSpeedMultiplier: CGFloat
+    let glideSpeedMultiplier: CGFloat
+    let glideDecelerationResponseMultiplier: CGFloat
+    let glideMinimumSpeedMultiplier: CGFloat
+    let glideSteeringMultiplier: CGFloat
+    let glidePresentationMultiplier: CGFloat
+    let neutralFrameIndex: Int
+
+    static let manta = WingSwimmingProfile(
+        flapCycleCountRange: 1...2,
+        glideDurationRange: 4.0...8.0,
+        flapSpeedMultiplier: 2.20,
+        glideSpeedMultiplier: 2.00,
+        glideDecelerationResponseMultiplier: 0.20,
+        glideMinimumSpeedMultiplier: 1.10,
+        glideSteeringMultiplier: 0.25,
+        glidePresentationMultiplier: 0.25,
+        neutralFrameIndex: 3
+    )
+}
+
 enum AquariumFishMotion {
     enum Behavior: CaseIterable {
         case cruising
@@ -114,6 +165,69 @@ enum AquariumFishMotion {
     static let horizontalRange: ClosedRange<CGFloat> = 0.18...0.82
     static let verticalRange: ClosedRange<CGFloat> = 0.16...0.62
     static let maximumDeltaTime: TimeInterval = 1.0 / 15.0
+
+    struct WingCycle {
+        enum Phase: Equatable {
+            case flapping
+            case gliding
+        }
+
+        private(set) var phase: Phase = .flapping
+        private(set) var flapElapsedTime: TimeInterval = 0
+        private(set) var flapCycleCount: Int
+        private(set) var glideTimeRemaining: TimeInterval = 0
+        private var randomState: UInt64
+
+        init(id: UUID, profile: WingSwimmingProfile) {
+            let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
+            randomState = AquariumFishMotion.seed(from: bytes) ^ 0xA7C3_51D9_2E64_8B10
+            flapCycleCount = profile.flapCycleCountRange.lowerBound
+            flapCycleCount = randomCycleCount(in: profile.flapCycleCountRange)
+        }
+
+        mutating func advance(
+            deltaTime rawDeltaTime: TimeInterval,
+            frameCount: Int,
+            frameDuration: TimeInterval,
+            profile: WingSwimmingProfile
+        ) {
+            let deltaTime = min(max(rawDeltaTime, 0), AquariumFishMotion.maximumDeltaTime)
+            guard deltaTime > 0 else { return }
+
+            switch phase {
+            case .flapping:
+                flapElapsedTime += deltaTime
+                let stepsPerCycle = max((frameCount - 1) * 2, 1)
+                let cycleDuration = Double(stepsPerCycle) * max(frameDuration, 0.01)
+                if flapElapsedTime >= cycleDuration * Double(flapCycleCount) {
+                    phase = .gliding
+                    flapElapsedTime = 0
+                    glideTimeRemaining = random(in: profile.glideDurationRange)
+                }
+            case .gliding:
+                glideTimeRemaining -= deltaTime
+                if glideTimeRemaining <= 0 {
+                    phase = .flapping
+                    flapElapsedTime = 0
+                    flapCycleCount = randomCycleCount(in: profile.flapCycleCountRange)
+                }
+            }
+        }
+
+        private mutating func randomCycleCount(in range: ClosedRange<Int>) -> Int {
+            guard range.lowerBound < range.upperBound else { return range.lowerBound }
+            return randomUnit() < 0.72 ? range.lowerBound : range.upperBound
+        }
+
+        private mutating func random(in range: ClosedRange<TimeInterval>) -> TimeInterval {
+            range.lowerBound + Double(randomUnit()) * (range.upperBound - range.lowerBound)
+        }
+
+        private mutating func randomUnit() -> CGFloat {
+            randomState = randomState &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return CGFloat((randomState >> 40) & 0xFF_FFFF) / CGFloat(0xFF_FFFF)
+        }
+    }
 
     struct State {
         var position: CGPoint
@@ -165,7 +279,11 @@ enum AquariumFishMotion {
         mutating func advance(
             deltaTime rawDeltaTime: TimeInterval,
             elapsedTime: TimeInterval,
-            neighborPositions: [CGPoint] = []
+            neighborPositions: [CGPoint] = [],
+            speedMultiplier: CGFloat = 1,
+            speedResponseMultiplier: CGFloat = 1,
+            minimumSpeedMultiplier: CGFloat = 0,
+            steeringNoiseMultiplier: CGFloat = 1
         ) {
             let deltaTime = min(max(rawDeltaTime, 0), AquariumFishMotion.maximumDeltaTime)
             guard deltaTime > 0 else { return }
@@ -187,7 +305,10 @@ enum AquariumFishMotion {
                 phaseX: noisePhaseX,
                 phaseY: noisePhaseY
             )
-            let behaviorSteering = steeringForCurrentBehavior(noise: noise)
+            let behaviorSteering = steeringForCurrentBehavior(noise: CGVector(
+                dx: noise.dx * steeringNoiseMultiplier,
+                dy: noise.dy * steeringNoiseMultiplier
+            ))
             let speedRatio = currentSpeed / max(baseSpeed, 0.001)
             let wallStrength = AquariumFishMotion.wallStrength(
                 behavior: behavior,
@@ -215,7 +336,12 @@ enum AquariumFishMotion {
                 dx: currentDirection.dx + (targetDirection.dx - currentDirection.dx) * steeringAmount,
                 dy: currentDirection.dy + (targetDirection.dy - currentDirection.dy) * steeringAmount
             ))
-            updateSpeed(deltaTime: deltaTime)
+            updateSpeed(
+                deltaTime: deltaTime,
+                multiplier: speedMultiplier,
+                responseMultiplier: speedResponseMultiplier,
+                minimumSpeedMultiplier: minimumSpeedMultiplier
+            )
             velocity = CGVector(dx: blendedDirection.dx * currentSpeed, dy: blendedDirection.dy * currentSpeed)
             updateDepth(deltaTime: deltaTime)
             let depthSpeed = movementProfile.depthSpeedMultiplier(at: currentDepth)
@@ -370,11 +496,21 @@ enum AquariumFishMotion {
             ) * scaleAmount
         }
 
-        private mutating func updateSpeed(deltaTime: TimeInterval) {
+        private mutating func updateSpeed(
+            deltaTime: TimeInterval,
+            multiplier: CGFloat,
+            responseMultiplier: CGFloat,
+            minimumSpeedMultiplier: CGFloat
+        ) {
             let previousSpeed = currentSpeed
-            let response = targetSpeed > currentSpeed ? accelerationResponse : brakingResponse
+            let effectiveTargetSpeed = max(
+                targetSpeed * max(multiplier, 0),
+                baseSpeed * max(minimumSpeedMultiplier, 0)
+            )
+            let baseResponse = effectiveTargetSpeed > currentSpeed ? accelerationResponse : brakingResponse
+            let response = baseResponse * max(responseMultiplier, 0)
             let amount = 1 - exp(-response * CGFloat(deltaTime))
-            currentSpeed += (targetSpeed - currentSpeed) * amount
+            currentSpeed += (effectiveTargetSpeed - currentSpeed) * amount
             accelerationMagnitude = abs(currentSpeed - previousSpeed) / max(CGFloat(deltaTime), 0.001)
         }
 
@@ -691,9 +827,15 @@ enum AquariumFishMotion {
             .clownfish
         case .jellyfish:
             .jellyfish
-        case .pufferfish, .seahorse, .manta, .whaleShark:
+        case .manta:
+            .manta
+        case .pufferfish, .seahorse, .whaleShark:
             .clownfish
         }
+    }
+
+    static func wingSwimmingProfile(for species: FishSpecies) -> WingSwimmingProfile? {
+        species == .manta ? .manta : nil
     }
 
     static func spriteFrameDuration(
@@ -702,7 +844,14 @@ enum AquariumFishMotion {
         currentSpeed: CGFloat,
         baseSpeed: CGFloat
     ) -> TimeInterval {
-        guard species != .jellyfish else { return 0.30 }
+        switch species {
+        case .jellyfish:
+            return 0.30
+        case .manta:
+            return 0.36
+        case .clownfish, .pufferfish, .seahorse, .whaleShark:
+            break
+        }
         return spriteFrameDuration(
             for: behavior,
             currentSpeed: currentSpeed,

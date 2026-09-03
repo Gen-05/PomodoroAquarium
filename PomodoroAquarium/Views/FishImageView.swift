@@ -51,6 +51,7 @@ struct FishImageView: View {
     var animationTime: TimeInterval?
     var animationFrameDuration: TimeInterval = 0.18
     var animationPhase: TimeInterval = 0
+    var fixedAnimationFrameIndex: Int?
 
     var body: some View {
         Group {
@@ -76,7 +77,7 @@ struct FishImageView: View {
     }
 
     private var resolvedHorizontalScale: CGFloat {
-        guard species.usesDirectionalSwimmingSprites else { return 1 }
+        guard species.usesHorizontalSwimmingFlip else { return 1 }
         switch spritePose {
         case .sideToDiagonalUp15(let isLeftFacing),
              .sideToDiagonalDown15(let isLeftFacing):
@@ -87,7 +88,7 @@ struct FishImageView: View {
     }
 
     private var spriteImage: UIImage? {
-        guard let animationTime else { return nil }
+        guard animationTime != nil || fixedAnimationFrameIndex != nil else { return nil }
         let directionalFrames = FishSpriteAssetCache.frames(
             for: species,
             pose: spritePose ?? .facing(facingDirection)
@@ -95,7 +96,11 @@ struct FishImageView: View {
         let sideFrames = FishSpriteAssetCache.frames(for: species, pose: .facing(.right))
         let frames = directionalFrames.isEmpty ? sideFrames : directionalFrames
         guard !frames.isEmpty else { return nil }
+        if let fixedAnimationFrameIndex {
+            return frames[min(max(fixedAnimationFrameIndex, 0), frames.count - 1)]
+        }
         guard frames.count > 1 else { return frames[0] }
+        guard let animationTime else { return frames[0] }
         let index = FishSpriteAnimation.pingPongFrameIndex(
             frameCount: frames.count,
             elapsedTime: animationTime,
