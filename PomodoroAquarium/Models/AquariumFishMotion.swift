@@ -106,6 +106,33 @@ struct FishMovementProfile {
         swimPhaseSpeedMultiplier: 0.70
     )
 
+    /// ジンベエザメなど、止まらず長距離を安定巡航する大型魚向けの基準profile。
+    static let whaleShark = FishMovementProfile(
+        baseSpeedRange: 0.026...0.040,
+        hoverProbability: 0,
+        burstProbability: 0,
+        gatheringProbability: 0.02,
+        wanderingRadiusX: 0.42...0.68,
+        wanderingRadiusY: 0.20...0.36,
+        turnResponsivenessRange: 0.14...0.28,
+        depthRange: 0.20...0.82,
+        depthScaleRange: 1.0...1.0,
+        depthOpacityRange: 0.86...1.0,
+        depthSpeedRange: 0.94...1.04,
+        depthChangeProbability: 0.20,
+        depthChangeResponse: 0.12,
+        directionHoldDurationRange: 10.0...15.0,
+        burstSpeedMultiplierRange: 1.0...1.0,
+        burstDurationRange: 0.4...0.4,
+        burstCooldownRange: 30.0...30.0,
+        hoverDurationRange: 0.5...0.8,
+        steeringNoiseMultiplier: 0.14,
+        verticalDirectionBias: 0.48,
+        accelerationResponseRange: 0.65...1.05,
+        brakingResponseRange: 0.55...0.90,
+        swimPhaseSpeedMultiplier: 0.35
+    )
+
     func depthScale(at depth: CGFloat) -> CGFloat {
         interpolate(depthScaleRange, at: depth)
     }
@@ -281,6 +308,7 @@ enum AquariumFishMotion {
             elapsedTime: TimeInterval,
             neighborPositions: [CGPoint] = [],
             speedMultiplier: CGFloat = 1,
+            behaviorTargetSpeedMultiplier: CGFloat? = nil,
             speedResponseMultiplier: CGFloat = 1,
             minimumSpeedMultiplier: CGFloat = 0,
             steeringNoiseMultiplier: CGFloat = 1
@@ -339,6 +367,7 @@ enum AquariumFishMotion {
             updateSpeed(
                 deltaTime: deltaTime,
                 multiplier: speedMultiplier,
+                behaviorTargetSpeedMultiplier: behaviorTargetSpeedMultiplier,
                 responseMultiplier: speedResponseMultiplier,
                 minimumSpeedMultiplier: minimumSpeedMultiplier
             )
@@ -499,12 +528,15 @@ enum AquariumFishMotion {
         private mutating func updateSpeed(
             deltaTime: TimeInterval,
             multiplier: CGFloat,
+            behaviorTargetSpeedMultiplier: CGFloat?,
             responseMultiplier: CGFloat,
             minimumSpeedMultiplier: CGFloat
         ) {
             let previousSpeed = currentSpeed
+            let behaviorTargetSpeed = behaviorTargetSpeedMultiplier.map { baseSpeed * max($0, 0) }
+                ?? targetSpeed
             let effectiveTargetSpeed = max(
-                targetSpeed * max(multiplier, 0),
+                behaviorTargetSpeed * max(multiplier, 0),
                 baseSpeed * max(minimumSpeedMultiplier, 0)
             )
             let baseResponse = effectiveTargetSpeed > currentSpeed ? accelerationResponse : brakingResponse
@@ -625,9 +657,9 @@ enum AquariumFishMotion {
             case .burst:
                 next = .braking
             case .braking:
-                next = chance(0.62) ? .hovering : .wandering
+                next = hoverProbability > 0 && chance(0.62) ? .hovering : .wandering
             case .turning:
-                next = chance(0.38) ? .hovering : .wandering
+                next = hoverProbability > 0 && chance(0.38) ? .hovering : .wandering
             }
             enter(next, neighborPositions: neighborPositions)
         }
@@ -754,7 +786,9 @@ enum AquariumFishMotion {
         ))
         let facingSign: CGFloat = direction.dx >= 0 ? -1 : 1
         let facingDirection = FishFacingDirection.quantized(velocity: direction)
-        let initialBehavior: Behavior = bytes[11].isMultiple(of: 3) ? .hovering : .wandering
+        let initialBehavior: Behavior = profile.hoverProbability > 0 && bytes[11].isMultiple(of: 3)
+            ? .hovering
+            : .wandering
         let initialPosition = initialPosition(for: id)
         let wanderingRadiusX = interpolated(profile.wanderingRadiusX, byte: bytes[12])
         let wanderingRadiusY = interpolated(profile.wanderingRadiusY, byte: bytes[13])
@@ -829,13 +863,38 @@ enum AquariumFishMotion {
             .jellyfish
         case .manta:
             .manta
-        case .pufferfish, .seahorse, .whaleShark:
+        case .whaleShark:
+            .whaleShark
+        case .pufferfish, .seahorse:
             .clownfish
         }
     }
 
     static func wingSwimmingProfile(for species: FishSpecies) -> WingSwimmingProfile? {
         species == .manta ? .manta : nil
+    }
+
+    /// Frame tempoと実移動の印象を揃えるクマノミ専用の目標速度倍率。
+    /// nilの魚種は従来のtargetSpeedをそのまま使う。
+    static func behaviorTargetSpeedMultiplier(
+        for species: FishSpecies,
+        behavior: Behavior
+    ) -> CGFloat? {
+        guard species == .clownfish else { return nil }
+        return switch behavior {
+        case .hovering:
+            0.62
+        case .wandering:
+            0.95
+        case .cruising:
+            1.22
+        case .burst:
+            1.90
+        case .turning:
+            0.85
+        case .braking:
+            nil
+        }
     }
 
     static func spriteFrameDuration(
@@ -849,7 +908,9 @@ enum AquariumFishMotion {
             return 0.30
         case .manta:
             return 0.36
-        case .clownfish, .pufferfish, .seahorse, .whaleShark:
+        case .whaleShark:
+            return 0.30
+        case .clownfish, .pufferfish, .seahorse:
             break
         }
         return spriteFrameDuration(

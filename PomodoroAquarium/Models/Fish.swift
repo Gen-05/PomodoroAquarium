@@ -49,12 +49,14 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     var imageName: String? {
         switch self {
         case .clownfish:
-            "fish_clownfish_side"
+            "fish_clownfish_side_2"
         case .jellyfish:
             "fish_moon_jellyfish"
         case .manta:
             "fish_reef_manta"
-        case .pufferfish, .seahorse, .whaleShark:
+        case .whaleShark:
+            "fish_whale_shark"
+        case .pufferfish, .seahorse:
             nil
         }
     }
@@ -66,7 +68,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
 
     /// 右向きのside素材を、水平方向の進行に合わせて左右反転する魚種。
     var usesHorizontalSwimmingFlip: Bool {
-        self == .clownfish || self == .manta
+        self == .clownfish || self == .manta || self == .whaleShark
     }
 
     /// side方向の泳ぎフレーム候補。実在する画像が2枚以上ある時だけアニメーションする。
@@ -78,28 +80,14 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     func swimmingImageNames(for direction: FishFacingDirection) -> [String] {
         switch self {
         case .clownfish:
-            let stem: String
-            switch direction {
-            case .right, .left:
-                stem = "fish_clownfish_side"
-            case .upRight, .upLeft:
-                stem = "fish_clownfish_diagonal_up"
-            case .up:
-                stem = "fish_clownfish_up"
-            case .downRight, .downLeft:
-                stem = "fish_clownfish_diagonal_down"
-            case .down:
-                stem = "fish_clownfish_down"
-            case .front:
-                // front素材は現在の遊泳表示では使用せず、sideへ安全にフォールバックする。
-                stem = "fish_clownfish_side"
-            }
-            return (1...3).map { "\(stem)_\($0)" }
+            return (1...3).map { "fish_clownfish_side_\($0)" }
         case .jellyfish:
             return (1...5).map { "fish_moon_jellyfish_\($0)" }
         case .manta:
             return (1...7).map { "fish_reef_manta_side_\($0)" }
-        case .pufferfish, .seahorse, .whaleShark:
+        case .whaleShark:
+            return (1...7).map { "fish_whale_shark_side_\($0)" }
+        case .pufferfish, .seahorse:
             return []
         }
     }
@@ -111,20 +99,35 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
         return switch pose {
         case .facing(let direction):
             swimmingImageNames(for: direction)
-        case .sideToDiagonalUp15:
+        case .sideToDiagonalUp15, .sideToDiagonalDown15:
             switch self {
             case .clownfish:
-                (1...3).map { "fish_clownfish_side_to_diagonal_up_15_\($0)" }
+                // 中間方向でも専用Assetへ切り替えず、side 3枚を共用する。
+                (1...3).map { "fish_clownfish_side_\($0)" }
             case .jellyfish, .pufferfish, .seahorse, .manta, .whaleShark:
                 []
             }
-        case .sideToDiagonalDown15:
-            switch self {
-            case .clownfish:
-                (1...3).map { "fish_clownfish_side_to_diagonal_down_15_\($0)" }
-            case .jellyfish, .pufferfish, .seahorse, .manta, .whaleShark:
-                []
-            }
+        }
+    }
+
+    /// クマノミの右向きside素材を、horizontal flip後に進行方向へ回転する角度。
+    func swimmingImageRotation(for direction: FishFacingDirection) -> Double {
+        guard self == .clownfish else { return 0 }
+        return switch direction {
+        case .right, .left, .front:
+            0
+        case .upRight:
+            -45
+        case .up:
+            -90
+        case .upLeft:
+            45
+        case .downRight:
+            45
+        case .down:
+            90
+        case .downLeft:
+            -45
         }
     }
 
@@ -140,7 +143,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
         case .manta:
             4.0
         case .whaleShark:
-            2.50
+            6.00
         }
     }
 

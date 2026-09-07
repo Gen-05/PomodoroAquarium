@@ -12,14 +12,13 @@ import Testing
 
 struct PomodoroAquariumTests {
     @Test func clownfishUsesOfficialSideImageAndDefaultDisplayScale() {
-        #expect(FishSpecies.clownfish.imageName == "fish_clownfish_side")
+        #expect(FishSpecies.clownfish.imageName == "fish_clownfish_side_2")
         #expect(FishSpecies.clownfish.displayScale == 0.60)
     }
 
     @Test func fishWithoutOfficialArtworkUsesFallbackContract() {
         #expect(FishSpecies.pufferfish.imageName == nil)
         #expect(FishSpecies.seahorse.imageName == nil)
-        #expect(FishSpecies.whaleShark.imageName == nil)
     }
 
 
@@ -1642,7 +1641,7 @@ struct PomodoroAquariumTests {
         #expect(FishSpecies.jellyfish.displayScale == 0.90)
         #expect(FishSpecies.pufferfish.displayScale == 0.75)
         #expect(FishSpecies.seahorse.displayScale == 0.75)
-        #expect(FishSpecies.whaleShark.displayScale == 2.50)
+        #expect(FishSpecies.whaleShark.displayScale == 6.00)
         #expect(FishSpecies.manta.swimmingImageNames == expectedFrames)
         #expect(!FishSpecies.manta.usesDirectionalSwimmingSprites)
         #expect(FishSpecies.manta.usesHorizontalSwimmingFlip)
@@ -1668,6 +1667,68 @@ struct PomodoroAquariumTests {
 
         #expect(duration == 0.36)
         #expect(indices == [0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1, 0, 1])
+    }
+
+    @Test func whaleSharkUsesOfficialSideArtworkAndSevenSwimmingFrames() {
+        let expectedFrames = (1...7).map { "fish_whale_shark_side_\($0)" }
+
+        #expect(FishSpecies.whaleShark.imageName == "fish_whale_shark")
+        #expect(FishSpecies.whaleShark.displayScale == 6.00)
+        #expect(FishSpecies.whaleShark.swimmingImageNames == expectedFrames)
+        #expect(expectedFrames[3] == "fish_whale_shark_side_4")
+        #expect(!FishSpecies.whaleShark.usesDirectionalSwimmingSprites)
+        #expect(FishSpecies.whaleShark.usesHorizontalSwimmingFlip)
+        for direction in FishFacingDirection.allCases {
+            #expect(FishSpecies.whaleShark.swimmingImageNames(for: direction) == expectedFrames)
+        }
+    }
+
+    @Test func whaleSharkUsesSharedSevenFramePingPongAtPowerfulCruisingTempo() {
+        let duration = AquariumFishMotion.spriteFrameDuration(
+            for: .whaleShark,
+            behavior: .cruising,
+            currentSpeed: 0.033,
+            baseSpeed: 0.033
+        )
+        let indices = (0...13).map { step in
+            FishSpriteAnimation.pingPongFrameIndex(
+                frameCount: FishSpecies.whaleShark.swimmingImageNames.count,
+                elapsedTime: Double(step) * duration,
+                frameDuration: duration
+            )
+        }
+
+        #expect(duration == 0.30)
+        #expect(indices == [0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1, 0, 1])
+    }
+
+    @Test func whaleSharkProfileIsStableLongRangeAndNeverStopsOrBursts() {
+        let profile = FishMovementProfile.whaleShark
+
+        #expect(AquariumFishMotion.movementProfile(for: .whaleShark).baseSpeedRange
+            == profile.baseSpeedRange)
+        #expect(profile.baseSpeedRange == 0.026...0.040)
+        #expect(profile.directionHoldDurationRange == 10.0...15.0)
+        #expect(profile.wanderingRadiusX == 0.42...0.68)
+        #expect(profile.wanderingRadiusY == 0.20...0.36)
+        #expect(profile.turnResponsivenessRange == 0.14...0.28)
+        #expect(profile.depthScaleRange == 1.0...1.0)
+        #expect(profile.steeringNoiseMultiplier == 0.14)
+        #expect(profile.accelerationResponseRange == 0.65...1.05)
+        #expect(profile.brakingResponseRange == 0.55...0.90)
+        #expect(profile.hoverProbability == 0)
+        #expect(profile.burstProbability == 0)
+        #expect(profile.swimPhaseSpeedMultiplier == 0.35)
+
+        let id = UUID(uuid: (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86))
+        var motion = AquariumFishMotion.initialState(for: id, profile: profile)
+        #expect(motion.behavior != .hovering)
+        for frame in 1...1_800 {
+            motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: Double(frame) / 30)
+            #expect(motion.behavior != .burst)
+            #expect(motion.behavior != .hovering)
+            #expect(motion.currentSpeed > 0)
+        }
     }
 
     @Test func mantaWingSwimmingProfileIsLongRangeSlowTurningAndBurstFree() {
@@ -2037,7 +2098,7 @@ struct PomodoroAquariumTests {
         ) == .downRight)
     }
 
-    @Test func frontSpriteFallsBackToSideFramesWhileFrontDisplayIsDisabled() {
+    @Test func frontSpriteUsesSideFramesWithoutFrontAssets() {
         #expect(FishSpecies.clownfish.swimmingImageNames(for: .front) == [
             "fish_clownfish_side_1",
             "fish_clownfish_side_2",
@@ -2085,13 +2146,13 @@ struct PomodoroAquariumTests {
             == .sideToDiagonalUp15(isLeftFacing: true))
     }
 
-    @Test func clownfishIntermediatePoseUsesExistingPingPongFrames() {
+    @Test func clownfishIntermediatePoseUsesSharedSideFrames() {
         #expect(FishSpecies.clownfish.swimmingImageNames(
             for: .sideToDiagonalUp15(isLeftFacing: false)
         ) == [
-            "fish_clownfish_side_to_diagonal_up_15_1",
-            "fish_clownfish_side_to_diagonal_up_15_2",
-            "fish_clownfish_side_to_diagonal_up_15_3"
+            "fish_clownfish_side_1",
+            "fish_clownfish_side_2",
+            "fish_clownfish_side_3"
         ])
         #expect(!FishSpecies.clownfish.swimmingImageNames(
             for: .sideToDiagonalUp15(isLeftFacing: false)
@@ -2132,13 +2193,13 @@ struct PomodoroAquariumTests {
             == .sideToDiagonalDown15(isLeftFacing: true))
     }
 
-    @Test func clownfishDownIntermediatePoseUsesExistingPingPongFrames() {
+    @Test func clownfishDownIntermediatePoseUsesSharedSideFrames() {
         #expect(FishSpecies.clownfish.swimmingImageNames(
             for: .sideToDiagonalDown15(isLeftFacing: false)
         ) == [
-            "fish_clownfish_side_to_diagonal_down_15_1",
-            "fish_clownfish_side_to_diagonal_down_15_2",
-            "fish_clownfish_side_to_diagonal_down_15_3"
+            "fish_clownfish_side_1",
+            "fish_clownfish_side_2",
+            "fish_clownfish_side_3"
         ])
     }
 
@@ -2348,21 +2409,21 @@ struct PomodoroAquariumTests {
         #expect(profile.depthSpeedMultiplier(at: 0) < profile.depthSpeedMultiplier(at: 1))
     }
 
-    @Test func clownfishDefinesFutureSwimmingSpriteFrameNames() {
+    @Test func clownfishUsesOnlySideSwimmingFrames() {
         #expect(FishSpecies.clownfish.swimmingImageNames == [
             "fish_clownfish_side_1",
             "fish_clownfish_side_2",
             "fish_clownfish_side_3"
         ])
         #expect(FishSpecies.clownfish.swimmingImageNames(for: .upRight) == [
-            "fish_clownfish_diagonal_up_1",
-            "fish_clownfish_diagonal_up_2",
-            "fish_clownfish_diagonal_up_3"
+            "fish_clownfish_side_1",
+            "fish_clownfish_side_2",
+            "fish_clownfish_side_3"
         ])
         #expect(FishSpecies.clownfish.swimmingImageNames(for: .down) == [
-            "fish_clownfish_down_1",
-            "fish_clownfish_down_2",
-            "fish_clownfish_down_3"
+            "fish_clownfish_side_1",
+            "fish_clownfish_side_2",
+            "fish_clownfish_side_3"
         ])
         #expect(FishSpecies.pufferfish.swimmingImageNames.isEmpty)
     }

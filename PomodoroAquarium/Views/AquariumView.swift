@@ -422,7 +422,7 @@ private struct SwimmingFishView: View {
     var body: some View {
         fishImage
             // 分離された尾びれ素材がないため、1枚絵へ速度連動の微細な変形を加える。
-            .rotationEffect(.degrees(swimRotation))
+            .rotationEffect(.degrees(swimRotation + clownfishDirectionRotation))
             .scaleEffect(x: 1, y: swimVerticalScale)
             .offset(y: swimVerticalOffset)
             .opacity(motion.depthOpacity)
@@ -460,6 +460,10 @@ private struct SwimmingFishView: View {
             elapsedTime: elapsedTime,
             neighborPositions: neighborPositions,
             speedMultiplier: wingSpeedMultiplier,
+            behaviorTargetSpeedMultiplier: AquariumFishMotion.behaviorTargetSpeedMultiplier(
+                for: species,
+                behavior: motion.behavior
+            ),
             speedResponseMultiplier: wingSpeedResponseMultiplier,
             minimumSpeedMultiplier: wingMinimumSpeedMultiplier,
             steeringNoiseMultiplier: wingSteeringMultiplier
@@ -555,6 +559,11 @@ private struct SwimmingFishView: View {
                 * motion.presentationMotionIntensity
                 * wingPresentationMultiplier
         )
+    }
+
+    /// クマノミのside 3フレームを、flip後に画面内の進行方向へ回転する。
+    private var clownfishDirectionRotation: Double {
+        species.swimmingImageRotation(for: motion.facingDirection)
     }
 
     private var swimVerticalScale: CGFloat {
