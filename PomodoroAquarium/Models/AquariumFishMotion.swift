@@ -79,6 +79,33 @@ struct FishMovementProfile {
         swimPhaseSpeedMultiplier: 0.55
     )
 
+    /// クラゲ型の浮遊性格を維持し、基準移動速度だけを上げたタツノオトシゴ用profile。
+    static let seahorse = FishMovementProfile(
+        baseSpeedRange: 0.016...0.030,
+        hoverProbability: 0.55,
+        burstProbability: 0,
+        gatheringProbability: 0.08,
+        wanderingRadiusX: 0.08...0.16,
+        wanderingRadiusY: 0.14...0.28,
+        turnResponsivenessRange: 0.30...0.55,
+        depthRange: 0.18...0.86,
+        depthScaleRange: 1.0...1.0,
+        depthOpacityRange: 0.80...1.0,
+        depthSpeedRange: 0.90...1.02,
+        depthChangeProbability: 0.40,
+        depthChangeResponse: 0.18,
+        directionHoldDurationRange: 5.0...10.0,
+        burstSpeedMultiplierRange: 1.0...1.0,
+        burstDurationRange: 0.4...0.4,
+        burstCooldownRange: 20.0...20.0,
+        hoverDurationRange: 2.0...5.0,
+        steeringNoiseMultiplier: 0.30,
+        verticalDirectionBias: 1.6,
+        accelerationResponseRange: 0.9...1.6,
+        brakingResponseRange: 0.8...1.4,
+        swimPhaseSpeedMultiplier: 0.55
+    )
+
     /// マンタなど、大きな翼で長距離をゆっくり巡航する魚種向けの基準profile。
     static let manta = FishMovementProfile(
         baseSpeedRange: 0.042...0.066,
@@ -189,6 +216,35 @@ enum AquariumFishMotion {
         case turning
     }
 
+    struct SpeedVariationProfile: Equatable {
+        let changeIntervalRange: ClosedRange<TimeInterval>
+        let hoveringRange: ClosedRange<CGFloat>
+        let wanderingRange: ClosedRange<CGFloat>
+        let cruisingRange: ClosedRange<CGFloat>
+        let transitionRange: ClosedRange<CGFloat>
+
+        static let seahorse = SpeedVariationProfile(
+            changeIntervalRange: 2.0...6.0,
+            hoveringRange: 0.60...0.75,
+            wanderingRange: 0.75...1.20,
+            cruisingRange: 1.10...1.35,
+            transitionRange: 0.70...0.90
+        )
+
+        func multiplierRange(for behavior: Behavior) -> ClosedRange<CGFloat> {
+            switch behavior {
+            case .hovering:
+                hoveringRange
+            case .wandering:
+                wanderingRange
+            case .cruising, .burst:
+                cruisingRange
+            case .braking, .turning:
+                transitionRange
+            }
+        }
+    }
+
     static let horizontalRange: ClosedRange<CGFloat> = 0.18...0.82
     static let verticalRange: ClosedRange<CGFloat> = 0.16...0.62
     static let maximumDeltaTime: TimeInterval = 1.0 / 15.0
@@ -289,6 +345,9 @@ enum AquariumFishMotion {
         var noisePhaseY: CGFloat
         var swimPhase: CGFloat
         var accelerationMagnitude: CGFloat
+        let speedVariationProfile: SpeedVariationProfile?
+        var targetSpeedVariationMultiplier: CGFloat
+        var speedVariationTimeRemaining: TimeInterval
 
         var facingSign: CGFloat
         var facingWidth: CGFloat
@@ -327,6 +386,7 @@ enum AquariumFishMotion {
             }
 
             updatePresentationMotionIntensity(deltaTime: deltaTime)
+            updateSpeedVariation(deltaTime: deltaTime)
 
             let noise = AquariumFishMotion.smoothNoise(
                 time: elapsedTime,
@@ -366,7 +426,7 @@ enum AquariumFishMotion {
             ))
             updateSpeed(
                 deltaTime: deltaTime,
-                multiplier: speedMultiplier,
+                multiplier: speedMultiplier * targetSpeedVariationMultiplier,
                 behaviorTargetSpeedMultiplier: behaviorTargetSpeedMultiplier,
                 responseMultiplier: speedResponseMultiplier,
                 minimumSpeedMultiplier: minimumSpeedMultiplier
@@ -544,6 +604,17 @@ enum AquariumFishMotion {
             let amount = 1 - exp(-response * CGFloat(deltaTime))
             currentSpeed += (effectiveTargetSpeed - currentSpeed) * amount
             accelerationMagnitude = abs(currentSpeed - previousSpeed) / max(CGFloat(deltaTime), 0.001)
+        }
+
+        private mutating func updateSpeedVariation(deltaTime: TimeInterval) {
+            guard let speedVariationProfile else { return }
+            speedVariationTimeRemaining -= deltaTime
+            guard speedVariationTimeRemaining <= 0 else { return }
+
+            targetSpeedVariationMultiplier = random(
+                in: speedVariationProfile.multiplierRange(for: behavior)
+            )
+            speedVariationTimeRemaining = random(in: speedVariationProfile.changeIntervalRange)
         }
 
         private mutating func updateSwimPhase(deltaTime: TimeInterval) {
@@ -775,7 +846,8 @@ enum AquariumFishMotion {
 
     static func initialState(
         for id: UUID,
-        profile: FishMovementProfile = .clownfish
+        profile: FishMovementProfile = .clownfish,
+        speedVariationProfile: SpeedVariationProfile? = nil
     ) -> State {
         let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
         let angle = CGFloat(bytes[4]) / 255 * .pi * 2
@@ -803,6 +875,14 @@ enum AquariumFishMotion {
         let initialBurstCooldown = profile.burstCooldownRange.lowerBound
             + Double(bytes[10]) / 255
                 * (profile.burstCooldownRange.upperBound - profile.burstCooldownRange.lowerBound)
+        let initialSpeedVariationMultiplier = speedVariationProfile.map {
+            interpolated($0.multiplierRange(for: initialBehavior), byte: bytes[0])
+        } ?? 1
+        let initialSpeedVariationTimeRemaining = speedVariationProfile.map {
+            $0.changeIntervalRange.lowerBound
+                + Double(bytes[1]) / 255
+                    * ($0.changeIntervalRange.upperBound - $0.changeIntervalRange.lowerBound)
+        } ?? 0
 
         return State(
             position: initialPosition,
@@ -841,6 +921,9 @@ enum AquariumFishMotion {
             noisePhaseY: CGFloat(bytes[15]) / 255 * .pi * 2,
             swimPhase: CGFloat(bytes[3]) / 255 * .pi * 2,
             accelerationMagnitude: 0,
+            speedVariationProfile: speedVariationProfile,
+            targetSpeedVariationMultiplier: initialSpeedVariationMultiplier,
+            speedVariationTimeRemaining: initialSpeedVariationTimeRemaining,
             facingSign: facingSign,
             facingWidth: 1,
             visualTurnTargetSign: nil,
@@ -865,9 +948,15 @@ enum AquariumFishMotion {
             .manta
         case .whaleShark:
             .whaleShark
-        case .pufferfish, .seahorse:
+        case .seahorse:
+            .seahorse
+        case .pufferfish:
             .clownfish
         }
+    }
+
+    static func speedVariationProfile(for species: FishSpecies) -> SpeedVariationProfile? {
+        species == .seahorse ? .seahorse : nil
     }
 
     static func wingSwimmingProfile(for species: FishSpecies) -> WingSwimmingProfile? {
@@ -910,7 +999,17 @@ enum AquariumFishMotion {
             return 0.36
         case .whaleShark:
             return 0.30
-        case .clownfish, .pufferfish, .seahorse:
+        case .pufferfish:
+            // 小さな胸びれを素早く見せつつ、30fpsでのちらつきを避ける。
+            let sharedDuration = spriteFrameDuration(
+                for: behavior,
+                currentSpeed: currentSpeed,
+                baseSpeed: baseSpeed
+            )
+            return max(sharedDuration * 0.45, 0.06)
+        case .seahorse:
+            return 0.28
+        case .clownfish:
             break
         }
         return spriteFrameDuration(
@@ -947,6 +1046,28 @@ enum AquariumFishMotion {
     static func spriteAnimationPhase(for id: UUID) -> TimeInterval {
         let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
         return Double(bytes[6]) / 255 * 1.7
+    }
+
+    /// 既存の泳動phaseを5枚ping-pongの1周期へ対応させる。
+    static func seahorseSpriteAnimationTime(
+        swimPhase: CGFloat,
+        frameCount: Int,
+        frameDuration: TimeInterval
+    ) -> TimeInterval {
+        let fullTurn = CGFloat.pi * 2
+        let normalizedPhase = swimPhase.truncatingRemainder(dividingBy: fullTurn)
+        let positivePhase = normalizedPhase >= 0 ? normalizedPhase : normalizedPhase + fullTurn
+        let cycleStepCount = max((frameCount - 1) * 2, 1)
+        return Double(positivePhase / fullTurn)
+            * Double(cycleStepCount)
+            * max(frameDuration, 0.01)
+    }
+
+    static func seahorseVisualOffsetY(
+        swimPhase: CGFloat,
+        amplitude: CGFloat = 1.2
+    ) -> CGFloat {
+        -sin(swimPhase) * amplitude
     }
 
     static func spriteTempoMultiplier(for id: UUID) -> TimeInterval {

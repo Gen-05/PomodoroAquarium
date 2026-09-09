@@ -408,7 +408,8 @@ private struct SwimmingFishView: View {
 
         let initialMotion = AquariumFishMotion.initialState(
             for: fishID,
-            profile: AquariumFishMotion.movementProfile(for: species)
+            profile: AquariumFishMotion.movementProfile(for: species),
+            speedVariationProfile: AquariumFishMotion.speedVariationProfile(for: species)
         )
         self._motion = State(initialValue: initialMotion)
         self._spriteDirectionTransition = State(
@@ -422,7 +423,7 @@ private struct SwimmingFishView: View {
     var body: some View {
         fishImage
             // 分離された尾びれ素材がないため、1枚絵へ速度連動の微細な変形を加える。
-            .rotationEffect(.degrees(swimRotation + clownfishDirectionRotation))
+            .rotationEffect(.degrees(swimRotation + smallFishDirectionRotation))
             .scaleEffect(x: 1, y: swimVerticalScale)
             .offset(y: swimVerticalOffset)
             .opacity(motion.depthOpacity)
@@ -487,7 +488,7 @@ private struct SwimmingFishView: View {
             facingHorizontalScale: motion.facingHorizontalScale,
             animationTime: spriteAnimationTime,
             animationFrameDuration: spriteFrameDuration,
-            animationPhase: species == .manta ? 0 : spriteAnimationPhase,
+            animationPhase: species == .manta || species == .seahorse ? 0 : spriteAnimationPhase,
             fixedAnimationFrameIndex: fixedSpriteFrameIndex
         )
         .frame(width: fishSize, height: fishSize)
@@ -515,6 +516,13 @@ private struct SwimmingFishView: View {
     }
 
     private var spriteAnimationTime: TimeInterval? {
+        if species == .seahorse {
+            return AquariumFishMotion.seahorseSpriteAnimationTime(
+                swimPhase: motion.swimPhase,
+                frameCount: species.swimmingImageNames.count,
+                frameDuration: spriteFrameDuration
+            )
+        }
         guard species == .manta else { return updateDate.timeIntervalSinceReferenceDate }
         guard wingCycle?.phase == .flapping else { return nil }
         return wingCycle?.flapElapsedTime
@@ -553,7 +561,8 @@ private struct SwimmingFishView: View {
     }
 
     private var swimRotation: Double {
-        Double(
+        guard species != .seahorse else { return 0 }
+        return Double(
             sin(motion.swimPhase)
                 * min(0.8 + swimIntensity * 0.45, 1.8)
                 * motion.presentationMotionIntensity
@@ -561,20 +570,25 @@ private struct SwimmingFishView: View {
         )
     }
 
-    /// クマノミのside 3フレームを、flip後に画面内の進行方向へ回転する。
-    private var clownfishDirectionRotation: Double {
+    /// 小魚型のsideフレームを、flip後に画面内の進行方向へ回転する。
+    private var smallFishDirectionRotation: Double {
         species.swimmingImageRotation(for: motion.facingDirection)
     }
 
     private var swimVerticalScale: CGFloat {
-        1 + cos(motion.swimPhase * 1.07)
+        guard species != .seahorse else { return 1 }
+        return 1 + cos(motion.swimPhase * 1.07)
             * min(0.008 + swimIntensity * 0.005, 0.02)
             * motion.presentationMotionIntensity
             * wingPresentationMultiplier
     }
 
     private var swimVerticalOffset: CGFloat {
-        sin(motion.swimPhase * 0.53)
+        if species == .seahorse {
+            // frame1側で上昇、frame3で折り返し、frame5側で下降する描画専用の浮遊。
+            return AquariumFishMotion.seahorseVisualOffsetY(swimPhase: motion.swimPhase)
+        }
+        return sin(motion.swimPhase * 0.53)
             * min(0.7 + swimIntensity * 0.45, 1.8)
             * motion.presentationMotionIntensity
             * wingPresentationMultiplier

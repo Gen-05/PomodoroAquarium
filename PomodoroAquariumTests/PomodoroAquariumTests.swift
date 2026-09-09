@@ -16,9 +16,8 @@ struct PomodoroAquariumTests {
         #expect(FishSpecies.clownfish.displayScale == 0.60)
     }
 
-    @Test func fishWithoutOfficialArtworkUsesFallbackContract() {
-        #expect(FishSpecies.pufferfish.imageName == nil)
-        #expect(FishSpecies.seahorse.imageName == nil)
+    @Test func seahorseUsesItsNeutralOfficialArtwork() {
+        #expect(FishSpecies.seahorse.imageName == "fish_seahorse_side_3")
     }
 
 
@@ -1915,12 +1914,12 @@ struct PomodoroAquariumTests {
             < motion.hoverRadius * 1.4)
     }
 
-    @Test func existingNonJellyfishSpeciesKeepTheirCurrentMovementProfile() {
+    @Test func existingSmallFishKeepTheirCurrentMovementProfile() {
         let clownfish = FishMovementProfile.clownfish
 
         #expect(AquariumFishMotion.movementProfile(for: .clownfish).baseSpeedRange
             == clownfish.baseSpeedRange)
-        #expect(AquariumFishMotion.movementProfile(for: .seahorse).baseSpeedRange
+        #expect(AquariumFishMotion.movementProfile(for: .pufferfish).baseSpeedRange
             == clownfish.baseSpeedRange)
     }
 
@@ -2425,7 +2424,13 @@ struct PomodoroAquariumTests {
             "fish_clownfish_side_2",
             "fish_clownfish_side_3"
         ])
-        #expect(FishSpecies.pufferfish.swimmingImageNames.isEmpty)
+        #expect(FishSpecies.pufferfish.swimmingImageNames == [
+            "fish_tiger_puffer_side_1",
+            "fish_tiger_puffer_side_2",
+            "fish_tiger_puffer_side_3",
+            "fish_tiger_puffer_side_4",
+            "fish_tiger_puffer_side_5"
+        ])
     }
 
     @Test func spriteFramesPlayForwardAndBackward() {
