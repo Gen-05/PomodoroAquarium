@@ -8,6 +8,34 @@
 import SwiftUI
 import SwiftData
 
+enum BookFishThumbnailLayout {
+    static let frameSize = CGSize(width: 48, height: 38)
+
+    /// Asset内の透明余白を補正し、図鑑一覧での視覚的な存在感を揃える。
+    /// 水槽用のdisplayScaleとは独立した一覧専用値。
+    static func imageScale(for species: FishSpecies) -> CGFloat {
+        switch species {
+        case .clownfish:
+            0.75
+        case .jellyfish:
+            1.00
+        case .pufferfish:
+            1.20
+        case .seahorse:
+            1.40
+        case .manta:
+            1.10
+        case .whaleShark:
+            1.32
+        }
+    }
+
+    static func imageSize(for species: FishSpecies) -> CGSize {
+        let scale = imageScale(for: species)
+        return CGSize(width: frameSize.width * scale, height: frameSize.height * scale)
+    }
+}
+
 struct BookView: View {
     @Query private var players: [Player]
 
@@ -25,12 +53,22 @@ struct BookView: View {
             } label: {
                 HStack {
                     if ownedCount > 0 {
+                        let imageSize = BookFishThumbnailLayout.imageSize(for: species)
+
                         FishImageView(species: species)
-                            .frame(width: 48, height: 38)
+                            .frame(width: imageSize.width, height: imageSize.height)
+                            .frame(
+                                width: BookFishThumbnailLayout.frameSize.width,
+                                height: BookFishThumbnailLayout.frameSize.height
+                            )
+                            .clipped()
                     } else {
                         Image(systemName: "fish")
                             .font(.title2)
-                            .frame(width: 48, height: 38)
+                            .frame(
+                                width: BookFishThumbnailLayout.frameSize.width,
+                                height: BookFishThumbnailLayout.frameSize.height
+                            )
                     }
 
                     VStack(alignment: .leading) {

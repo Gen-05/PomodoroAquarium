@@ -2576,6 +2576,181 @@ struct PomodoroAquariumTests {
         #expect(BookView.ownedCount(for: .clownfish, in: nil) == 0)
     }
 
+    @Test func bookThumbnailsUseOneFixedFrameAndCatalogOnlyScaleCorrections() {
+        #expect(BookFishThumbnailLayout.frameSize == CGSize(width: 48, height: 38))
+
+        let expectedScales: [FishSpecies: CGFloat] = [
+            .clownfish: 0.75,
+            .jellyfish: 1.00,
+            .pufferfish: 1.20,
+            .seahorse: 1.40,
+            .manta: 1.10,
+            .whaleShark: 1.32
+        ]
+
+        #expect(expectedScales.count == FishSpecies.allCases.count)
+        for species in FishSpecies.allCases {
+            let expectedScale = expectedScales[species] ?? 0
+            #expect(BookFishThumbnailLayout.imageScale(for: species) == expectedScale)
+            #expect(BookFishThumbnailLayout.imageSize(for: species) == CGSize(
+                width: BookFishThumbnailLayout.frameSize.width * expectedScale,
+                height: BookFishThumbnailLayout.frameSize.height * expectedScale
+            ))
+        }
+
+        #expect(BookFishThumbnailLayout.imageScale(for: .clownfish) != FishSpecies.clownfish.displayScale)
+        #expect(BookFishThumbnailLayout.imageScale(for: .whaleShark) != FishSpecies.whaleShark.displayScale)
+        #expect(BookFishThumbnailLayout.imageScale(for: .seahorse) > 1)
+    }
+
+    @Test func bookThumbnailsKeepEachSpeciesNeutralStaticImage() {
+        let expectedImages: [FishSpecies: String] = [
+            .clownfish: "fish_clownfish_side_2",
+            .jellyfish: "fish_moon_jellyfish",
+            .pufferfish: "fish_tiger_puffer_side_3",
+            .seahorse: "fish_seahorse_side_3",
+            .manta: "fish_reef_manta",
+            .whaleShark: "fish_whale_shark"
+        ]
+
+        for species in FishSpecies.allCases {
+            #expect(species.imageName == expectedImages[species])
+        }
+    }
+
+    @Test func fishDetailUsesAquariumRelativeScalesWithinItsOwnBounds() {
+        #expect(FishDetailImageLayout.cardHeight == 240)
+        #expect(FishDetailImageLayout.cardContentInset == 24)
+        #expect(FishDetailImageLayout.minimumPreferredSize == 80)
+        #expect(FishDetailImageLayout.maximumPreferredSize == 300)
+        #expect(FishDetailImageLayout.maximumVisibleContentRatio == 0.92)
+
+        let expectedSizes: [FishSpecies: CGFloat] = [
+            .clownfish: 80,
+            .jellyfish: 111.72,
+            .pufferfish: 118.29,
+            .seahorse: 136.06,
+            .manta: 185.04,
+            .whaleShark: 300
+        ]
+
+        for species in FishSpecies.allCases {
+            let expectedSize = expectedSizes[species] ?? 0
+            #expect(abs(FishDetailImageLayout.preferredDisplaySize(for: species) - expectedSize) < 0.01)
+        }
+
+        #expect(FishDetailImageLayout.preferredDisplaySize(for: .clownfish) > 28)
+        #expect(FishDetailImageLayout.preferredDisplaySize(for: .manta) > 112.5)
+        #expect(FishDetailImageLayout.preferredDisplaySize(for: .whaleShark) > 180)
+        #expect(FishDetailImageLayout.preferredDisplaySize(for: .clownfish) < FishDetailImageLayout.preferredDisplaySize(for: .pufferfish))
+        #expect(FishDetailImageLayout.preferredDisplaySize(for: .pufferfish) < FishDetailImageLayout.preferredDisplaySize(for: .seahorse))
+        #expect(FishDetailImageLayout.preferredDisplaySize(for: .manta) < FishDetailImageLayout.preferredDisplaySize(for: .whaleShark))
+    }
+
+    @Test func fishDetailKeepsVisibleArtworkInsideTheCardContentArea() {
+        let cardSize = CGSize(width: 361, height: FishDetailImageLayout.cardHeight)
+        let availableSize = FishDetailImageLayout.availableSize(in: cardSize)
+
+        #expect(availableSize == CGSize(width: 313, height: 192))
+        for species in FishSpecies.allCases {
+            let displaySize = FishDetailImageLayout.displaySize(
+                for: species,
+                availableSize: availableSize
+            )
+            let visibleRatio = FishDetailImageLayout.visibleContentRatio(for: species)
+            #expect(
+                displaySize * visibleRatio.width
+                    <= availableSize.width * FishDetailImageLayout.maximumVisibleContentRatio + 0.01
+            )
+            #expect(
+                displaySize * visibleRatio.height
+                    <= availableSize.height * FishDetailImageLayout.maximumVisibleContentRatio + 0.01
+            )
+        }
+    }
+
+    @Test func fishDetailSizingStaysSeparateFromBookThumbnailSizing() {
+        #expect(FishDetailImageLayout.preferredDisplaySize(for: .clownfish) != BookFishThumbnailLayout.imageSize(for: .clownfish).width)
+        #expect(FishDetailImageLayout.preferredDisplaySize(for: .seahorse) != BookFishThumbnailLayout.imageSize(for: .seahorse).height)
+        #expect(BookFishThumbnailLayout.frameSize == CGSize(width: 48, height: 38))
+    }
+
+    @Test func fishDetailStrokeReusesEverySpeciesFrameSequenceAndCruisingTempo() {
+        let expectedFrameCounts: [FishSpecies: Int] = [
+            .clownfish: 3,
+            .jellyfish: 5,
+            .pufferfish: 5,
+            .seahorse: 5,
+            .manta: 7,
+            .whaleShark: 7
+        ]
+        let expectedDurations: [FishSpecies: TimeInterval] = [
+            .clownfish: 0.155,
+            .jellyfish: 0.30,
+            .pufferfish: 0.06975,
+            .seahorse: 0.28,
+            .manta: 0.36,
+            .whaleShark: 0.30
+        ]
+
+        for species in FishSpecies.allCases {
+            let state = FishDetailStrokeAnimationState(species: species)
+            #expect(state.frameCount == expectedFrameCounts[species])
+            #expect(abs(state.frameDuration - (expectedDurations[species] ?? 0)) < 0.000_001)
+            #expect(state.currentFrameIndex == nil)
+            #expect(!state.isAnimating)
+        }
+    }
+
+    @Test func fishDetailStrokePlaysOnePingPongThenReturnsToNeutral() {
+        var threeFrames = FishDetailStrokeAnimationState(frameCount: 3, frameDuration: 0.2)
+        var displayedFrames: [Int] = []
+
+        #expect(FishDetailStrokeAnimationState.oneStrokeFrameIndices(frameCount: 3)
+            == [0, 1, 2, 1, 0])
+        #expect(FishDetailStrokeAnimationState.oneStrokeFrameIndices(frameCount: 5)
+            == [0, 1, 2, 3, 4, 3, 2, 1, 0])
+        #expect(FishDetailStrokeAnimationState.oneStrokeFrameIndices(frameCount: 7)
+            == [0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1, 0])
+        #expect(threeFrames.currentFrameIndex == nil)
+        let started = threeFrames.start()
+        #expect(started)
+        while let frameIndex = threeFrames.currentFrameIndex {
+            displayedFrames.append(frameIndex)
+            threeFrames.advance()
+        }
+
+        #expect(displayedFrames == [0, 1, 2, 1, 0])
+        #expect(!threeFrames.isAnimating)
+        #expect(threeFrames.currentFrameIndex == nil)
+    }
+
+    @Test func fishDetailStrokeIgnoresRetapsUntilPlaybackFinishes() {
+        var animation = FishDetailStrokeAnimationState(frameCount: 5, frameDuration: 0.2)
+
+        let started = animation.start()
+        let ignoredRetap = animation.start()
+        #expect(started)
+        #expect(!ignoredRetap)
+        #expect(animation.isAnimating)
+
+        while animation.advance() {}
+
+        #expect(!animation.isAnimating)
+        let restarted = animation.start()
+        #expect(restarted)
+    }
+
+    @Test func fishDetailStrokeKeepsSingleFrameSpeciesStatic() {
+        var animation = FishDetailStrokeAnimationState(frameCount: 1, frameDuration: 0.2)
+
+        #expect(FishDetailStrokeAnimationState.oneStrokeFrameIndices(frameCount: 1) == [0])
+        let started = animation.start()
+        #expect(!started)
+        #expect(!animation.isAnimating)
+        #expect(animation.currentFrameIndex == nil)
+    }
+
     @Test func ownedFishCanBeSetAsFavorite() {
         let clownfish = PlayerFish(species: .clownfish)
         let player = Player(ownedFish: [clownfish])
