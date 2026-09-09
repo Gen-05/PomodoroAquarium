@@ -13,7 +13,7 @@ import Testing
 struct PomodoroAquariumTests {
     @Test func clownfishUsesOfficialSideImageAndDefaultDisplayScale() {
         #expect(FishSpecies.clownfish.imageName == "fish_clownfish_side_2")
-        #expect(FishSpecies.clownfish.displayScale == 0.60)
+        #expect(FishSpecies.clownfish.displayScale == 0.40)
     }
 
     @Test func seahorseUsesItsNeutralOfficialArtwork() {
@@ -1635,11 +1635,11 @@ struct PomodoroAquariumTests {
         let expectedFrames = (1...7).map { "fish_reef_manta_side_\($0)" }
 
         #expect(FishSpecies.manta.imageName == "fish_reef_manta")
-        #expect(FishSpecies.manta.displayScale == 4.0)
-        #expect(FishSpecies.clownfish.displayScale == 0.60)
-        #expect(FishSpecies.jellyfish.displayScale == 0.90)
-        #expect(FishSpecies.pufferfish.displayScale == 0.75)
-        #expect(FishSpecies.seahorse.displayScale == 0.75)
+        #expect(FishSpecies.manta.displayScale == 2.25)
+        #expect(FishSpecies.clownfish.displayScale == 0.40)
+        #expect(FishSpecies.jellyfish.displayScale == 0.80)
+        #expect(FishSpecies.pufferfish.displayScale == 0.90)
+        #expect(FishSpecies.seahorse.displayScale == 1.20)
         #expect(FishSpecies.whaleShark.displayScale == 6.00)
         #expect(FishSpecies.manta.swimmingImageNames == expectedFrames)
         #expect(!FishSpecies.manta.usesDirectionalSwimmingSprites)
@@ -1826,7 +1826,16 @@ struct PomodoroAquariumTests {
         #expect(WingSwimmingProfile.manta.glideDecelerationResponseMultiplier == 0.20)
         #expect(WingSwimmingProfile.manta.glideMinimumSpeedMultiplier == 1.10)
         #expect(WingSwimmingProfile.manta.neutralFrameIndex == 3)
-        #expect(FishSpecies.manta.displayScale == 4.0)
+        #expect(FishSpecies.manta.displayScale == 2.25)
+    }
+
+    @Test func favoriteFishUsesTheSameAquariumSizeAsNormalFish() {
+        for species in FishSpecies.allCases {
+            let normalSize = AquariumFishSizing.displaySize(for: species, isFavorite: false)
+            let favoriteSize = AquariumFishSizing.displaySize(for: species, isFavorite: true)
+            #expect(favoriteSize == normalSize)
+            #expect(normalSize == AquariumFishSizing.baseSize * species.displayScale)
+        }
     }
 
     @Test @MainActor func jellyfishAcquisitionSupportsFirstAndDuplicateCounts() throws {

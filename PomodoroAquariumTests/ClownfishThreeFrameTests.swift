@@ -88,7 +88,7 @@ struct ClownfishThreeFrameTests {
         #expect(profile.burstProbability == 0.24)
         #expect(profile.hoverProbability == 0.34)
         #expect(profile.gatheringProbability == 0.15)
-        #expect(FishSpecies.clownfish.displayScale == 0.60)
+        #expect(FishSpecies.clownfish.displayScale == 0.40)
     }
 
     @Test func clownfishBehaviorSpeedTargetsMatchAnimationTempo() {

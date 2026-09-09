@@ -369,6 +369,14 @@ struct AquariumDecorationView: View {
     }
 }
 
+enum AquariumFishSizing {
+    static let baseSize: CGFloat = 78
+
+    static func displaySize(for species: FishSpecies, isFavorite _: Bool) -> CGFloat {
+        baseSize * species.displayScale
+    }
+}
+
 private struct SwimmingFishView: View {
     let fishID: UUID
     let species: FishSpecies
@@ -495,7 +503,7 @@ private struct SwimmingFishView: View {
     }
 
     private var fishSize: CGFloat {
-        (isFavorite ? 120 : 78) * species.displayScale
+        AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite)
     }
 
     private var swimIntensity: CGFloat {

@@ -21,7 +21,7 @@ struct TigerPufferTests {
         #expect(FishSpecies.pufferfish.imageName == "fish_tiger_puffer_side_3")
         #expect(frames[2] == FishSpecies.pufferfish.imageName)
         #expect(FishSpecies.pufferfish.rarity == .common)
-        #expect(FishSpecies.pufferfish.displayScale == 0.75)
+        #expect(FishSpecies.pufferfish.displayScale == 0.90)
         #expect(FishSpecies.allCases.filter { $0 == .pufferfish }.count == 1)
     }
 

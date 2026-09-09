@@ -21,7 +21,7 @@ struct SeahorseTests {
         #expect(FishSpecies.seahorse.name == "タツノオトシゴ")
         #expect(FishSpecies.seahorse.imageName == "fish_seahorse_side_3")
         #expect(FishSpecies.seahorse.rarity == .rare)
-        #expect(FishSpecies.seahorse.displayScale == 0.75)
+        #expect(FishSpecies.seahorse.displayScale == 1.20)
 
         let persistedValue = try JSONEncoder().encode(FishSpecies.seahorse)
         #expect(try JSONDecoder().decode(FishSpecies.self, from: persistedValue) == .seahorse)
