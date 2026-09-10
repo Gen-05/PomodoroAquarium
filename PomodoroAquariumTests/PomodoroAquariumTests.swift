@@ -61,6 +61,64 @@ struct PomodoroAquariumTests {
         #expect(!TimerMode.stopwatch.showsTimeSettings)
     }
 
+    @Test func timerHourAndMinuteInputsConvertToTheExistingTotalMinuteValues() {
+        #expect(CountdownDurationComponents(hours: 0, minutes: 1).totalMinutes == 1)
+        #expect(CountdownDurationComponents(hours: 1, minutes: 30).totalMinutes == 90)
+        #expect(CountdownDurationComponents(hours: 3, minutes: 0).totalMinutes == 180)
+        #expect(CountdownDurationComponents(hours: 4, minutes: 0).totalMinutes == 240)
+        #expect(CountdownDurationComponents(hours: 12, minutes: 30).totalMinutes == 750)
+        #expect(CountdownDurationComponents(hours: 23, minutes: 59).totalMinutes == 1_439)
+    }
+
+    @Test func storedTimerTotalMinutesRestoreAsHourAndMinuteComponents() {
+        let components = CountdownDurationComponents(totalMinutes: 1_439)
+        #expect(components.hours == 23)
+        #expect(components.minutes == 59)
+    }
+
+    @Test func timerDurationValidationRejectsZeroAndAnythingAtOrAboveTwentyFourHours() {
+        #expect(CountdownDurationConfiguration.totalMinutesRange.upperBound == 1_439)
+        #expect(!CountdownDurationConfiguration.isValidDuration(hours: 0, minutes: 0))
+        #expect(CountdownDurationConfiguration.isValidDuration(hours: 0, minutes: 1))
+        #expect(CountdownDurationConfiguration.isValidDuration(hours: 23, minutes: 59))
+        #expect(!CountdownDurationConfiguration.isValidDuration(hours: 0, minutes: 60))
+        #expect(!CountdownDurationConfiguration.isValidDuration(hours: 24, minutes: 0))
+    }
+
+    @Test func longCountdownUsesHoursMinutesAndSecondsWithoutChangingShortTimeFormat() {
+        #expect(formatCountdownTime(30 * 60) == "30:00")
+        #expect(formatCountdownTime(1_439 * 60) == "23:59:00")
+        #expect(formatTime(1_439 * 60) == "1439:00")
+    }
+
+    @Test func maximumTimerDurationReachesCountdownCompletionAndNotificationAsTotalMinutes() {
+        let clock = TestClock()
+        let notifications = TestNotificationService()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: notifications
+        )
+        let studyDuration = CountdownDurationComponents(hours: 23, minutes: 59)
+        viewModel.selectMode(.countdown)
+
+        viewModel.updateConfiguration(
+            studyTime: studyDuration.totalMinutes,
+            breakTime: 5
+        )
+
+        #expect(viewModel.mode == .countdown)
+        #expect(viewModel.displayedSeconds == 1_439 * 60)
+        viewModel.resumeTimer()
+        #expect(notifications.scheduled == .study(clock.now.addingTimeInterval(1_439 * 60)))
+        clock.advance(by: 1_439 * 60)
+        viewModel.synchronizeTime()
+        #expect(!viewModel.isRunning)
+        #expect(viewModel.lastCompletedStudyMinutes == 1_439)
+    }
+
     @Test func notificationIntroductionAppearsOnlyForFirstCountdownStudyStart() {
         #expect(NotificationIntroductionSettings.shouldPresent(for: .pomodoro, hasShown: false))
         #expect(NotificationIntroductionSettings.shouldPresent(for: .countdown, hasShown: false))

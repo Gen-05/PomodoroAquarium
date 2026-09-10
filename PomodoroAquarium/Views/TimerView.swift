@@ -34,6 +34,43 @@ enum PomodoroBreakConfiguration {
     }
 }
 
+struct CountdownDurationComponents {
+    let hours: Int
+    let minutes: Int
+
+    init(totalMinutes: Int) {
+        let nonnegativeMinutes = max(totalMinutes, 0)
+        hours = nonnegativeMinutes / 60
+        minutes = nonnegativeMinutes % 60
+    }
+
+    init(hours: Int, minutes: Int) {
+        self.hours = hours
+        self.minutes = minutes
+    }
+
+    var totalMinutes: Int {
+        hours * 60 + minutes
+    }
+}
+
+enum CountdownDurationConfiguration {
+    static let maximumHours = 23
+    static let maximumMinutes = 59
+    static let totalMinutesRange = 1...(maximumHours * 60 + maximumMinutes)
+
+    static func maximumMinuteComponent(hours: Int, maximumTotalMinutes: Int) -> Int {
+        min(max(maximumTotalMinutes - max(hours, 0) * 60, 0), 59)
+    }
+
+    static func isValidDuration(hours: Int, minutes: Int) -> Bool {
+        guard hours >= 0, (0...59).contains(minutes) else { return false }
+        return totalMinutesRange.contains(
+            CountdownDurationComponents(hours: hours, minutes: minutes).totalMinutes
+        )
+    }
+}
+
 struct TimerView: View {
     
     let studyTime: Int
@@ -123,9 +160,13 @@ struct TimerView: View {
                     .background(.black.opacity(0.16), in: Capsule())
 
                 HStack(spacing: 12) {
-                    Text(formatTime(viewModel.displayedSeconds))
+                    Text(viewModel.mode == .countdown
+                         ? formatCountdownTime(viewModel.displayedSeconds)
+                         : formatTime(viewModel.displayedSeconds))
                         .font(.system(size: 72, weight: .semibold, design: .rounded))
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(viewModel.mode == .countdown ? 0.6 : 1)
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
 
@@ -442,6 +483,8 @@ private struct TimerTimeSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var studyMinutes: Int
     @State private var breakMinutes: Int
+    @State private var timerHours: Int
+    @State private var timerMinuteComponent: Int
     @State private var setCount: Int
     @State private var retainedBreakMinutes: Int
 
@@ -454,11 +497,19 @@ private struct TimerTimeSettingsSheet: View {
     ) {
         self.mode = mode
         self.onSave = onSave
+        let editableTimerMinutes = min(
+            max(studyMinutes, CountdownDurationConfiguration.totalMinutesRange.lowerBound),
+            CountdownDurationConfiguration.totalMinutesRange.upperBound
+        )
+        let timerComponents = CountdownDurationComponents(totalMinutes: editableTimerMinutes)
+
         _studyMinutes = State(initialValue: studyMinutes)
         _breakMinutes = State(initialValue: PomodoroBreakConfiguration.effectiveBreakMinutes(
             preferredMinutes: breakMinutes,
             setCount: setCount
         ))
+        _timerHours = State(initialValue: timerComponents.hours)
+        _timerMinuteComponent = State(initialValue: timerComponents.minutes)
         _setCount = State(initialValue: setCount)
         _retainedBreakMinutes = State(initialValue: max(
             breakMinutes,
@@ -499,19 +550,33 @@ private struct TimerTimeSettingsSheet: View {
                         )
                     }
                 } else {
-                    pickerColumn(
+                    durationPicker(
                         title: "勉強時間",
-                        selection: $studyMinutes,
-                        values: 1...180,
-                        suffix: "分"
+                        hours: $timerHours,
+                        minutes: $timerMinuteComponent,
+                        maximumTotalMinutes: CountdownDurationConfiguration.totalMinutesRange.upperBound
                     )
-                    .frame(maxWidth: 180)
+
+                    if timerTotalMinutes == 0 {
+                        Text("タイマー時間は1分以上に設定してください")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
 
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12)
             .padding(.top, 14)
+            .onChange(of: timerHours) { _, newHours in
+                timerMinuteComponent = min(
+                    timerMinuteComponent,
+                    CountdownDurationConfiguration.maximumMinuteComponent(
+                        hours: newHours,
+                        maximumTotalMinutes: CountdownDurationConfiguration.totalMinutesRange.upperBound
+                    )
+                )
+            }
             .onChange(of: setCount) { oldSetCount, newSetCount in
                 if newSetCount == 1 {
                     if oldSetCount > 1 {
@@ -530,13 +595,85 @@ private struct TimerTimeSettingsSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        onSave(studyMinutes, breakMinutes, setCount)
+                        let savedStudyMinutes = mode == .countdown
+                            ? timerTotalMinutes
+                            : studyMinutes
+                        onSave(savedStudyMinutes, breakMinutes, setCount)
                         dismiss()
                     }
+                    .disabled(!canSave)
                 }
             }
         }
         .presentationDetents([.height(300)])
+    }
+
+    private var timerTotalMinutes: Int {
+        CountdownDurationComponents(
+            hours: timerHours,
+            minutes: timerMinuteComponent
+        ).totalMinutes
+    }
+
+    private var canSave: Bool {
+        guard mode == .countdown else { return true }
+        return CountdownDurationConfiguration.isValidDuration(
+            hours: timerHours,
+            minutes: timerMinuteComponent
+        )
+    }
+
+    private func durationPicker(
+        title: String,
+        hours: Binding<Int>,
+        minutes: Binding<Int>,
+        maximumTotalMinutes: Int
+    ) -> some View {
+        let maximumHours = maximumTotalMinutes / 60
+        let maximumMinutes = CountdownDurationConfiguration.maximumMinuteComponent(
+            hours: hours.wrappedValue,
+            maximumTotalMinutes: maximumTotalMinutes
+        )
+
+        return VStack(spacing: 0) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                componentPicker(
+                    accessibilityLabel: "\(title)の時間",
+                    selection: hours,
+                    values: 0...maximumHours,
+                    suffix: "時間"
+                )
+                componentPicker(
+                    accessibilityLabel: "\(title)の分",
+                    selection: minutes,
+                    values: 0...maximumMinutes,
+                    suffix: "分"
+                )
+            }
+        }
+    }
+
+    private func componentPicker(
+        accessibilityLabel: String,
+        selection: Binding<Int>,
+        values: ClosedRange<Int>,
+        suffix: String
+    ) -> some View {
+        Picker(accessibilityLabel, selection: selection) {
+            ForEach(values, id: \.self) { value in
+                Text("\(value)\(suffix)")
+                    .tag(value)
+            }
+        }
+        .pickerStyle(.wheel)
+        .labelsHidden()
+        .frame(maxWidth: .infinity)
+        .frame(height: 105)
+        .clipped()
     }
 
     private func pickerColumn(
@@ -571,6 +708,18 @@ func formatTime(_ seconds: Int) -> String {
     let seconds = seconds % 60
     
     return String(format: "%02d:%02d", minutes, seconds)
+}
+
+func formatCountdownTime(_ seconds: Int) -> String {
+    let nonnegativeSeconds = max(seconds, 0)
+    let hours = nonnegativeSeconds / 3600
+    let minutes = (nonnegativeSeconds % 3600) / 60
+    let seconds = nonnegativeSeconds % 60
+
+    guard hours > 0 else {
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+    return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
 }
 
 #Preview {
