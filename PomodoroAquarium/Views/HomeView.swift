@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 
 struct HomeView: View {
+    let timerViewModel: TimerViewModel
     
     @AppStorage("studyTime") private var studyTime = "25"
     @AppStorage("breakTime") private var breakTime = "5"
@@ -165,10 +166,17 @@ struct HomeView: View {
                             TimerView(
                                 studyTime: Int(studyTime) ?? 25,
                                 breakTime: Int(breakTime) ?? 5,
-                                player: player
+                                player: player,
+                                viewModel: timerViewModel
                             )
                         } label: {
-                            Label("勉強をはじめる", systemImage: "timer")
+                            Label(
+                                HomeTimerEntryPresentation.title(
+                                    for: timerViewModel.phase,
+                                    state: timerViewModel.state
+                                ),
+                                systemImage: "timer"
+                            )
                         }
                         .buttonStyle(AquariumPrimaryButtonStyle())
                     }
@@ -205,7 +213,8 @@ struct HomeView: View {
                 TimerView(
                     studyTime: Int(studyTime) ?? 25,
                     breakTime: Int(breakTime) ?? 5,
-                    player: player
+                    player: player,
+                    viewModel: timerViewModel
                 )
             }
         }
@@ -535,6 +544,19 @@ struct HomeView: View {
         }
     }
 
+}
+
+enum HomeTimerEntryPresentation {
+    static func title(for phase: PomodoroSessionPhase, state: TimerState) -> String {
+        switch phase {
+        case .breakTime:
+            "休憩に戻る"
+        case .awaitingNextSet:
+            "次のセット確認へ戻る"
+        case .study, .finished:
+            "勉強をはじめる"
+        }
+    }
 }
 
 extension DateFormatter {

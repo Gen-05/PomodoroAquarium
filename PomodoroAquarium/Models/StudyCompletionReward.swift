@@ -2,15 +2,23 @@ struct StudyCompletionReward: Equatable {
     let studyReward: Int
     let streakReward: Int
     let streakDays: Int
+    let didEarnFish: Bool
 
-    static func shouldPresent(forStudyMinutes minutes: Int) -> Bool {
+    /// 既存のポイント・魚・継続報酬処理を実行する条件。結果画面の表示条件ではない。
+    static func isEligibleForExistingRewards(forStudyMinutes minutes: Int) -> Bool {
         minutes >= 25
     }
 
-    init(studyReward: Int, streakReward: Int, streakDays: Int) {
+    init(
+        studyReward: Int,
+        streakReward: Int,
+        streakDays: Int,
+        didEarnFish: Bool = true
+    ) {
         self.studyReward = max(0, studyReward)
         self.streakReward = max(0, streakReward)
         self.streakDays = max(0, streakDays)
+        self.didEarnFish = didEarnFish
     }
 
     var totalReward: Int {
@@ -29,7 +37,8 @@ struct StudyCompletionReward: Equatable {
         return StudyCompletionReward(
             studyReward: overflowed ? Int.max : multipliedReward,
             streakReward: streakReward,
-            streakDays: streakDays
+            streakDays: streakDays,
+            didEarnFish: didEarnFish
         )
     }
 }

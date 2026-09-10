@@ -545,13 +545,12 @@ struct PomodoroAquariumTests {
             viewModel.resumeTimer()
             clock.advance(by: 25 * 60)
             viewModel.synchronizeTime()
-
-            viewModel.beginPomodoroBreak()
-            clock.advance(by: 5 * 60)
-            viewModel.synchronizeTime()
-
             if setIndex < 2 {
-                viewModel.resumeTimer()
+                viewModel.beginPomodoroBreak()
+                clock.advance(by: 5 * 60)
+                viewModel.synchronizeTime()
+                #expect(viewModel.shouldConfirmNextSet)
+                #expect(viewModel.prepareNextSet())
             }
         }
 
@@ -586,10 +585,12 @@ struct PomodoroAquariumTests {
             viewModel.resumeTimer()
             clock.advance(by: 25 * 60)
             viewModel.synchronizeTime()
-            viewModel.beginPomodoroBreak()
-            clock.advance(by: 5 * 60)
-            viewModel.synchronizeTime()
-            if setIndex < 2 { viewModel.resumeTimer() }
+            if setIndex < 2 {
+                viewModel.beginPomodoroBreak()
+                clock.advance(by: 5 * 60)
+                viewModel.synchronizeTime()
+                #expect(viewModel.prepareNextSet())
+            }
         }
 
         #expect(player.coins == 30)
@@ -615,6 +616,368 @@ struct PomodoroAquariumTests {
         #expect(nextSetPromptCount == 1)
         #expect(viewModel.isStudyTime)
         #expect(viewModel.state == .completed)
+        #expect(viewModel.phase == .awaitingNextSet)
+        #expect(viewModel.shouldConfirmNextSet)
+    }
+
+    @Test func inProcessBreakContinuesWhileTimerScreenIsNotVisible() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            totalSets: 2,
+            now: { clock.now },
+            sessionStore: makeTimerStore()
+        )
+
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        viewModel.beginPomodoroBreak()
+
+        // MainTabが同じViewModelを所有し、図鑑・水槽・ショップ表示中もtickする。
+        clock.advance(by: 2 * 60)
+        viewModel.tick()
+
+        #expect(viewModel.phase == .breakTime)
+        #expect(viewModel.isRunning)
+        #expect(viewModel.timeRemaining == 3 * 60)
+    }
+
+    @Test func nextSetIsPreparedWithoutStartingAutomatically() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            totalSets: 2,
+            now: { clock.now },
+            sessionStore: makeTimerStore()
+        )
+
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        viewModel.beginPomodoroBreak()
+        clock.advance(by: 5 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(viewModel.currentSet == 1)
+        #expect(viewModel.shouldConfirmNextSet)
+        #expect(viewModel.prepareNextSet())
+        #expect(viewModel.currentSet == 2)
+        #expect(viewModel.phase == .study)
+        #expect(viewModel.state == .idle)
+        #expect(!viewModel.isRunning)
+        #expect(viewModel.timeRemaining == 25 * 60)
+    }
+
+    @Test func nextSetConfirmationStartsStudyImmediatelyAndOnlyOnce() {
+        let clock = TestClock()
+        let notifications = TestNotificationService()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            totalSets: 2,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: notifications
+        )
+        var studyCompletionCount = 0
+        viewModel.onStudyFinished = { studyCompletionCount += 1 }
+
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        viewModel.beginPomodoroBreak()
+        clock.advance(by: 5 * 60)
+        viewModel.synchronizeTime()
+        let notificationCountBeforeStarting = notifications.history.count
+
+        #expect(viewModel.startNextSet())
+        #expect(viewModel.currentSet == 2)
+        #expect(viewModel.phase == .study)
+        #expect(viewModel.isRunning)
+        #expect(viewModel.timeRemaining == 25 * 60)
+        #expect(viewModel.endDate == clock.now.addingTimeInterval(25 * 60))
+        #expect(notifications.scheduled == .study(clock.now.addingTimeInterval(25 * 60)))
+        #expect(notifications.history.count == notificationCountBeforeStarting + 1)
+
+        #expect(!viewModel.startNextSet())
+        #expect(viewModel.currentSet == 2)
+        #expect(studyCompletionCount == 1)
+        #expect(notifications.history.count == notificationCountBeforeStarting + 1)
+    }
+
+    @Test func activeAndPausedStudyLockMainTabsButBreakDoesNot() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            totalSets: 2,
+            now: { clock.now },
+            sessionStore: makeTimerStore()
+        )
+
+        #expect(!viewModel.locksMainTabNavigation)
+        viewModel.resumeTimer()
+        #expect(viewModel.locksMainTabNavigation)
+        viewModel.pauseTimer()
+        #expect(viewModel.locksMainTabNavigation)
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+
+        #expect(viewModel.phase == .breakTime)
+        #expect(!viewModel.locksMainTabNavigation)
+        viewModel.beginPomodoroBreak()
+        #expect(!viewModel.locksMainTabNavigation)
+        clock.advance(by: 5 * 60)
+        viewModel.synchronizeTime()
+        #expect(viewModel.phase == .awaitingNextSet)
+        #expect(!viewModel.locksMainTabNavigation)
+        viewModel.finishPomodoroSessionAfterBreak()
+        #expect(viewModel.phase == .finished)
+        #expect(!viewModel.locksMainTabNavigation)
+    }
+
+    @Test func mainTabPolicyBlocksOnlyNonAquariumTabsDuringStudy() {
+        let lockedTabs: [MainAppTab] = [.book, .shop, .statistics]
+
+        #expect(MainTabNavigationPolicy.canSelect(.aquarium, whileStudyLocked: true))
+        for tab in lockedTabs {
+            #expect(!MainTabNavigationPolicy.canSelect(tab, whileStudyLocked: true))
+            #expect(MainTabNavigationPolicy.opacity(
+                for: tab,
+                whileStudyLocked: true
+            ) == MainTabNavigationPolicy.lockedTabOpacity)
+            #expect(MainTabNavigationPolicy.canSelect(tab, whileStudyLocked: false))
+            #expect(MainTabNavigationPolicy.opacity(
+                for: tab,
+                whileStudyLocked: false
+            ) == 1)
+        }
+    }
+
+    @Test func homeTimerEntryReflectsBreakAndNextSetState() {
+        #expect(HomeTimerEntryPresentation.title(for: .study, state: .idle) == "勉強をはじめる")
+        #expect(HomeTimerEntryPresentation.title(for: .study, state: .running) == "勉強をはじめる")
+        #expect(HomeTimerEntryPresentation.title(for: .study, state: .paused) == "勉強をはじめる")
+        #expect(HomeTimerEntryPresentation.title(for: .breakTime, state: .running) == "休憩に戻る")
+        #expect(HomeTimerEntryPresentation.title(
+            for: .awaitingNextSet,
+            state: .completed
+        ) == "次のセット確認へ戻る")
+        #expect(HomeTimerEntryPresentation.title(for: .finished, state: .completed) == "勉強をはじめる")
+    }
+
+    @Test func mainTabSelectionDoesNotChangeWhenStudyBlocksButtonAndBindingRequests() {
+        let lockedTabs: [MainAppTab] = [.book, .shop, .statistics]
+
+        for tab in lockedTabs {
+            var buttonSelection = MainTabSelectionState()
+            let buttonDidSelect = buttonSelection.select(tab, whileStudyLocked: true)
+            #expect(!buttonDidSelect)
+            #expect(buttonSelection.selection == .aquarium)
+
+            var bindingSelection = MainTabSelectionState()
+            let bindingDidSelect = bindingSelection.select(tab, whileStudyLocked: true)
+            #expect(!bindingDidSelect)
+            #expect(bindingSelection.selection == .aquarium)
+        }
+    }
+
+    @Test func mainTabSelectionAllowsBreakAwaitingNextSetAndFinishedNavigation() {
+        for tab in [MainAppTab.book, .shop, .statistics] {
+            var breakSelection = MainTabSelectionState()
+            let breakDidSelect = breakSelection.select(tab, whileStudyLocked: false)
+            #expect(breakDidSelect)
+            #expect(breakSelection.selection == tab)
+
+            var awaitingSelection = MainTabSelectionState()
+            let awaitingDidSelect = awaitingSelection.select(tab, whileStudyLocked: false)
+            #expect(awaitingDidSelect)
+            #expect(awaitingSelection.selection == tab)
+        }
+    }
+
+    @Test func tabBarHitShieldIsLimitedToStudyLockAndCoversSafeAreaPlusUpperEdge() {
+        #expect(MainTabBarHitShieldLayout.isActive(whileStudyLocked: true))
+        #expect(!MainTabBarHitShieldLayout.isActive(whileStudyLocked: false))
+        #expect(MainTabBarHitShieldLayout.height(bottomSafeArea: 34) ==
+            MainTabBarHitShieldLayout.tabBarHeight +
+            MainTabBarHitShieldLayout.upperOverflow + 34)
+        #expect(MainTabBarHitShieldLayout.upperOverflow > 0)
+        #expect(MainTabBarHitShieldLayout.zIndex > 0)
+    }
+
+    @Test func decliningNextSetFinishesWithoutRepeatingStudyCompletion() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            totalSets: 3,
+            now: { clock.now },
+            sessionStore: makeTimerStore()
+        )
+        var completionCount = 0
+        viewModel.onStudyFinished = { completionCount += 1 }
+
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        viewModel.beginPomodoroBreak()
+        clock.advance(by: 5 * 60)
+        viewModel.synchronizeTime()
+        viewModel.finishPomodoroSessionAfterBreak()
+
+        #expect(completionCount == 1)
+        #expect(viewModel.phase == .finished)
+        #expect(!viewModel.shouldConfirmNextSet)
+        #expect(!viewModel.isRunning)
+    }
+
+    @Test func finalAndSinglePomodoroSetsFinishWithoutBreak() {
+        let singleClock = TestClock()
+        let single = TimerViewModel(
+            studyTime: 25,
+            breakTime: 0,
+            totalSets: 1,
+            now: { singleClock.now },
+            sessionStore: makeTimerStore()
+        )
+        single.resumeTimer()
+        singleClock.advance(by: 25 * 60)
+        single.synchronizeTime()
+
+        #expect(single.currentSet == 1)
+        #expect(single.totalSets == 1)
+        #expect(single.phase == .finished)
+        #expect(!single.shouldBeginPomodoroBreak)
+
+        let finalClock = TestClock()
+        let final = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            totalSets: 2,
+            now: { finalClock.now },
+            sessionStore: makeTimerStore()
+        )
+        final.resumeTimer()
+        finalClock.advance(by: 25 * 60)
+        final.synchronizeTime()
+        final.beginPomodoroBreak()
+        finalClock.advance(by: 5 * 60)
+        final.synchronizeTime()
+        #expect(final.startNextSet())
+        finalClock.advance(by: 25 * 60)
+        final.synchronizeTime()
+
+        #expect(final.currentSet == 2)
+        #expect(final.phase == .finished)
+        #expect(!final.shouldBeginPomodoroBreak)
+        #expect(!final.shouldConfirmNextSet)
+        #expect(!final.startNextSet())
+    }
+
+    @Test func oneSetDisablesBreakAndTwoSetsRestoreThePreferredValue() {
+        #expect(!PomodoroBreakConfiguration.isBreakSelectionEnabled(setCount: 1))
+        #expect(PomodoroBreakConfiguration.effectiveBreakMinutes(
+            preferredMinutes: 9,
+            setCount: 1
+        ) == 0)
+        #expect(PomodoroBreakConfiguration.isBreakSelectionEnabled(setCount: 2))
+        #expect(PomodoroBreakConfiguration.effectiveBreakMinutes(
+            preferredMinutes: 9,
+            setCount: 2
+        ) == 9)
+    }
+
+    @Test func pomodoroSetConfigurationDefaultsAndStoredValuesAreResolvedSafely() throws {
+        let suiteName = "PomodoroAquariumSetConfigurationTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(PomodoroBreakConfiguration.configuredSetCount(in: defaults) == 3)
+
+        defaults.set(1, forKey: TimerConfigurationStorageKey.pomodoroSetCount)
+        #expect(PomodoroBreakConfiguration.configuredSetCount(in: defaults) == 1)
+
+        defaults.set(4, forKey: TimerConfigurationStorageKey.pomodoroSetCount)
+        #expect(PomodoroBreakConfiguration.configuredSetCount(in: defaults) == 4)
+    }
+
+    @Test func zeroMinuteBreakAdvancesDirectlyToNextSetConfirmation() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 0,
+            totalSets: 2,
+            now: { clock.now },
+            sessionStore: makeTimerStore()
+        )
+        var breakCompletionCount = 0
+        viewModel.onBreakFinished = { breakCompletionCount += 1 }
+
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.synchronizeTime()
+        #expect(viewModel.shouldBeginPomodoroBreak)
+
+        viewModel.beginPomodoroBreak()
+
+        #expect(viewModel.phase == .awaitingNextSet)
+        #expect(viewModel.shouldConfirmNextSet)
+        #expect(breakCompletionCount == 1)
+        #expect(!viewModel.isRunning)
+    }
+
+    @Test func finishedScreenAllowsMultilineTextWithoutExtremeScaling() {
+        #expect(StudyFinishedLayout.titleLineLimit >= 2)
+        #expect(StudyFinishedLayout.titleMinimumScaleFactor >= 0.75)
+        #expect(StudyFinishedLayout.contentHorizontalPadding <= 32)
+    }
+
+    @Test func studySessionPersistenceKeepsSetProgressButBreakStillIsNotPersisted() throws {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "set-old")
+        let original = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            totalSets: 3,
+            now: { clock.now },
+            sessionStore: oldStore
+        )
+
+        original.resumeTimer()
+        clock.advance(by: 25 * 60)
+        original.synchronizeTime()
+        original.beginPomodoroBreak()
+        clock.advance(by: 5 * 60)
+        original.synchronizeTime()
+        #expect(original.prepareNextSet())
+        original.resumeTimer()
+        clock.advance(by: 60)
+        original.recordLastActiveTime()
+
+        let persisted = try #require(oldStore.load())
+        #expect(persisted.currentSet == 2)
+        #expect(persisted.totalSets == 3)
+
+        let restored = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            totalSets: 1,
+            now: { clock.now },
+            sessionStore: TimerSessionStore(
+                defaults: defaults,
+                processIdentifier: "set-new"
+            )
+        )
+        restored.restorePersistedSessionIfNeeded()
+        #expect(restored.currentSet == 2)
+        #expect(restored.totalSets == 3)
+        #expect(restored.phase == .study)
     }
 
     @Test func countdownTimerCompletionDoesNotEnterBreak() {
@@ -748,7 +1111,9 @@ struct PomodoroAquariumTests {
         viewModel.endCurrentStudySession()
 
         #expect(viewModel.lastCompletedStudyMinutes == 10)
-        #expect(!StudyCompletionReward.shouldPresent(forStudyMinutes: viewModel.lastCompletedStudyMinutes))
+        #expect(!StudyCompletionReward.isEligibleForExistingRewards(
+            forStudyMinutes: viewModel.lastCompletedStudyMinutes
+        ))
         #expect(CurrencyService.studyCompletionReward(
             for: viewModel.lastCompletedStudyMinutes,
             todayStudyMinutesBeforeCompletion: 0
@@ -3265,9 +3630,23 @@ struct PomodoroAquariumTests {
         #expect(doubled.totalReward == 90)
     }
 
-    @Test func completionRewardPresentationRequiresTwentyFiveMinutes() {
-        #expect(!StudyCompletionReward.shouldPresent(forStudyMinutes: 24))
-        #expect(StudyCompletionReward.shouldPresent(forStudyMinutes: 25))
+    @Test func existingRewardEligibilityRequiresTwentyFiveMinutes() {
+        #expect(!StudyCompletionReward.isEligibleForExistingRewards(forStudyMinutes: 24))
+        #expect(StudyCompletionReward.isEligibleForExistingRewards(forStudyMinutes: 25))
+    }
+
+    @Test func zeroRewardPresentationUsesExistingCoinUnitAndNoFishState() {
+        let reward = StudyCompletionReward(
+            studyReward: 0,
+            streakReward: 0,
+            streakDays: 0,
+            didEarnFish: false
+        )
+
+        #expect(reward.totalReward == 0)
+        #expect(!reward.didEarnFish)
+        #expect(StudyCompletionRewardPresentation.amountText(reward.studyReward) == "0コイン")
+        #expect(StudyCompletionRewardPresentation.amountText(reward.totalReward) == "0コイン")
     }
 
     @Test @MainActor func dailyStudyMinutesArePersistedAndSameDaySessionsAreCombined() throws {

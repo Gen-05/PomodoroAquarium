@@ -24,6 +24,13 @@ struct StudyCompletionRewardView: View {
             .opacity(showsStudyReward ? 1 : 0)
             .offset(y: showsStudyReward ? 0 : 12)
 
+            if !reward.didEarnFish {
+                Label("獲得魚なし", systemImage: "fish")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("noFishReward")
+            }
+
             if reward.hasStreakReward && showsStreakReward {
                 rewardRow(
                     icon: "🔥",
@@ -41,7 +48,7 @@ struct StudyCompletionRewardView: View {
                     Text("合計")
                         .font(.headline)
                         .foregroundStyle(.secondary)
-                    Text("+\(displayedTotalReward)コイン")
+                    Text(StudyCompletionRewardPresentation.amountText(displayedTotalReward))
                         .font(.title.bold())
                         .foregroundStyle(.yellow)
                         .contentTransition(.numericText())
@@ -69,7 +76,7 @@ struct StudyCompletionRewardView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.headline)
-                Text("+\(amount)コイン")
+                Text(StudyCompletionRewardPresentation.amountText(amount))
                     .font(.title3.bold())
                     .contentTransition(.numericText())
             }
@@ -130,6 +137,13 @@ struct StudyCompletionRewardView: View {
     private func waitForNextReward() async -> Bool {
         try? await Task.sleep(nanoseconds: 140_000_000)
         return !Task.isCancelled
+    }
+}
+
+enum StudyCompletionRewardPresentation {
+    static func amountText(_ amount: Int) -> String {
+        let safeAmount = max(0, amount)
+        return safeAmount == 0 ? "0コイン" : "+\(safeAmount)コイン"
     }
 }
 

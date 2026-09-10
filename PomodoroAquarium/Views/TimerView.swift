@@ -6,13 +6,32 @@
 //
 
 import SwiftUI
-import Combine
 import SwiftData
 
 enum TimerConfigurationStorageKey {
     static let studyTime = "studyTime"
     static let breakTime = "breakTime"
     static let pomodoroSetCount = "pomodoroSetCount"
+}
+
+enum PomodoroBreakConfiguration {
+    static let defaultBreakMinutes = 5
+    static let defaultSetCount = 3
+
+    static func configuredSetCount(in defaults: UserDefaults = .standard) -> Int {
+        guard defaults.object(forKey: TimerConfigurationStorageKey.pomodoroSetCount) != nil else {
+            return defaultSetCount
+        }
+        return max(defaults.integer(forKey: TimerConfigurationStorageKey.pomodoroSetCount), 1)
+    }
+
+    static func isBreakSelectionEnabled(setCount: Int) -> Bool {
+        setCount > 1
+    }
+
+    static func effectiveBreakMinutes(preferredMinutes: Int, setCount: Int) -> Int {
+        isBreakSelectionEnabled(setCount: setCount) ? max(preferredMinutes, 0) : 0
+    }
 }
 
 struct TimerView: View {
@@ -31,22 +50,27 @@ struct TimerView: View {
     @AppStorage(NotificationSettings.enabledKey)
     private var notificationsEnabled = false
 
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     
     init(
         studyTime: Int,
         breakTime: Int,
-        player: Player?
+        player: Player?,
+        viewModel: TimerViewModel? = nil
     ) {
         self.studyTime = studyTime
         self.breakTime = breakTime
         self.player = player
         
-        let tempViewModel = TimerViewModel(
+        let configuredSetCount = PomodoroBreakConfiguration.configuredSetCount()
+        let tempViewModel = viewModel ?? TimerViewModel(
             studyTime: studyTime,
-            breakTime: breakTime
+            breakTime: PomodoroBreakConfiguration.effectiveBreakMinutes(
+                preferredMinutes: breakTime,
+                setCount: configuredSetCount
+            ),
+            totalSets: configuredSetCount
         )
         self._viewModel = State(initialValue: tempViewModel)
         self._fishAcquisition = State(initialValue: nil)
@@ -63,11 +87,8 @@ struct TimerView: View {
     @State private var studyFinishedMinutes: Int?
     @State private var studyFinishedEndReason: StudySessionEndReason = .completed
     @State private var showsEndConfirmation = false
-    @State private var showsNextSetConfirmation = false
     @State private var showsTimeSettings = false
     @State private var showsNotificationIntroduction = false
-    
-    let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     var body: some View {
         ZStack {
@@ -79,7 +100,7 @@ struct TimerView: View {
             VStack(spacing: 22) {
                 Spacer()
 
-                if viewModel.isStudyTime && (viewModel.state == .idle || viewModel.state == .completed) {
+                if viewModel.canConfigureSession {
                     Picker("計測方法", selection: Binding(
                         get: { viewModel.mode },
                         set: { viewModel.selectMode($0) }
@@ -149,21 +170,13 @@ struct TimerView: View {
             .padding(.vertical, 24)
         }
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(viewModel.locksMainTabNavigation)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .onAppear {
             configureStudyCompletion()
             viewModel.restorePersistedSessionIfNeeded()
-        }
-        .onReceive(timer) { _ in
-            viewModel.tick()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                viewModel.synchronizeTime()
-            } else {
-                viewModel.recordLastActiveTime()
-            }
+            viewModel.synchronizeTime()
         }
         .alert(viewModel.isStudyTime ? "勉強を終了しますか？" : "休憩を終了しますか？", isPresented: $showsEndConfirmation) {
             Button("キャンセル", role: .cancel) {}
@@ -196,15 +209,19 @@ struct TimerView: View {
         } message: {
             Text("勉強や休憩が終わった時に通知でお知らせできます。")
         }
-        .alert("次のセットを開始しますか？", isPresented: $showsNextSetConfirmation) {
-            Button("終了する", role: .cancel) {
+        .alert("次のセットを始めますか？", isPresented: Binding(
+            get: { viewModel.shouldConfirmNextSet },
+            set: { _ in }
+        )) {
+            Button("今回は終了する", role: .cancel) {
+                viewModel.finishPomodoroSessionAfterBreak()
                 dismiss()
             }
-            Button("続ける") {
-                viewModel.resumeTimer()
+            Button("次のセットを始める") {
+                viewModel.startNextSet()
             }
         } message: {
-            Text("休憩が終了しました。")
+            Text("休憩が終了しました。次の勉強セットを開始できます。")
         }
         .sheet(
             isPresented: $showsTimeSettings
@@ -292,7 +309,16 @@ struct TimerView: View {
             let completedStudyMinutes = viewModel.lastCompletedStudyMinutes
             studyFinishedEndReason = viewModel.lastStudySessionEndReason ?? .completed
             studyFinishedMinutes = completedStudyMinutes
-            guard let player else { return }
+            guard let player else {
+                pendingFishAcquisition = nil
+                pendingCompletionReward = StudyCompletionReward(
+                    studyReward: 0,
+                    streakReward: 0,
+                    streakDays: 0,
+                    didEarnFish: false
+                )
+                return
+            }
 
             let coinReward = CurrencyService.studyCompletionReward(
                 for: completedStudyMinutes,
@@ -307,13 +333,23 @@ struct TimerView: View {
                 in: modelContext
             )
 
-            guard StudyCompletionReward.shouldPresent(forStudyMinutes: completedStudyMinutes) else {
+            guard StudyCompletionReward.isEligibleForExistingRewards(
+                forStudyMinutes: completedStudyMinutes
+            ) else {
+                pendingFishAcquisition = nil
+                pendingCompletionReward = StudyCompletionReward(
+                    studyReward: 0,
+                    streakReward: 0,
+                    streakDays: player.studyStreakDays,
+                    didEarnFish: false
+                )
                 return
             }
 
-            pendingFishAcquisition = FishAcquisitionResult.capture(for: player) {
+            let fishResult = FishAcquisitionResult.capture(for: player) {
                 FishRewardService.awardFish(for: completedStudyMinutes, to: player)
             }
+            pendingFishAcquisition = fishResult
 
             var awardedStudyReward = 0
             if coinReward > 0 {
@@ -334,29 +370,40 @@ struct TimerView: View {
             pendingCompletionReward = StudyCompletionReward(
                 studyReward: awardedStudyReward,
                 streakReward: streakUpdate?.awardedCoins ?? 0,
-                streakDays: streakUpdate?.streakDays ?? player.studyStreakDays
+                streakDays: streakUpdate?.streakDays ?? player.studyStreakDays,
+                didEarnFish: fishResult != nil
             )
         }
-        viewModel.onBreakFinished = {
-            showsNextSetConfirmation = true
-        }
+        viewModel.onBreakFinished = nil
     }
 
     private func saveTimeSettings(studyMinutes: Int, breakMinutes: Int, setCount: Int) {
         storedStudyTime = String(studyMinutes)
         if viewModel.mode == .pomodoro {
-            storedBreakTime = String(breakMinutes)
+            if PomodoroBreakConfiguration.isBreakSelectionEnabled(setCount: setCount) {
+                storedBreakTime = String(breakMinutes)
+            }
             pomodoroSetCount = setCount
         }
+        let effectiveBreakMinutes = PomodoroBreakConfiguration.effectiveBreakMinutes(
+            preferredMinutes: breakMinutes,
+            setCount: setCount
+        )
         viewModel.updateConfiguration(
             studyTime: studyMinutes,
-            breakTime: viewModel.mode == .pomodoro ? breakMinutes : (Int(storedBreakTime) ?? breakTime)
+            breakTime: viewModel.mode == .pomodoro
+                ? effectiveBreakMinutes
+                : (Int(storedBreakTime) ?? breakTime),
+            totalSets: viewModel.mode == .pomodoro ? setCount : nil
         )
     }
 
     private var sessionDescription: String {
         if !viewModel.isStudyTime {
             return "☕️ 休憩時間"
+        }
+        if viewModel.mode == .pomodoro {
+            return "📚 勉強時間 ・ \(viewModel.currentSet)/\(viewModel.totalSets)セット"
         }
         return viewModel.mode == .stopwatch ? "⏱️ ストップウォッチ" : "📚 勉強時間"
     }
@@ -396,6 +443,7 @@ private struct TimerTimeSettingsSheet: View {
     @State private var studyMinutes: Int
     @State private var breakMinutes: Int
     @State private var setCount: Int
+    @State private var retainedBreakMinutes: Int
 
     init(
         mode: TimerMode,
@@ -407,8 +455,15 @@ private struct TimerTimeSettingsSheet: View {
         self.mode = mode
         self.onSave = onSave
         _studyMinutes = State(initialValue: studyMinutes)
-        _breakMinutes = State(initialValue: breakMinutes)
+        _breakMinutes = State(initialValue: PomodoroBreakConfiguration.effectiveBreakMinutes(
+            preferredMinutes: breakMinutes,
+            setCount: setCount
+        ))
         _setCount = State(initialValue: setCount)
+        _retainedBreakMinutes = State(initialValue: max(
+            breakMinutes,
+            PomodoroBreakConfiguration.defaultBreakMinutes
+        ))
     }
 
     var body: some View {
@@ -426,9 +481,15 @@ private struct TimerTimeSettingsSheet: View {
                         pickerColumn(
                             title: "休憩時間",
                             selection: $breakMinutes,
-                            values: 1...60,
+                            values: 0...60,
                             suffix: "分"
                         )
+                        .disabled(!PomodoroBreakConfiguration.isBreakSelectionEnabled(
+                            setCount: setCount
+                        ))
+                        .opacity(PomodoroBreakConfiguration.isBreakSelectionEnabled(
+                            setCount: setCount
+                        ) ? 1 : 0.42)
 
                         pickerColumn(
                             title: "セット数",
@@ -451,6 +512,16 @@ private struct TimerTimeSettingsSheet: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 14)
+            .onChange(of: setCount) { oldSetCount, newSetCount in
+                if newSetCount == 1 {
+                    if oldSetCount > 1 {
+                        retainedBreakMinutes = breakMinutes
+                    }
+                    breakMinutes = 0
+                } else if oldSetCount == 1 {
+                    breakMinutes = retainedBreakMinutes
+                }
+            }
             .navigationTitle(mode == .pomodoro ? "ポモドーロ設定" : "タイマー設定")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

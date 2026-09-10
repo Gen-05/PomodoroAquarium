@@ -53,7 +53,8 @@ enum NotificationIntroductionSettings {
     }
 }
 
-final class NotificationService: TimerNotificationScheduling, @unchecked Sendable {
+final class NotificationService: NSObject, TimerNotificationScheduling,
+    UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = NotificationService()
     static var appDefault: TimerNotificationScheduling {
         // XCTestホストではシステム許可UIを起動せず、注入したFakeで通知挙動を検証する。
@@ -84,6 +85,16 @@ final class NotificationService: TimerNotificationScheduling, @unchecked Sendabl
     ) {
         self.center = center
         self.defaults = defaults
+        super.init()
+        center.delegate = self
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
     }
 
     func authorizationStatus(

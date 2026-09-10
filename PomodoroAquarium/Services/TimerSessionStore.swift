@@ -13,6 +13,9 @@ struct PersistedTimerSession: Codable, Equatable {
     let lastHeartbeatDate: Date
     let studyTime: Int
     let breakTime: Int
+    /// 旧保存データとの互換性を保ちながら、複数セット中のstudy位置を復元する。
+    let currentSet: Int?
+    let totalSets: Int?
     let processIdentifier: String
 }
 
@@ -58,7 +61,9 @@ final class TimerSessionStore {
         timerModeRawValue: String,
         lastHeartbeatDate: Date,
         studyTime: Int,
-        breakTime: Int
+        breakTime: Int,
+        currentSet: Int,
+        totalSets: Int
     ) -> PersistedTimerSession {
         PersistedTimerSession(
             sessionIsActive: true,
@@ -71,6 +76,8 @@ final class TimerSessionStore {
             lastHeartbeatDate: lastHeartbeatDate,
             studyTime: studyTime,
             breakTime: breakTime,
+            currentSet: currentSet,
+            totalSets: totalSets,
             processIdentifier: processIdentifier
         )
     }

@@ -43,6 +43,13 @@ enum StudySessionEndReason: Equatable {
     var isNormalCompletion: Bool { self == .completed }
 }
 
+enum PomodoroSessionPhase: Equatable {
+    case study
+    case breakTime
+    case awaitingNextSet
+    case finished
+}
+
 @Observable
 final class TimerViewModel {
     
@@ -66,16 +73,27 @@ final class TimerViewModel {
     private(set) var stopwatchElapsedSeconds = 0
     private(set) var state: TimerState = .idle
     var isRunning: Bool { state == .running }
-    var isStudyTime = true
+    private(set) var phase: PomodoroSessionPhase = .study
+    var isStudyTime: Bool { phase != .breakTime }
+    private(set) var currentSet = 1
+    private(set) var totalSets: Int
     private(set) var endDate: Date?
     private(set) var lastCompletedStudyMinutes = 0
     private(set) var lastStudySessionEndReason: StudySessionEndReason?
 
     var shouldBeginPomodoroBreak: Bool {
         mode == .pomodoro &&
-            !isStudyTime &&
+            phase == .breakTime &&
             state == .completed &&
             lastStudySessionEndReason?.isNormalCompletion == true
+    }
+
+    var shouldConfirmNextSet: Bool {
+        mode == .pomodoro && phase == .awaitingNextSet && currentSet < totalSets
+    }
+
+    var locksMainTabNavigation: Bool {
+        phase == .study && (state == .running || state == .paused)
     }
 
     var elapsedStudySeconds: Int {
@@ -95,35 +113,45 @@ final class TimerViewModel {
     }
 
     var canConfigureSession: Bool {
-        isStudyTime && (state == .idle || state == .completed)
+        (phase == .study || phase == .finished) &&
+            (state == .idle || state == .completed)
     }
 
     /// 開始前の設定変更を現在の表示へ反映する。実行中・一時停止中のセッションは変更しない。
-    func updateConfiguration(studyTime: Int, breakTime: Int) {
+    func updateConfiguration(studyTime: Int, breakTime: Int, totalSets: Int? = nil) {
         guard canConfigureSession else { return }
         self.studyTime = studyTime
         self.breakTime = breakTime
+        if let totalSets {
+            self.totalSets = max(totalSets, 1)
+        }
+        currentSet = 1
+        phase = .study
         timeRemaining = studyTime * 60
     }
 
     func selectMode(_ newMode: TimerMode) {
-        guard isStudyTime, state == .idle || state == .completed else { return }
+        guard canConfigureSession else { return }
         mode = newMode
         stopwatchElapsedSeconds = 0
         stopwatchElapsedAtRunStart = 0
         stopwatchRunStartDate = nil
+        currentSet = 1
+        phase = .study
         timeRemaining = studyTime * 60
     }
     
     convenience init(
         studyTime: Int,
         breakTime: Int,
+        totalSets: Int = 3,
         now: @escaping () -> Date = Date.init,
         sessionStore: TimerSessionStore = .shared
     ) {
         self.init(
             studyTime: studyTime,
             breakTime: breakTime,
+            totalSets: totalSets,
             now: now,
             sessionStore: sessionStore,
             notificationService: NotificationService.appDefault
@@ -133,12 +161,14 @@ final class TimerViewModel {
     init(
         studyTime: Int,
         breakTime: Int,
+        totalSets: Int = 3,
         now: @escaping () -> Date,
         sessionStore: TimerSessionStore,
         notificationService: TimerNotificationScheduling
     ) {
         self.studyTime = studyTime
         self.breakTime = breakTime
+        self.totalSets = max(totalSets, 1)
         self.now = now
         self.sessionStore = sessionStore
         self.notificationService = notificationService
@@ -174,6 +204,13 @@ final class TimerViewModel {
 
     func resumeTimer() {
         guard state != .running else { return }
+        guard phase != .awaitingNextSet else { return }
+        if phase == .finished {
+            currentSet = 1
+            phase = .study
+            state = .idle
+            timeRemaining = studyTime * 60
+        }
         hasHandledCurrentSessionCompletion = false
         let currentDate = now()
         if mode == .stopwatch && isStudyTime {
@@ -190,7 +227,48 @@ final class TimerViewModel {
 
     func beginPomodoroBreak() {
         guard shouldBeginPomodoroBreak else { return }
+        if timeRemaining <= 0 {
+            hasHandledCurrentSessionCompletion = false
+            finishCurrentSession()
+            return
+        }
         resumeTimer()
+    }
+
+    /// 休憩終了確認後、次セットを開始前のstudy状態へ進める。
+    @discardableResult
+    func prepareNextSet() -> Bool {
+        guard shouldConfirmNextSet else { return false }
+        currentSet += 1
+        phase = .study
+        state = .idle
+        timeRemaining = studyTime * 60
+        endDate = nil
+        hasHandledCurrentSessionCompletion = false
+        lastStudySessionEndReason = nil
+        notificationService.cancelCurrentSessionNotification()
+        sessionStore.clearSession()
+        return true
+    }
+
+    /// 休憩終了確認から次セットを1回だけ進め、既存の開始処理で直ちにstudyを開始する。
+    @discardableResult
+    func startNextSet() -> Bool {
+        guard prepareNextSet() else { return false }
+        resumeTimer()
+        return true
+    }
+
+    /// 既に完了したstudy報酬を維持したまま、残りセットを行わず終了する。
+    func finishPomodoroSessionAfterBreak() {
+        guard phase == .awaitingNextSet else { return }
+        phase = .finished
+        state = .completed
+        timeRemaining = studyTime * 60
+        endDate = nil
+        hasHandledCurrentSessionCompletion = true
+        notificationService.cancelCurrentSessionNotification()
+        sessionStore.clearSession()
     }
 
     /// 許可ダイアログの完了後などに、現在の終了予定時刻へ通知を合わせ直す。
@@ -220,7 +298,8 @@ final class TimerViewModel {
     
     func resetTimer() {
         state = .idle
-        isStudyTime = true
+        phase = .study
+        currentSet = 1
         timeRemaining = studyTime * 60
         endDate = nil
         hasHandledCurrentSessionCompletion = false
@@ -284,7 +363,9 @@ final class TimerViewModel {
     }
 
     private func restore(_ session: PersistedTimerSession, at currentDate: Date) {
-        isStudyTime = session.isStudyTime
+        phase = session.isStudyTime ? .study : .breakTime
+        totalSets = max(session.totalSets ?? totalSets, 1)
+        currentSet = min(max(session.currentSet ?? 1, 1), totalSets)
         mode = TimerMode(rawValue: session.timerModeRawValue ?? "") ?? .pomodoro
         state = session.isRunning ? .running : .paused
         timeRemaining = session.timeRemaining
@@ -322,7 +403,9 @@ final class TimerViewModel {
             return
         }
 
-        isStudyTime = session.isStudyTime
+        phase = .study
+        totalSets = max(session.totalSets ?? totalSets, 1)
+        currentSet = min(max(session.currentSet ?? 1, 1), totalSets)
         mode = TimerMode(rawValue: session.timerModeRawValue ?? "") ?? .pomodoro
         state = .paused
         endDate = nil
@@ -383,7 +466,9 @@ final class TimerViewModel {
             timerModeRawValue: mode.rawValue,
             lastHeartbeatDate: date,
             studyTime: studyTime,
-            breakTime: breakTime
+            breakTime: breakTime,
+            currentSet: currentSet,
+            totalSets: totalSets
         ))
     }
 
@@ -399,18 +484,21 @@ final class TimerViewModel {
         notificationService.cancelCurrentSessionNotification()
         sessionStore.clearSession()
 
-        let completedStudySession = isStudyTime
+        let completedStudySession = phase == .study
         if completedStudySession {
             lastCompletedStudyMinutes = completedStudyMinutes ?? studyTime
             lastStudySessionEndReason = studyEndReason
             onStudyFinished?()
         }
 
-        if completedStudySession && mode == .pomodoro && studyEndReason.isNormalCompletion {
-            isStudyTime = false
+        if completedStudySession &&
+            mode == .pomodoro &&
+            studyEndReason.isNormalCompletion &&
+            currentSet < totalSets {
+            phase = .breakTime
             timeRemaining = breakTime * 60
         } else {
-            isStudyTime = true
+            phase = completedStudySession ? .finished : .awaitingNextSet
             timeRemaining = studyTime * 60
             if !completedStudySession {
                 onBreakFinished?()
