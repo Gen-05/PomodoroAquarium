@@ -29,13 +29,14 @@ struct AquariumView: View {
 
     private var displayedFish: [PlayerFish] {
         guard let player else { return [] }
+        return AquariumFishDisplayPolicy.displayedFish(
+            from: player.ownedFish,
+            favoriteFish: favoriteFish
+        )
+    }
 
-        var fish = player.ownedFish
-        if let favoriteFish {
-            fish.removeAll { $0.id == favoriteFish.id }
-            fish.insert(favoriteFish, at: 0)
-        }
-        return fish
+    private var displayedFishIDs: [UUID] {
+        displayedFish.map(\.id)
     }
 
     var body: some View {
@@ -62,6 +63,13 @@ struct AquariumView: View {
         .ignoresSafeArea()
         .onAppear {
             _ = try? AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
+        }
+        .onChange(of: displayedFishIDs, initial: true) { _, displayedFishIDs in
+            let displayedIDSet = Set(displayedFishIDs)
+            let retainedPositions = fishPositions.filter { displayedIDSet.contains($0.key) }
+            if retainedPositions.count != fishPositions.count {
+                fishPositions = retainedPositions
+            }
         }
         .onChange(of: isEditing) { _, newValue in
             if !newValue {
