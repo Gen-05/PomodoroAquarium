@@ -365,13 +365,34 @@ enum AquariumFishMotion {
         mutating func advance(
             deltaTime rawDeltaTime: TimeInterval,
             elapsedTime: TimeInterval,
-            neighborPositions: [CGPoint] = [],
             speedMultiplier: CGFloat = 1,
             behaviorTargetSpeedMultiplier: CGFloat? = nil,
             speedResponseMultiplier: CGFloat = 1,
             minimumSpeedMultiplier: CGFloat = 0,
             steeringNoiseMultiplier: CGFloat = 1
         ) {
+            advance(
+                deltaTime: rawDeltaTime,
+                elapsedTime: elapsedTime,
+                neighborPositions: EmptyCollection<CGPoint>(),
+                speedMultiplier: speedMultiplier,
+                behaviorTargetSpeedMultiplier: behaviorTargetSpeedMultiplier,
+                speedResponseMultiplier: speedResponseMultiplier,
+                minimumSpeedMultiplier: minimumSpeedMultiplier,
+                steeringNoiseMultiplier: steeringNoiseMultiplier
+            )
+        }
+
+        mutating func advance<NeighborPositions: RandomAccessCollection>(
+            deltaTime rawDeltaTime: TimeInterval,
+            elapsedTime: TimeInterval,
+            neighborPositions: NeighborPositions,
+            speedMultiplier: CGFloat = 1,
+            behaviorTargetSpeedMultiplier: CGFloat? = nil,
+            speedResponseMultiplier: CGFloat = 1,
+            minimumSpeedMultiplier: CGFloat = 0,
+            steeringNoiseMultiplier: CGFloat = 1
+        ) where NeighborPositions.Index == Int, NeighborPositions.Element == CGPoint {
             let deltaTime = min(max(rawDeltaTime, 0), AquariumFishMotion.maximumDeltaTime)
             guard deltaTime > 0 else { return }
 
@@ -694,7 +715,9 @@ enum AquariumFishMotion {
             }
         }
 
-        private mutating func transitionBehavior(neighborPositions: [CGPoint]) {
+        private mutating func transitionBehavior<NeighborPositions: RandomAccessCollection>(
+            neighborPositions: NeighborPositions
+        ) where NeighborPositions.Index == Int, NeighborPositions.Element == CGPoint {
             let next: Behavior
             let canBurst = burstCooldownRemaining <= 0
             switch behavior {
@@ -735,7 +758,10 @@ enum AquariumFishMotion {
             enter(next, neighborPositions: neighborPositions)
         }
 
-        private mutating func enter(_ next: Behavior, neighborPositions: [CGPoint]) {
+        private mutating func enter<NeighborPositions: RandomAccessCollection>(
+            _ next: Behavior,
+            neighborPositions: NeighborPositions
+        ) where NeighborPositions.Index == Int, NeighborPositions.Element == CGPoint {
             behavior = next
             switch next {
             case .wandering:
@@ -773,7 +799,9 @@ enum AquariumFishMotion {
             }
         }
 
-        private mutating func updateLocalCourse(neighborPositions: [CGPoint]) {
+        private mutating func updateLocalCourse<NeighborPositions: RandomAccessCollection>(
+            neighborPositions: NeighborPositions
+        ) where NeighborPositions.Index == Int, NeighborPositions.Element == CGPoint {
             if behavior == .wandering || behavior == .cruising {
                 chooseLocalTarget(neighborPositions: neighborPositions, permitsGathering: true)
             }
@@ -788,10 +816,10 @@ enum AquariumFishMotion {
                 : random(in: movementProfile.directionHoldDurationRange)
         }
 
-        mutating func chooseLocalTarget(
-            neighborPositions: [CGPoint],
+        mutating func chooseLocalTarget<NeighborPositions: RandomAccessCollection>(
+            neighborPositions: NeighborPositions,
             permitsGathering: Bool
-        ) {
+        ) where NeighborPositions.Index == Int, NeighborPositions.Element == CGPoint {
             let center: CGPoint
             let isGathering: Bool
             if permitsGathering,

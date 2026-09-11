@@ -164,6 +164,10 @@ struct AquariumView: View {
             minimumInterval: 1.0 / 30.0,
             paused: isSimulationPaused
         )) { timeline in
+            let positionSnapshot = isSimulationPaused
+                ? AquariumFishPositionSnapshot.empty
+                : AquariumFishPositionSnapshot(fishPositions)
+
             ZStack {
                 ForEach(displayedFish) { playerFish in
                     let isFavorite = playerFish.id == favoriteFish?.id
@@ -176,10 +180,8 @@ struct AquariumView: View {
                         updateDate: timeline.date,
                         isSimulationPaused: isSimulationPaused,
                         neighborPositions: isSimulationPaused
-                            ? []
-                            : fishPositions
-                                .filter { $0.key != playerFish.id }
-                                .map { $0.value },
+                            ? .empty
+                            : positionSnapshot.neighborPositions(excluding: playerFish.id),
                         reportPosition: { fishPositions[playerFish.id] = $0 }
                     )
                 }
@@ -416,6 +418,63 @@ struct AquariumSimulationTiming {
     }
 }
 
+/// 1 tick内で共有する魚位置。Dictionary走査とIDのindex解決を1回にまとめる。
+struct AquariumFishPositionSnapshot {
+    static let empty = AquariumFishPositionSnapshot([:])
+
+    fileprivate let positions: [CGPoint]
+    private let indexByFishID: [UUID: Int]
+
+    init(_ fishPositions: [UUID: CGPoint]) {
+        var positions: [CGPoint] = []
+        positions.reserveCapacity(fishPositions.count)
+        var indexByFishID: [UUID: Int] = [:]
+        indexByFishID.reserveCapacity(fishPositions.count)
+
+        for (fishID, position) in fishPositions {
+            indexByFishID[fishID] = positions.count
+            positions.append(position)
+        }
+
+        self.positions = positions
+        self.indexByFishID = indexByFishID
+    }
+
+    func neighborPositions(excluding fishID: UUID) -> AquariumNeighborPositions {
+        AquariumNeighborPositions(
+            positions: positions,
+            excludedIndex: indexByFishID[fishID]
+        )
+    }
+}
+
+/// snapshotの配列を複製せず、指定した魚だけを除外して見せるCollection。
+struct AquariumNeighborPositions: RandomAccessCollection {
+    typealias Index = Int
+    typealias Element = CGPoint
+
+    static let empty = AquariumNeighborPositions(positions: [], excludedIndex: nil)
+
+    fileprivate let positions: [CGPoint]
+    fileprivate let excludedIndex: Int?
+
+    var startIndex: Int { 0 }
+    var endIndex: Int { positions.count - (excludedIndex == nil ? 0 : 1) }
+
+    func index(after index: Int) -> Int { index + 1 }
+    func index(before index: Int) -> Int { index - 1 }
+
+    subscript(index: Int) -> CGPoint {
+        precondition(indices.contains(index))
+        let sourceIndex = if let excludedIndex, index >= excludedIndex {
+            index + 1
+        } else {
+            index
+        }
+        return positions[sourceIndex]
+    }
+}
+
 private struct SwimmingFishView: View {
     let fishID: UUID
     let species: FishSpecies
@@ -423,7 +482,7 @@ private struct SwimmingFishView: View {
     let aquariumSize: CGSize
     let updateDate: Date
     let isSimulationPaused: Bool
-    let neighborPositions: [CGPoint]
+    let neighborPositions: AquariumNeighborPositions
     let reportPosition: (CGPoint) -> Void
     let spriteAnimationPhase: TimeInterval
     let spriteTempoMultiplier: TimeInterval
@@ -442,7 +501,7 @@ private struct SwimmingFishView: View {
         aquariumSize: CGSize,
         updateDate: Date,
         isSimulationPaused: Bool,
-        neighborPositions: [CGPoint],
+        neighborPositions: AquariumNeighborPositions,
         reportPosition: @escaping (CGPoint) -> Void
     ) {
         self.fishID = fishID
