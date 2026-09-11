@@ -10,6 +10,7 @@ import UIKit
 struct AquariumView: View {
     let player: Player?
     var backgroundTheme: AquariumBackgroundTheme = .aquarium
+    var isSimulationPaused = false
     var isEditing = false
     var onDecorationEditingChanged: (Bool) -> Void = { _ in }
     var decorationRestoreRequestID: String?
@@ -159,7 +160,10 @@ struct AquariumView: View {
 
     // 魚の配置と泳ぎは、背景装飾とは独立したレイヤーで管理する。
     private func fishLayer(in size: CGSize) -> some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { timeline in
+        TimelineView(.animation(
+            minimumInterval: 1.0 / 30.0,
+            paused: isSimulationPaused
+        )) { timeline in
             ZStack {
                 ForEach(displayedFish) { playerFish in
                     let isFavorite = playerFish.id == favoriteFish?.id
@@ -170,9 +174,12 @@ struct AquariumView: View {
                         isFavorite: isFavorite,
                         aquariumSize: size,
                         updateDate: timeline.date,
-                        neighborPositions: fishPositions
-                            .filter { $0.key != playerFish.id }
-                            .map { $0.value },
+                        isSimulationPaused: isSimulationPaused,
+                        neighborPositions: isSimulationPaused
+                            ? []
+                            : fishPositions
+                                .filter { $0.key != playerFish.id }
+                                .map { $0.value },
                         reportPosition: { fishPositions[playerFish.id] = $0 }
                     )
                 }
@@ -377,12 +384,45 @@ enum AquariumFishSizing {
     }
 }
 
+struct AquariumSimulationTiming {
+    private(set) var lastUpdateDate: Date?
+    private(set) var requiresResumeBaseline = false
+
+    mutating func pause() {
+        lastUpdateDate = nil
+        requiresResumeBaseline = true
+    }
+
+    /// pause中の実時間をMovementへ渡さず、再開後の最初のtickを新しい基準時刻にする。
+    mutating func nextDeltaTime(at date: Date, isPaused: Bool) -> TimeInterval? {
+        guard !isPaused else {
+            pause()
+            return nil
+        }
+
+        if requiresResumeBaseline {
+            requiresResumeBaseline = false
+            lastUpdateDate = date
+            return nil
+        }
+
+        guard let lastUpdateDate else {
+            self.lastUpdateDate = date
+            return nil
+        }
+
+        self.lastUpdateDate = date
+        return date.timeIntervalSince(lastUpdateDate)
+    }
+}
+
 private struct SwimmingFishView: View {
     let fishID: UUID
     let species: FishSpecies
     let isFavorite: Bool
     let aquariumSize: CGSize
     let updateDate: Date
+    let isSimulationPaused: Bool
     let neighborPositions: [CGPoint]
     let reportPosition: (CGPoint) -> Void
     let spriteAnimationPhase: TimeInterval
@@ -391,7 +431,7 @@ private struct SwimmingFishView: View {
     @State private var motion: AquariumFishMotion.State
     @State private var spriteDirectionTransition: FishSpriteDirectionTransition
     @State private var wingCycle: AquariumFishMotion.WingCycle?
-    @State private var lastUpdateDate: Date?
+    @State private var simulationTiming = AquariumSimulationTiming()
     @State private var elapsedTime: TimeInterval = 0
     @State private var positionReportTimeRemaining: TimeInterval = 0
 
@@ -401,6 +441,7 @@ private struct SwimmingFishView: View {
         isFavorite: Bool,
         aquariumSize: CGSize,
         updateDate: Date,
+        isSimulationPaused: Bool,
         neighborPositions: [CGPoint],
         reportPosition: @escaping (CGPoint) -> Void
     ) {
@@ -409,6 +450,7 @@ private struct SwimmingFishView: View {
         self.isFavorite = isFavorite
         self.aquariumSize = aquariumSize
         self.updateDate = updateDate
+        self.isSimulationPaused = isSimulationPaused
         self.neighborPositions = neighborPositions
         self.reportPosition = reportPosition
         self.spriteAnimationPhase = AquariumFishMotion.spriteAnimationPhase(for: fishID)
@@ -443,17 +485,20 @@ private struct SwimmingFishView: View {
             .onChange(of: updateDate) { _, newDate in
                 updateMotion(at: newDate)
             }
+            .onChange(of: isSimulationPaused) { _, isPaused in
+                if isPaused {
+                    simulationTiming.pause()
+                }
+            }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(isFavorite ? "お気に入りの\(species.name)" : species.name)
     }
 
     private func updateMotion(at date: Date) {
-        guard let lastUpdateDate else {
-            self.lastUpdateDate = date
-            return
-        }
-        let deltaTime = date.timeIntervalSince(lastUpdateDate)
-        self.lastUpdateDate = date
+        guard let deltaTime = simulationTiming.nextDeltaTime(
+            at: date,
+            isPaused: isSimulationPaused
+        ) else { return }
         elapsedTime += min(max(deltaTime, 0), AquariumFishMotion.maximumDeltaTime)
         if var wingCycle, let wingProfile {
             wingCycle.advance(

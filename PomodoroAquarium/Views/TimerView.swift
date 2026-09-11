@@ -131,7 +131,8 @@ struct TimerView: View {
         ZStack {
             AquariumView(
                 player: player,
-                backgroundTheme: AquariumThemeStore.theme(from: backgroundThemeRawValue)
+                backgroundTheme: AquariumThemeStore.theme(from: backgroundThemeRawValue),
+                isSimulationPaused: showsTimeSettings
             )
 
             VStack(spacing: 22) {
