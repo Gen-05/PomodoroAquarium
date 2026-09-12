@@ -798,10 +798,43 @@ struct PomodoroAquariumTests {
         #expect(!viewModel.locksMainTabNavigation)
     }
 
-    @Test func mainTabPolicyBlocksOnlyNonAquariumTabsDuringStudy() {
-        let lockedTabs: [MainAppTab] = [.book, .shop, .statistics]
+    @Test func mainTabStructureMatchesHomeAquariumShopStatisticsAndMore() {
+        #expect(MainAppTab.allCases == [.home, .aquarium, .shop, .statistics, .more])
+        #expect(MainAppTab.allCases.map(\.title) == ["ホーム", "水槽", "ショップ", "統計", "その他"])
+        #expect(!MainAppTab.allCases.map(\.title).contains("図鑑"))
+    }
 
-        #expect(MainTabNavigationPolicy.canSelect(.aquarium, whileStudyLocked: true))
+    @Test func onlyTheSelectedAquariumScreenRunsItsFishSimulation() {
+        #expect(!MainTabAquariumActivityPolicy.isSimulationPaused(
+            for: .home,
+            selectedTab: .home
+        ))
+        #expect(MainTabAquariumActivityPolicy.isSimulationPaused(
+            for: .aquarium,
+            selectedTab: .home
+        ))
+        #expect(MainTabAquariumActivityPolicy.isSimulationPaused(
+            for: .home,
+            selectedTab: .aquarium
+        ))
+        #expect(!MainTabAquariumActivityPolicy.isSimulationPaused(
+            for: .aquarium,
+            selectedTab: .aquarium
+        ))
+        #expect(MainTabAquariumActivityPolicy.isSimulationPaused(
+            for: .home,
+            selectedTab: .more
+        ))
+        #expect(MainTabAquariumActivityPolicy.isSimulationPaused(
+            for: .aquarium,
+            selectedTab: .more
+        ))
+    }
+
+    @Test func mainTabPolicyBlocksEveryNonHomeTabDuringStudy() {
+        let lockedTabs: [MainAppTab] = [.aquarium, .shop, .statistics, .more]
+
+        #expect(MainTabNavigationPolicy.canSelect(.home, whileStudyLocked: true))
         for tab in lockedTabs {
             #expect(!MainTabNavigationPolicy.canSelect(tab, whileStudyLocked: true))
             #expect(MainTabNavigationPolicy.opacity(
@@ -829,23 +862,23 @@ struct PomodoroAquariumTests {
     }
 
     @Test func mainTabSelectionDoesNotChangeWhenStudyBlocksButtonAndBindingRequests() {
-        let lockedTabs: [MainAppTab] = [.book, .shop, .statistics]
+        let lockedTabs: [MainAppTab] = [.aquarium, .shop, .statistics, .more]
 
         for tab in lockedTabs {
             var buttonSelection = MainTabSelectionState()
             let buttonDidSelect = buttonSelection.select(tab, whileStudyLocked: true)
             #expect(!buttonDidSelect)
-            #expect(buttonSelection.selection == .aquarium)
+            #expect(buttonSelection.selection == .home)
 
             var bindingSelection = MainTabSelectionState()
             let bindingDidSelect = bindingSelection.select(tab, whileStudyLocked: true)
             #expect(!bindingDidSelect)
-            #expect(bindingSelection.selection == .aquarium)
+            #expect(bindingSelection.selection == .home)
         }
     }
 
     @Test func mainTabSelectionAllowsBreakAwaitingNextSetAndFinishedNavigation() {
-        for tab in [MainAppTab.book, .shop, .statistics] {
+        for tab in [MainAppTab.aquarium, .shop, .statistics, .more] {
             var breakSelection = MainTabSelectionState()
             let breakDidSelect = breakSelection.select(tab, whileStudyLocked: false)
             #expect(breakDidSelect)

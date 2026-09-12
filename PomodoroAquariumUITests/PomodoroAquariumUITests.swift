@@ -35,6 +35,16 @@ final class PomodoroAquariumUITests: XCTestCase {
 
         let studyButton = app.buttons["勉強をはじめる"]
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
+        for tabIdentifier in [
+            "mainTab.home",
+            "mainTab.aquarium",
+            "mainTab.shop",
+            "mainTab.statistics",
+            "mainTab.more"
+        ] {
+            XCTAssertTrue(app.buttons[tabIdentifier].exists)
+        }
+        XCTAssertFalse(app.buttons["mainTab.book"].exists)
 
         let statisticsTab = app.buttons["mainTab.statistics"]
         XCTAssertTrue(statisticsTab.exists)
@@ -42,16 +52,25 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["統計"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.otherElements["monthlyStudyCalendar"].exists)
 
-        let bookTab = app.buttons["mainTab.book"]
-        bookTab.tap()
+        let moreTab = app.buttons["mainTab.more"]
+        moreTab.tap()
+        XCTAssertTrue(app.navigationBars["その他"].waitForExistence(timeout: 5))
+        app.buttons["more.book"].tap()
         XCTAssertTrue(app.navigationBars["魚図鑑"].waitForExistence(timeout: 5))
+
+        app.navigationBars["魚図鑑"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["その他"].waitForExistence(timeout: 5))
+        app.buttons["more.settings"].tap()
+        XCTAssertTrue(app.navigationBars["設定"].waitForExistence(timeout: 5))
+        app.navigationBars["設定"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["その他"].waitForExistence(timeout: 5))
 
         let shopTab = app.buttons["mainTab.shop"]
         shopTab.tap()
         XCTAssertTrue(app.navigationBars["ショップ"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["100コイン"].exists)
 
-        app.buttons["mainTab.aquarium"].tap()
+        app.buttons["mainTab.home"].tap()
 
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         studyButton.tap()
@@ -83,9 +102,10 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertFalse(hitShield.frame.intersects(app.buttons["一時停止"].frame))
 
         let lockedTabs = [
-            app.buttons["mainTab.book"],
+            app.buttons["mainTab.aquarium"],
             app.buttons["mainTab.shop"],
-            app.buttons["mainTab.statistics"]
+            app.buttons["mainTab.statistics"],
+            app.buttons["mainTab.more"]
         ]
         for tab in lockedTabs {
             XCTAssertTrue(tab.exists)
@@ -99,8 +119,8 @@ final class PomodoroAquariumUITests: XCTestCase {
         repeatedlyTap(
             app,
             absolutePoint: CGPoint(
-                x: app.buttons["mainTab.book"].frame.maxX,
-                y: app.buttons["mainTab.book"].frame.midY
+                x: app.buttons["mainTab.aquarium"].frame.maxX,
+                y: app.buttons["mainTab.aquarium"].frame.midY
             ),
             count: 10
         )
@@ -138,9 +158,9 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(app.buttons["startButton"].waitForExistence(timeout: 5))
         app.buttons["startButton"].tap()
 
-        let editButton = app.buttons["水槽編集"]
-        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
-        editButton.tap()
+        XCTAssertFalse(app.buttons["水槽編集"].exists)
+        XCTAssertFalse(app.buttons["設定"].exists)
+        app.buttons["mainTab.aquarium"].tap()
 
         let panel = app.descendants(matching: .any)["aquariumEditor.panel"]
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
@@ -161,8 +181,10 @@ final class PomodoroAquariumUITests: XCTestCase {
 
         app.buttons["aquariumEditor.category.fish"].tap()
         XCTAssertTrue(app.staticTexts["水槽の魚"].waitForExistence(timeout: 5))
-        app.buttons["水槽編集を終了"].tap()
-        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["水槽編集を終了"].exists)
+
+        app.buttons["mainTab.home"].tap()
+        XCTAssertTrue(app.buttons["勉強をはじめる"].waitForExistence(timeout: 5))
     }
 
     private func repeatedlyTap(

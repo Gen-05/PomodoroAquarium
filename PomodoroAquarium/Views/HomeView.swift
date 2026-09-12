@@ -8,8 +8,15 @@
 import SwiftUI
 import SwiftData
 
+enum HomeViewMode {
+    case home
+    case aquariumEditor
+}
+
 struct HomeView: View {
     let timerViewModel: TimerViewModel
+    var mode: HomeViewMode = .home
+    var isAquariumSimulationPaused = false
     
     @AppStorage("studyTime") private var studyTime = "25"
     @AppStorage("breakTime") private var breakTime = "5"
@@ -55,13 +62,17 @@ struct HomeView: View {
         AquariumThemeStore.theme(from: backgroundThemeRawValue)
     }
 
+    private var isAquariumEditorPresented: Bool {
+        mode == .aquariumEditor || isEditingAquarium
+    }
+
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
                 let editorWidth = AquariumSideEditorLayout.width(for: geometry.size.width)
                 let aquariumWidth = AquariumSideEditorLayout.aquariumWidth(
                     for: geometry.size.width,
-                    isEditing: isEditingAquarium
+                    isEditing: isAquariumEditorPresented
                 )
                 let aquariumSize = CGSize(width: aquariumWidth, height: geometry.size.height)
 
@@ -69,8 +80,9 @@ struct HomeView: View {
                     AquariumView(
                         player: player,
                         backgroundTheme: savedBackgroundTheme,
-                        isEditing: isEditingAquarium && aquariumEditorCategory == .decoration,
-                        isFishSelectionEnabled: isEditingAquarium && aquariumEditorCategory == .fish,
+                        isSimulationPaused: isAquariumSimulationPaused,
+                        isEditing: isAquariumEditorPresented && aquariumEditorCategory == .decoration,
+                        isFishSelectionEnabled: isAquariumEditorPresented && aquariumEditorCategory == .fish,
                         selectedFishID: selectedAquariumFishID,
                         onFishSelected: selectAquariumFish
                     )
@@ -84,15 +96,15 @@ struct HomeView: View {
                         )
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                    .animation(.easeInOut(duration: 0.22), value: isEditingAquarium)
+                    .animation(.easeInOut(duration: 0.22), value: isAquariumEditorPresented)
 
                     coinBalanceOverlay
 
-                    if !isEditingAquarium {
+                    if !isAquariumEditorPresented {
                         regularHomeControls
                     }
 
-                    if isEditingAquarium {
+                    if isAquariumEditorPresented {
                         selectedFishRemovalControl(aquariumWidth: aquariumWidth)
 
                         AquariumSideEditor(
@@ -110,7 +122,8 @@ struct HomeView: View {
                                 )
                             },
                             cancelFishDrag: cancelFishDrag,
-                            finishEditing: finishAquariumEditing
+                            finishEditing: finishAquariumEditing,
+                            showsFinishButton: mode != .aquariumEditor
                         )
                         .frame(height: geometry.size.height)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -136,21 +149,6 @@ struct HomeView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        SettingsView()
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .foregroundStyle(.white)
-                            .padding(10)
-                            .background(.black.opacity(0.16), in: Circle())
-                    }
-                    .accessibilityLabel("設定")
-                    .disabled(isEditingAquarium)
-                    .opacity(isEditingAquarium ? 0.42 : 1)
-                }
-            }
             .navigationDestination(isPresented: $resumesPersistedTimer) {
                 TimerView(
                     studyTime: Int(studyTime) ?? 25,
@@ -161,7 +159,9 @@ struct HomeView: View {
             }
         }
         .onAppear {
-            inspectPersistedTimerSession()
+            if mode == .home {
+                inspectPersistedTimerSession()
+            }
             let now = Date()
             let calendar = Calendar.current
             let today = DateFormatter.yyyyMMdd.string(from: now)
@@ -206,7 +206,7 @@ struct HomeView: View {
                 fishDragSession = nil
             }
         }
-        .onChange(of: isEditingAquarium) { _, isEditing in
+        .onChange(of: isAquariumEditorPresented) { _, isEditing in
             if !isEditing {
                 selectedAquariumFishID = nil
                 fishDragSession = nil
@@ -237,9 +237,6 @@ struct HomeView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("所持コイン \(CurrencyService.balance(of: player))枚")
                 .allowsHitTesting(false)
-
-                Color.clear
-                    .frame(width: 76, height: 1)
             }
             .padding(.trailing, 16)
 
@@ -265,16 +262,6 @@ struct HomeView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 14)
             .aquariumGlass(cornerRadius: 18)
-
-            Button {
-                aquariumEditorCategory = .fish
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    isEditingAquarium = true
-                }
-            } label: {
-                Label("水槽編集", systemImage: "move.3d")
-            }
-            .buttonStyle(AquariumSecondaryButtonStyle())
 
             NavigationLink {
                 TimerView(
@@ -303,7 +290,7 @@ struct HomeView: View {
         at location: CGPoint,
         aquariumSize: CGSize
     ) -> Bool {
-        guard isEditingAquarium,
+        guard isAquariumEditorPresented,
               AquariumSideEditorLayout.acceptsDrop(at: location, in: aquariumSize) else {
             return false
         }
@@ -347,14 +334,14 @@ struct HomeView: View {
     }
 
     private func selectAquariumFish(_ playerFishID: UUID) {
-        guard isEditingAquarium,
+        guard isAquariumEditorPresented,
               aquariumEditorCategory == .fish,
               player?.activeAquariumFishIDs.contains(playerFishID) == true else { return }
         selectedAquariumFishID = playerFishID
     }
 
     private func updateFishDrag(species: FishSpecies, location: CGPoint) {
-        guard isEditingAquarium, aquariumEditorCategory == .fish else {
+        guard isAquariumEditorPresented, aquariumEditorCategory == .fish else {
             fishDragSession = nil
             return
         }
@@ -367,7 +354,7 @@ struct HomeView: View {
         aquariumSize: CGSize
     ) {
         defer { fishDragSession = nil }
-        guard isEditingAquarium,
+        guard isAquariumEditorPresented,
               aquariumEditorCategory == .fish,
               fishDragSession?.species == species,
               let player,

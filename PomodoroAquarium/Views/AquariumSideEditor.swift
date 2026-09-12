@@ -212,6 +212,7 @@ struct AquariumSideEditor: View {
     let finishFishDrag: (FishSpecies, CGPoint) -> Void
     let cancelFishDrag: () -> Void
     let finishEditing: () -> Void
+    var showsFinishButton = true
 
     private var contentWidth: CGFloat {
         max(panelWidth - AquariumSideEditorLayout.categoryTabWidth, 80)
@@ -224,13 +225,15 @@ struct AquariumSideEditor: View {
                     Text("編集")
                         .font(.headline)
                     Spacer(minLength: 0)
-                    Button(action: finishEditing) {
-                        Image(systemName: "checkmark")
-                            .font(.caption.weight(.bold))
-                            .frame(width: 28, height: 28)
+                    if showsFinishButton {
+                        Button(action: finishEditing) {
+                            Image(systemName: "checkmark")
+                                .font(.caption.weight(.bold))
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityLabel("水槽編集を終了")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityLabel("水槽編集を終了")
                 }
 
                 editorContent

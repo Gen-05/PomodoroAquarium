@@ -3,37 +3,41 @@ import SwiftData
 import SwiftUI
 
 enum MainAppTab: Hashable, CaseIterable, Identifiable {
+    case home
     case aquarium
-    case book
     case shop
     case statistics
+    case more
 
     var id: Self { self }
 
     var title: String {
         switch self {
+        case .home: "ホーム"
         case .aquarium: "水槽"
-        case .book: "図鑑"
         case .shop: "ショップ"
         case .statistics: "統計"
+        case .more: "その他"
         }
     }
 
     var systemImage: String {
         switch self {
+        case .home: "house.fill"
         case .aquarium: "fish.fill"
-        case .book: "book.closed.fill"
         case .shop: "storefront.fill"
         case .statistics: "chart.bar.fill"
+        case .more: "ellipsis.circle.fill"
         }
     }
 
     var accessibilityIdentifier: String {
         switch self {
+        case .home: "mainTab.home"
         case .aquarium: "mainTab.aquarium"
-        case .book: "mainTab.book"
         case .shop: "mainTab.shop"
         case .statistics: "mainTab.statistics"
+        case .more: "mainTab.more"
         }
     }
 }
@@ -42,7 +46,7 @@ enum MainTabNavigationPolicy {
     static let lockedTabOpacity = 0.42
 
     static func canSelect(_ tab: MainAppTab, whileStudyLocked: Bool) -> Bool {
-        !whileStudyLocked || tab == .aquarium
+        !whileStudyLocked || tab == .home
     }
 
     static func opacity(for tab: MainAppTab, whileStudyLocked: Bool) -> Double {
@@ -64,8 +68,17 @@ enum MainTabBarHitShieldLayout {
     }
 }
 
+enum MainTabAquariumActivityPolicy {
+    static func isSimulationPaused(
+        for aquariumTab: MainAppTab,
+        selectedTab: MainAppTab
+    ) -> Bool {
+        aquariumTab != selectedTab
+    }
+}
+
 struct MainTabSelectionState {
-    private(set) var selection: MainAppTab = .aquarium
+    private(set) var selection: MainAppTab = .home
 
     /// Bindingと実際のTabボタンが共有する選択処理。拒否時はselectionを変更しない。
     @discardableResult
@@ -123,18 +136,32 @@ struct MainTabView: View {
     var body: some View {
         GeometryReader { geometry in
             TabView(selection: tabSelection) {
-                Tab(value: MainAppTab.aquarium) {
-                    HomeView(timerViewModel: timerViewModel)
+                Tab(value: MainAppTab.home) {
+                    HomeView(
+                        timerViewModel: timerViewModel,
+                        mode: .home,
+                        isAquariumSimulationPaused: MainTabAquariumActivityPolicy
+                            .isSimulationPaused(
+                                for: .home,
+                                selectedTab: tabSelectionState.selection
+                            )
+                    )
                 } label: {
-                    Label("水槽", systemImage: "fish.fill")
+                    Label("ホーム", systemImage: "house.fill")
                 }
 
-                Tab(value: MainAppTab.book) {
-                    NavigationStack {
-                        BookView()
-                    }
+                Tab(value: MainAppTab.aquarium) {
+                    HomeView(
+                        timerViewModel: timerViewModel,
+                        mode: .aquariumEditor,
+                        isAquariumSimulationPaused: MainTabAquariumActivityPolicy
+                            .isSimulationPaused(
+                                for: .aquarium,
+                                selectedTab: tabSelectionState.selection
+                            )
+                    )
                 } label: {
-                    Label("図鑑", systemImage: "book.closed.fill")
+                    Label("水槽", systemImage: "fish.fill")
                 }
 
                 Tab(value: MainAppTab.shop) {
@@ -151,6 +178,14 @@ struct MainTabView: View {
                     }
                 } label: {
                     Label("統計", systemImage: "chart.bar.fill")
+                }
+
+                Tab(value: MainAppTab.more) {
+                    NavigationStack {
+                        MoreView()
+                    }
+                } label: {
+                    Label("その他", systemImage: "ellipsis.circle.fill")
                 }
             }
             .toolbar(.hidden, for: .tabBar)
@@ -177,7 +212,7 @@ struct MainTabView: View {
             }
             .onChange(of: timerViewModel.locksMainTabNavigation) { _, isLocked in
                 if isLocked {
-                    tabSelectionState.select(.aquarium, whileStudyLocked: false)
+                    tabSelectionState.select(.home, whileStudyLocked: false)
                 }
             }
         }
