@@ -93,6 +93,24 @@ enum AquariumDecorationService {
 
 enum AquariumDecorationEditor {
     static func relativePosition(
+        forDropLocation location: CGPoint,
+        aquariumSize: CGSize,
+        kind: AquariumDecorationKind
+    ) -> CGPoint {
+        guard aquariumSize.width > 0, aquariumSize.height > 0 else {
+            return kind.restorationPosition
+        }
+
+        let bounds = kind.movementBounds
+        let proposedX = location.x / aquariumSize.width
+        let proposedY = location.y / aquariumSize.height
+        return CGPoint(
+            x: min(max(proposedX, bounds.x.lowerBound), bounds.x.upperBound),
+            y: min(max(proposedY, bounds.y.lowerBound), bounds.y.upperBound)
+        )
+    }
+
+    static func relativePosition(
         originalX: CGFloat,
         originalY: CGFloat,
         translation: CGSize,

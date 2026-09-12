@@ -12,6 +12,10 @@ import Foundation
 class Player {
     var ownedFish: [PlayerFish] = []
     var favoriteFish: PlayerFish?
+    /// 水槽へ出している個体ID。魚種単位ではなくPlayerFish単位で永続化する。
+    var activeAquariumFishIDs: [UUID] = []
+    /// `activeAquariumFishIDs.isEmpty`を「未移行」と「0匹選択済み」の判定に兼用しないためのフラグ。
+    var hasInitializedActiveAquariumFish = false
     
     var totalStudyMinutes = 0
     var todayStudyMinutes = 0
@@ -26,6 +30,8 @@ class Player {
     init(
         ownedFish: [PlayerFish] = [],
         favoriteFish: PlayerFish? = nil,
+        activeAquariumFishIDs: [UUID] = [],
+        hasInitializedActiveAquariumFish: Bool = false,
         totalStudyMinutes: Int = 0,
         todayStudyMinutes: Int = 0,
         yesterdayStudyMinutes: Int = 0,
@@ -38,6 +44,8 @@ class Player {
     ) {
         self.ownedFish = ownedFish
         self.favoriteFish = favoriteFish
+        self.activeAquariumFishIDs = activeAquariumFishIDs
+        self.hasInitializedActiveAquariumFish = hasInitializedActiveAquariumFish
         self.totalStudyMinutes = totalStudyMinutes
         self.todayStudyMinutes = todayStudyMinutes
         self.yesterdayStudyMinutes = yesterdayStudyMinutes

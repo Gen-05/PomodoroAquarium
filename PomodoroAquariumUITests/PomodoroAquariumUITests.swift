@@ -130,6 +130,41 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["獲得魚なし"].exists)
     }
 
+    @MainActor
+    func testAquariumSideEditorKeepsTheAquariumVisibleAndSwitchesCategories() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.buttons["startButton"].waitForExistence(timeout: 5))
+        app.buttons["startButton"].tap()
+
+        let editButton = app.buttons["水槽編集"]
+        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+        editButton.tap()
+
+        let panel = app.descendants(matching: .any)["aquariumEditor.panel"]
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        XCTAssertLessThan(panel.frame.width, app.frame.width / 2)
+        XCTAssertGreaterThan(app.frame.width - panel.frame.width, app.frame.width / 2)
+        XCTAssertGreaterThan(panel.frame.minX, app.frame.midX)
+        XCTAssertTrue(app.staticTexts["水槽の魚"].exists)
+        XCTAssertEqual(
+            app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "戻す")).count,
+            0
+        )
+
+        app.buttons["aquariumEditor.category.decoration"].tap()
+        XCTAssertTrue(app.staticTexts["水槽へドラッグ"].waitForExistence(timeout: 5))
+
+        app.buttons["aquariumEditor.category.background"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["aquariumEditor.background.deepSea"].waitForExistence(timeout: 5))
+
+        app.buttons["aquariumEditor.category.fish"].tap()
+        XCTAssertTrue(app.staticTexts["水槽の魚"].waitForExistence(timeout: 5))
+        app.buttons["水槽編集を終了"].tap()
+        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+    }
+
     private func repeatedlyTap(
         _ element: XCUIElement,
         normalizedOffset: CGVector,

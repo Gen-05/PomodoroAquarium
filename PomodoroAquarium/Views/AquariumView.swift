@@ -7,11 +7,21 @@ import SwiftUI
 import SwiftData
 import UIKit
 
+private struct AquariumFishSelectionRevision: Equatable {
+    let ownedFishIDs: [UUID]
+    let activeFishIDs: [UUID]
+    let favoriteFishID: UUID?
+    let isInitialized: Bool
+}
+
 struct AquariumView: View {
     let player: Player?
     var backgroundTheme: AquariumBackgroundTheme = .aquarium
     var isSimulationPaused = false
     var isEditing = false
+    var isFishSelectionEnabled = false
+    var selectedFishID: UUID?
+    var onFishSelected: (UUID) -> Void = { _ in }
     var onDecorationEditingChanged: (Bool) -> Void = { _ in }
     var decorationRestoreRequestID: String?
     var onDecorationRestoreRequestHandled: () -> Void = {}
@@ -22,21 +32,23 @@ struct AquariumView: View {
     @State private var originalPosition: CGPoint?
     @State private var previewPosition: CGPoint?
     @State private var fishPositions: [UUID: CGPoint] = [:]
+    @State private var displayedFish: [PlayerFish] = []
 
     private var favoriteFish: PlayerFish? {
         player?.favoriteFish
     }
 
-    private var displayedFish: [PlayerFish] {
-        guard let player else { return [] }
-        return AquariumFishDisplayPolicy.displayedFish(
-            from: player.ownedFish,
-            favoriteFish: favoriteFish
-        )
-    }
-
     private var displayedFishIDs: [UUID] {
         displayedFish.map(\.id)
+    }
+
+    private var fishSelectionRevision: AquariumFishSelectionRevision {
+        AquariumFishSelectionRevision(
+            ownedFishIDs: player?.ownedFish.map(\.id) ?? [],
+            activeFishIDs: player?.activeAquariumFishIDs ?? [],
+            favoriteFishID: player?.favoriteFish?.id,
+            isInitialized: player?.hasInitializedActiveAquariumFish ?? false
+        )
     }
 
     var body: some View {
@@ -49,7 +61,7 @@ struct AquariumView: View {
                 fishLayer(in: geometry.size)
 
                 if displayedFish.isEmpty {
-                    favoriteFishGuide
+                    emptyAquariumGuide
                         .offset(y: -geometry.size.height * 0.16)
                 } else if favoriteFish == nil {
                     favoriteFishGuide
@@ -63,6 +75,10 @@ struct AquariumView: View {
         .ignoresSafeArea()
         .onAppear {
             _ = try? AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
+            updateDisplayedFish()
+        }
+        .onChange(of: fishSelectionRevision, initial: true) { _, _ in
+            updateDisplayedFish()
         }
         .onChange(of: displayedFishIDs, initial: true) { _, displayedFishIDs in
             let displayedIDSet = Set(displayedFishIDs)
@@ -83,6 +99,21 @@ struct AquariumView: View {
                   }) else { return }
             beginEditing(placement, at: placement.kind.restorationPosition)
             onDecorationRestoreRequestHandled()
+        }
+    }
+
+    private func updateDisplayedFish() {
+        guard let player else {
+            displayedFish = []
+            return
+        }
+
+        if AquariumFishSelection.initializeIfNeeded(for: player) {
+            try? modelContext.save()
+        }
+        let activeFish = player.activeAquariumFish
+        if activeFish.map(\.id) != displayedFishIDs {
+            displayedFish = activeFish
         }
     }
 
@@ -187,14 +218,31 @@ struct AquariumView: View {
                         aquariumSize: size,
                         updateDate: timeline.date,
                         isSimulationPaused: isSimulationPaused,
+                        isSelectionEnabled: isFishSelectionEnabled,
+                        isSelected: selectedFishID == playerFish.id,
                         neighborPositions: isSimulationPaused
                             ? .empty
                             : positionSnapshot.neighborPositions(excluding: playerFish.id),
-                        reportPosition: { fishPositions[playerFish.id] = $0 }
+                        reportPosition: { fishPositions[playerFish.id] = $0 },
+                        select: { onFishSelected(playerFish.id) }
                     )
                 }
             }
         }
+    }
+
+    private var emptyAquariumGuide: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "fish")
+                .font(.system(size: 42))
+
+            Text("水槽編集から魚を追加してください")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .aquariumGlass(cornerRadius: 20)
+        .padding(.horizontal, 32)
     }
 
     private var favoriteFishGuide: some View {
@@ -490,8 +538,11 @@ private struct SwimmingFishView: View {
     let aquariumSize: CGSize
     let updateDate: Date
     let isSimulationPaused: Bool
+    let isSelectionEnabled: Bool
+    let isSelected: Bool
     let neighborPositions: AquariumNeighborPositions
     let reportPosition: (CGPoint) -> Void
+    let select: () -> Void
     let spriteAnimationPhase: TimeInterval
     let spriteTempoMultiplier: TimeInterval
 
@@ -509,8 +560,11 @@ private struct SwimmingFishView: View {
         aquariumSize: CGSize,
         updateDate: Date,
         isSimulationPaused: Bool,
+        isSelectionEnabled: Bool,
+        isSelected: Bool,
         neighborPositions: AquariumNeighborPositions,
-        reportPosition: @escaping (CGPoint) -> Void
+        reportPosition: @escaping (CGPoint) -> Void,
+        select: @escaping () -> Void
     ) {
         self.fishID = fishID
         self.species = species
@@ -518,8 +572,11 @@ private struct SwimmingFishView: View {
         self.aquariumSize = aquariumSize
         self.updateDate = updateDate
         self.isSimulationPaused = isSimulationPaused
+        self.isSelectionEnabled = isSelectionEnabled
+        self.isSelected = isSelected
         self.neighborPositions = neighborPositions
         self.reportPosition = reportPosition
+        self.select = select
         self.spriteAnimationPhase = AquariumFishMotion.spriteAnimationPhase(for: fishID)
         self.spriteTempoMultiplier = AquariumFishMotion.spriteTempoMultiplier(for: fishID)
 
@@ -538,12 +595,32 @@ private struct SwimmingFishView: View {
     }
 
     var body: some View {
-        fishImage
-            // 分離された尾びれ素材がないため、1枚絵へ速度連動の微細な変形を加える。
-            .rotationEffect(.degrees(swimRotation + smallFishDirectionRotation))
-            .scaleEffect(x: 1, y: swimVerticalScale)
-            .offset(y: swimVerticalOffset)
-            .opacity(motion.depthOpacity)
+        ZStack {
+            if isSelected {
+                Circle()
+                    .fill(.cyan.opacity(0.12))
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.9), lineWidth: 2)
+                    }
+                    .frame(width: fishSize + 14, height: fishSize + 14)
+                    .allowsHitTesting(false)
+            }
+
+            fishImage
+                // 分離された尾びれ素材がないため、1枚絵へ速度連動の微細な変形を加える。
+                .rotationEffect(.degrees(swimRotation + smallFishDirectionRotation))
+                .scaleEffect(x: 1, y: swimVerticalScale)
+                .offset(y: swimVerticalOffset)
+                .opacity(motion.depthOpacity)
+        }
+            .frame(width: selectionHitTargetSize, height: selectionHitTargetSize)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard isSelectionEnabled else { return }
+                select()
+            }
+            .allowsHitTesting(isSelectionEnabled)
             .position(
                 x: aquariumSize.width * motion.position.x,
                 y: aquariumSize.height * motion.position.y
@@ -558,7 +635,8 @@ private struct SwimmingFishView: View {
                 }
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(isFavorite ? "お気に入りの\(species.name)" : species.name)
+            .accessibilityLabel(fishAccessibilityLabel)
+            .accessibilityIdentifier("aquarium.fish.\(fishID.uuidString)")
     }
 
     private func updateMotion(at date: Date) {
@@ -616,6 +694,16 @@ private struct SwimmingFishView: View {
 
     private var fishSize: CGFloat {
         AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite)
+    }
+
+    private var selectionHitTargetSize: CGFloat {
+        guard isSelectionEnabled else { return fishSize }
+        return max(fishSize + 20, 56)
+    }
+
+    private var fishAccessibilityLabel: String {
+        let base = isFavorite ? "お気に入りの\(species.name)" : species.name
+        return isSelected ? "\(base)、選択中" : base
     }
 
     private var swimIntensity: CGFloat {

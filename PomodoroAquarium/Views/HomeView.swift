@@ -24,6 +24,10 @@ struct HomeView: View {
     @State private var showsInterruptionBanner = false
     @State private var resumesPersistedTimer = false
     @State private var isEditingAquarium = false
+    @State private var aquariumEditorCategory: AquariumEditorCategory = .fish
+    @State private var selectedAquariumFishID: UUID?
+    @State private var fishDragSession: AquariumFishDragSession?
+    // 旧編集overlayは新UIの検証完了まで実装を保持し、表示経路だけ切り替える。
     @State private var isEditingDecoration = false
     @State private var showsDecorationStorage = false
     @State private var decorationRestoreRequestID: String?
@@ -51,148 +55,84 @@ struct HomeView: View {
         AquariumThemeStore.theme(from: backgroundThemeRawValue)
     }
 
-    private var displayedBackgroundTheme: AquariumBackgroundTheme {
-        previewBackgroundTheme ?? savedBackgroundTheme
-    }
-
     var body: some View {
-        NavigationStack{
-            ZStack {
-                AquariumView(
-                    player: player,
-                    backgroundTheme: displayedBackgroundTheme,
-                    isEditing: isEditingAquarium,
-                    onDecorationEditingChanged: updateDecorationEditingState,
-                    decorationRestoreRequestID: decorationRestoreRequestID,
-                    onDecorationRestoreRequestHandled: {
-                        decorationRestoreRequestID = nil
-                    }
+        NavigationStack {
+            GeometryReader { geometry in
+                let editorWidth = AquariumSideEditorLayout.width(for: geometry.size.width)
+                let aquariumWidth = AquariumSideEditorLayout.aquariumWidth(
+                    for: geometry.size.width,
+                    isEditing: isEditingAquarium
                 )
+                let aquariumSize = CGSize(width: aquariumWidth, height: geometry.size.height)
 
-                VStack {
-                    HStack {
-                        Spacer()
-
-                        HStack(spacing: 6) {
-                            Image(systemName: "circle.hexagongrid.fill")
-                            Text("\(CurrencyService.balance(of: player))")
-                                .monospacedDigit()
-                        }
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.yellow)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("所持コイン \(CurrencyService.balance(of: player))枚")
-                        .allowsHitTesting(false)
-
-                        Color.clear
-                            .frame(width: 76, height: 1)
+                ZStack(alignment: .trailing) {
+                    AquariumView(
+                        player: player,
+                        backgroundTheme: savedBackgroundTheme,
+                        isEditing: isEditingAquarium && aquariumEditorCategory == .decoration,
+                        isFishSelectionEnabled: isEditingAquarium && aquariumEditorCategory == .fish,
+                        selectedFishID: selectedAquariumFishID,
+                        onFishSelected: selectAquariumFish
+                    )
+                    .frame(width: aquariumWidth, height: geometry.size.height)
+                    .contentShape(Rectangle())
+                    .dropDestination(for: AquariumEditorDragItem.self) { items, location in
+                        handleAquariumDrop(
+                            items,
+                            at: location,
+                            aquariumSize: aquariumSize
+                        )
                     }
-                    .padding(.trailing, 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .animation(.easeInOut(duration: 0.22), value: isEditingAquarium)
 
-                    Spacer()
-                }
-                .padding(.top, 8)
-                .offset(y: -52)
-                .zIndex(10)
+                    coinBalanceOverlay
 
-                VStack(spacing: 20) {
-                    if showsInterruptionBanner {
-                        interruptionBanner
-                            .transition(.move(edge: .top).combined(with: .opacity))
+                    if !isEditingAquarium {
+                        regularHomeControls
                     }
-
-                    Spacer()
 
                     if isEditingAquarium {
-                        if !isEditingDecoration &&
-                            !showsDecorationStorage &&
-                            !showsBackgroundThemePicker {
-                            Group {
-                                Text("水草や岩をタップして移動できます")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 18)
-                                    .padding(.vertical, 10)
-                                    .aquariumGlass(cornerRadius: 16)
+                        selectedFishRemovalControl(aquariumWidth: aquariumWidth)
 
-                                HStack(spacing: 12) {
-                                    Button {
-                                        withAnimation(.easeInOut(duration: 0.22)) {
-                                            showsDecorationStorage = true
-                                        }
-                                    } label: {
-                                        Label("収納", systemImage: "shippingbox.fill")
-                                    }
-                                    .buttonStyle(AquariumSecondaryButtonStyle())
+                        AquariumSideEditor(
+                            player: player,
+                            decorationPlacements: decorationPlacements,
+                            selectedBackgroundTheme: savedBackgroundTheme,
+                            panelWidth: editorWidth,
+                            selectedCategory: $aquariumEditorCategory,
+                            updateFishDrag: updateFishDrag,
+                            finishFishDrag: { species, location in
+                                finishFishDrag(
+                                    species: species,
+                                    at: location,
+                                    aquariumSize: aquariumSize
+                                )
+                            },
+                            cancelFishDrag: cancelFishDrag,
+                            finishEditing: finishAquariumEditing
+                        )
+                        .frame(height: geometry.size.height)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .zIndex(30)
 
-                                    Button {
-                                        beginBackgroundThemeEditing()
-                                    } label: {
-                                        Label("背景", systemImage: "photo.fill")
-                                    }
-                                    .buttonStyle(AquariumSecondaryButtonStyle())
-
-                                    Button("完了") {
-                                        withAnimation { isEditingAquarium = false }
-                                    }
-                                    .buttonStyle(AquariumPrimaryButtonStyle())
-                                }
-                            }
-                            .transition(.opacity)
+                        if let fishDragSession {
+                            AquariumFishDragPreview(species: fishDragSession.species)
+                                .position(fishDragSession.location)
+                                .zIndex(50)
                         }
-                    } else {
-                        VStack(spacing: 8) {
-                            Text("今日の勉強時間")
-                                .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.8))
-                            Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
-                                .font(.title2.weight(.semibold))
-                                .foregroundStyle(.white)
+                    }
+
+                    if showsInterruptionBanner {
+                        VStack {
+                            interruptionBanner
+                            Spacer()
                         }
                         .padding(.horizontal, 24)
-                        .padding(.vertical, 14)
-                        .aquariumGlass(cornerRadius: 18)
-
-                        Button {
-                            withAnimation { isEditingAquarium = true }
-                        } label: {
-                            Label("水槽編集", systemImage: "move.3d")
-                        }
-                        .buttonStyle(AquariumSecondaryButtonStyle())
-
-                        NavigationLink {
-                            TimerView(
-                                studyTime: Int(studyTime) ?? 25,
-                                breakTime: Int(breakTime) ?? 5,
-                                player: player,
-                                viewModel: timerViewModel
-                            )
-                        } label: {
-                            Label(
-                                HomeTimerEntryPresentation.title(
-                                    for: timerViewModel.phase,
-                                    state: timerViewModel.state
-                                ),
-                                systemImage: "timer"
-                            )
-                        }
-                        .buttonStyle(AquariumPrimaryButtonStyle())
+                        .zIndex(40)
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 24)
-
-                if showsDecorationStorage {
-                    decorationStorageOverlay
-                        .zIndex(20)
-                }
-
-                if showsBackgroundThemePicker {
-                    backgroundThemePickerOverlay
-                        .zIndex(21)
-                }
+                .coordinateSpace(name: AquariumEditorCoordinateSpace.name)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
@@ -207,6 +147,8 @@ struct HomeView: View {
                             .background(.black.opacity(0.16), in: Circle())
                     }
                     .accessibilityLabel("設定")
+                    .disabled(isEditingAquarium)
+                    .opacity(isEditingAquarium ? 0.42 : 1)
                 }
             }
             .navigationDestination(isPresented: $resumesPersistedTimer) {
@@ -233,6 +175,10 @@ struct HomeView: View {
                 currentPlayer = newPlayer
             }
 
+            if AquariumFishSelection.initializeIfNeeded(for: currentPlayer) {
+                try? modelContext.save()
+            }
+
             if lastStudyDate.isEmpty {
                 lastStudyDate = today
             } else if let lastDate = DateFormatter.yyyyMMdd.date(from: lastStudyDate),
@@ -252,6 +198,267 @@ struct HomeView: View {
                 currentPlayer.yesterdayStudyMinutes = 0
                 currentPlayer.todayStudyMinutes = 0
                 lastStudyDate = today
+            }
+        }
+        .onChange(of: aquariumEditorCategory) { _, category in
+            if category != .fish {
+                selectedAquariumFishID = nil
+                fishDragSession = nil
+            }
+        }
+        .onChange(of: isEditingAquarium) { _, isEditing in
+            if !isEditing {
+                selectedAquariumFishID = nil
+                fishDragSession = nil
+            }
+        }
+        .onChange(of: player?.activeAquariumFishIDs ?? []) { _, activeFishIDs in
+            if let selectedAquariumFishID,
+               !activeFishIDs.contains(selectedAquariumFishID) {
+                self.selectedAquariumFishID = nil
+            }
+        }
+    }
+
+    private var coinBalanceOverlay: some View {
+        VStack {
+            HStack {
+                Spacer()
+
+                HStack(spacing: 6) {
+                    Image(systemName: "circle.hexagongrid.fill")
+                    Text("\(CurrencyService.balance(of: player))")
+                        .monospacedDigit()
+                }
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.yellow)
+                .fixedSize(horizontal: true, vertical: false)
+                .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("所持コイン \(CurrencyService.balance(of: player))枚")
+                .allowsHitTesting(false)
+
+                Color.clear
+                    .frame(width: 76, height: 1)
+            }
+            .padding(.trailing, 16)
+
+            Spacer()
+        }
+        .padding(.top, 8)
+        .offset(y: -52)
+        .zIndex(10)
+    }
+
+    private var regularHomeControls: some View {
+        VStack(spacing: 20) {
+            Spacer()
+
+            VStack(spacing: 8) {
+                Text("今日の勉強時間")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.8))
+                Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .aquariumGlass(cornerRadius: 18)
+
+            Button {
+                aquariumEditorCategory = .fish
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    isEditingAquarium = true
+                }
+            } label: {
+                Label("水槽編集", systemImage: "move.3d")
+            }
+            .buttonStyle(AquariumSecondaryButtonStyle())
+
+            NavigationLink {
+                TimerView(
+                    studyTime: Int(studyTime) ?? 25,
+                    breakTime: Int(breakTime) ?? 5,
+                    player: player,
+                    viewModel: timerViewModel
+                )
+            } label: {
+                Label(
+                    HomeTimerEntryPresentation.title(
+                        for: timerViewModel.phase,
+                        state: timerViewModel.state
+                    ),
+                    systemImage: "timer"
+                )
+            }
+            .buttonStyle(AquariumPrimaryButtonStyle())
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 24)
+    }
+
+    private func handleAquariumDrop(
+        _ items: [AquariumEditorDragItem],
+        at location: CGPoint,
+        aquariumSize: CGSize
+    ) -> Bool {
+        guard isEditingAquarium,
+              AquariumSideEditorLayout.acceptsDrop(at: location, in: aquariumSize) else {
+            return false
+        }
+
+        for item in items {
+            switch item.kind {
+            case .fish:
+                guard let player,
+                      AquariumEditorDropCoordinator.addFish(from: item, to: player) else {
+                    continue
+                }
+                try? modelContext.save()
+                return true
+
+            case .decoration:
+                guard let placement = decorationPlacements.first(where: {
+                    $0.decorationID == item.identifier
+                }) else { continue }
+                do {
+                    try AquariumEditorDropCoordinator.placeDecoration(
+                        from: item,
+                        placement: placement,
+                        at: location,
+                        aquariumSize: aquariumSize,
+                        in: modelContext
+                    )
+                    return true
+                } catch {
+                    return false
+                }
+
+            case .background:
+                guard let theme = AquariumEditorDropCoordinator.backgroundTheme(from: item) else {
+                    continue
+                }
+                backgroundThemeRawValue = theme.rawValue
+                return true
+            }
+        }
+        return false
+    }
+
+    private func selectAquariumFish(_ playerFishID: UUID) {
+        guard isEditingAquarium,
+              aquariumEditorCategory == .fish,
+              player?.activeAquariumFishIDs.contains(playerFishID) == true else { return }
+        selectedAquariumFishID = playerFishID
+    }
+
+    private func updateFishDrag(species: FishSpecies, location: CGPoint) {
+        guard isEditingAquarium, aquariumEditorCategory == .fish else {
+            fishDragSession = nil
+            return
+        }
+        fishDragSession = AquariumFishDragSession(species: species, location: location)
+    }
+
+    private func finishFishDrag(
+        species: FishSpecies,
+        at location: CGPoint,
+        aquariumSize: CGSize
+    ) {
+        defer { fishDragSession = nil }
+        guard isEditingAquarium,
+              aquariumEditorCategory == .fish,
+              fishDragSession?.species == species,
+              let player,
+              AquariumEditorDropCoordinator.completeFishDrag(
+                species: species,
+                at: location,
+                aquariumSize: aquariumSize,
+                player: player
+              ) else { return }
+        try? modelContext.save()
+    }
+
+    private func cancelFishDrag() {
+        fishDragSession = nil
+    }
+
+    private func removeSelectedAquariumFish() {
+        guard let selectedAquariumFishID,
+              let player,
+              player.removeFishFromAquarium(playerFishID: selectedAquariumFishID) else { return }
+        self.selectedAquariumFishID = nil
+        try? modelContext.save()
+    }
+
+    @ViewBuilder
+    private func selectedFishRemovalControl(aquariumWidth: CGFloat) -> some View {
+        if aquariumEditorCategory == .fish,
+           let selectedAquariumFishID,
+           player?.activeAquariumFishIDs.contains(selectedAquariumFishID) == true {
+            VStack {
+                Spacer()
+                Button(action: removeSelectedAquariumFish) {
+                    Label("水槽から戻す", systemImage: "arrow.uturn.backward.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 13)
+                        .background(.red.opacity(0.82), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.4), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.24), radius: 8, y: 4)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("aquariumEditor.removeSelectedFish")
+            }
+            .padding(.bottom, AquariumSideEditorLayout.excludedDropBottomHeight + 8)
+            .frame(width: aquariumWidth)
+            .frame(maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .allowsHitTesting(true)
+            .zIndex(25)
+        }
+    }
+
+    private func finishAquariumEditing() {
+        selectedAquariumFishID = nil
+        fishDragSession = nil
+        withAnimation(.easeInOut(duration: 0.22)) {
+            isEditingAquarium = false
+        }
+    }
+
+    private var decorationEditorControls: some View {
+        Group {
+            Text("水草や岩をタップして移動できます")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .aquariumGlass(cornerRadius: 16)
+
+            HStack(spacing: 12) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        showsDecorationStorage = true
+                    }
+                } label: {
+                    Label("収納", systemImage: "shippingbox.fill")
+                }
+                .buttonStyle(AquariumSecondaryButtonStyle())
+
+                Button {
+                    beginBackgroundThemeEditing()
+                } label: {
+                    Label("背景", systemImage: "photo.fill")
+                }
+                .buttonStyle(AquariumSecondaryButtonStyle())
+
+                Button("完了") {
+                    withAnimation { isEditingAquarium = false }
+                }
+                .buttonStyle(AquariumPrimaryButtonStyle())
             }
         }
     }
