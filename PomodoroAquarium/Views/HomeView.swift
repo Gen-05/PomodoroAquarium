@@ -17,14 +17,20 @@ struct HomeView: View {
     let timerViewModel: TimerViewModel
     var mode: HomeViewMode = .home
     var isAquariumSimulationPaused = false
+    var isAquariumEditorActive = false
+    var aquariumEditorNavigation: AquariumEditorNavigationCoordinator?
+    var onFinishAquariumEditing: (MainAppTab) -> Void = { _ in }
     
     @AppStorage("studyTime") private var studyTime = "25"
     @AppStorage("breakTime") private var breakTime = "5"
     @AppStorage("lastStudyDate") private var lastStudyDate = ""
     @AppStorage(AquariumThemeStore.storageKey)
     private var backgroundThemeRawValue = AquariumBackgroundTheme.aquarium.rawValue
+    @AppStorage(AquariumEditorTutorialState.storageKey)
+    private var hasSeenAquariumEditorTutorial = false
     
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     
     @Query private var players: [Player]
     @Query private var decorationPlacements: [AquariumDecorationPlacement]
@@ -34,6 +40,12 @@ struct HomeView: View {
     @State private var aquariumEditorCategory: AquariumEditorCategory = .fish
     @State private var selectedAquariumFishID: UUID?
     @State private var fishDragSession: AquariumFishDragSession?
+    @State private var isEditorPanelExpanded = true
+    @State private var editorSessionSnapshot: AquariumEditorSessionSnapshot?
+    @State private var draftBackgroundTheme: AquariumBackgroundTheme?
+    @State private var showsAquariumEditConfirmation = false
+    @State private var showsEditorSaveConfirmation = false
+    @State private var showsAquariumEditorTutorial = false
     // 旧編集overlayは新UIの検証完了まで実装を保持し、表示経路だけ切り替える。
     @State private var isEditingDecoration = false
     @State private var showsDecorationStorage = false
@@ -62,8 +74,22 @@ struct HomeView: View {
         AquariumThemeStore.theme(from: backgroundThemeRawValue)
     }
 
+    private var displayedBackgroundTheme: AquariumBackgroundTheme {
+        if mode == .aquariumEditor, let draftBackgroundTheme {
+            return draftBackgroundTheme
+        }
+        return savedBackgroundTheme
+    }
+
     private var isAquariumEditorPresented: Bool {
-        mode == .aquariumEditor || isEditingAquarium
+        if mode == .aquariumEditor {
+            return aquariumEditorNavigation?.tabMode == .editing
+        }
+        return isEditingAquarium
+    }
+
+    private var hasUnsavedAquariumEditorChanges: Bool {
+        aquariumEditorNavigation?.hasUnsavedChanges ?? false
     }
 
     var body: some View {
@@ -72,19 +98,22 @@ struct HomeView: View {
                 let editorWidth = AquariumSideEditorLayout.width(for: geometry.size.width)
                 let aquariumWidth = AquariumSideEditorLayout.aquariumWidth(
                     for: geometry.size.width,
-                    isEditing: isAquariumEditorPresented
+                    isEditing: isAquariumEditorPresented,
+                    isPanelExpanded: isEditorPanelExpanded
                 )
                 let aquariumSize = CGSize(width: aquariumWidth, height: geometry.size.height)
 
                 ZStack(alignment: .trailing) {
                     AquariumView(
                         player: player,
-                        backgroundTheme: savedBackgroundTheme,
+                        backgroundTheme: displayedBackgroundTheme,
                         isSimulationPaused: isAquariumSimulationPaused,
                         isEditing: isAquariumEditorPresented && aquariumEditorCategory == .decoration,
+                        defersDecorationPersistence: mode == .aquariumEditor,
                         isFishSelectionEnabled: isAquariumEditorPresented && aquariumEditorCategory == .fish,
                         selectedFishID: selectedAquariumFishID,
-                        onFishSelected: selectAquariumFish
+                        onFishSelected: selectAquariumFish,
+                        onDecorationChanged: markAquariumEditorChanged
                     )
                     .frame(width: aquariumWidth, height: geometry.size.height)
                     .contentShape(Rectangle())
@@ -98,41 +127,61 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .animation(.easeInOut(duration: 0.22), value: isAquariumEditorPresented)
 
-                    coinBalanceOverlay
+                    if mode == .home {
+                        coinBalanceOverlay
+                    }
 
-                    if !isAquariumEditorPresented {
+                    if mode == .home, !isAquariumEditorPresented {
                         regularHomeControls
+                    }
+
+                    if mode == .aquariumEditor, !isAquariumEditorPresented {
+                        aquariumEditingEntryControl
                     }
 
                     if isAquariumEditorPresented {
                         selectedFishRemovalControl(aquariumWidth: aquariumWidth)
+                        editorCompletionControl(aquariumWidth: aquariumWidth)
 
-                        AquariumSideEditor(
-                            player: player,
-                            decorationPlacements: decorationPlacements,
-                            selectedBackgroundTheme: savedBackgroundTheme,
-                            panelWidth: editorWidth,
-                            selectedCategory: $aquariumEditorCategory,
-                            updateFishDrag: updateFishDrag,
-                            finishFishDrag: { species, location in
-                                finishFishDrag(
-                                    species: species,
-                                    at: location,
-                                    aquariumSize: aquariumSize
-                                )
-                            },
-                            cancelFishDrag: cancelFishDrag,
-                            finishEditing: finishAquariumEditing,
-                            showsFinishButton: mode != .aquariumEditor
-                        )
-                        .frame(height: geometry.size.height)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                        .zIndex(30)
+                        if isEditorPanelExpanded {
+                            AquariumSideEditor(
+                                player: player,
+                                decorationPlacements: decorationPlacements,
+                                selectedBackgroundTheme: displayedBackgroundTheme,
+                                panelWidth: editorWidth,
+                                selectedCategory: $aquariumEditorCategory,
+                                updateFishDrag: updateFishDrag,
+                                finishFishDrag: { species, location in
+                                    finishFishDrag(
+                                        species: species,
+                                        at: location,
+                                        aquariumSize: aquariumSize
+                                    )
+                                },
+                                cancelFishDrag: cancelFishDrag,
+                                finishEditing: finishAquariumEditing,
+                                collapse: collapseEditorPanel,
+                                showTutorial: showAquariumEditorTutorial,
+                                showsFinishButton: mode != .aquariumEditor
+                            )
+                            .frame(height: geometry.size.height)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .zIndex(30)
+                        } else {
+                            collapsedEditorHandle
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                                .zIndex(30)
+                        }
 
                         if let fishDragSession {
                             AquariumFishDragPreview(species: fishDragSession.species)
                                 .position(fishDragSession.location)
                                 .zIndex(50)
+                        }
+
+                        if showsAquariumEditorTutorial {
+                            aquariumEditorTutorial(aquariumWidth: aquariumWidth)
+                                .zIndex(60)
                         }
                     }
 
@@ -146,6 +195,7 @@ struct HomeView: View {
                     }
                 }
                 .coordinateSpace(name: AquariumEditorCoordinateSpace.name)
+                .animation(.easeInOut(duration: 0.22), value: isEditorPanelExpanded)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
@@ -199,6 +249,7 @@ struct HomeView: View {
                 currentPlayer.todayStudyMinutes = 0
                 lastStudyDate = today
             }
+
         }
         .onChange(of: aquariumEditorCategory) { _, category in
             if category != .fish {
@@ -216,6 +267,42 @@ struct HomeView: View {
             if let selectedAquariumFishID,
                !activeFishIDs.contains(selectedAquariumFishID) {
                 self.selectedAquariumFishID = nil
+            }
+        }
+        .onChange(of: isAquariumEditorActive) { _, isActive in
+            if !isActive, !hasUnsavedAquariumEditorChanges {
+                resetAquariumEditorSession()
+            }
+        }
+        .onChange(of: aquariumEditorNavigation?.confirmationRequestID) { _, requestID in
+            if requestID != nil, isAquariumEditorActive {
+                showsEditorSaveConfirmation = true
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                discardAquariumEditorSession(closeEditor: false)
+            }
+        }
+        .alert("水槽を編集しますか？", isPresented: $showsAquariumEditConfirmation) {
+            Button("編集する") {
+                beginAquariumEditorSessionIfNeeded(player: player)
+            }
+            Button("キャンセル", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "この編集内容を保存しますか？",
+            isPresented: $showsEditorSaveConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("保存する") {
+                saveAquariumEditorSession()
+            }
+            Button("変更を破棄", role: .destructive) {
+                discardAquariumEditorSession(closeEditor: true)
+            }
+            Button("編集を続ける", role: .cancel) {
+                continueAquariumEditing()
             }
         }
     }
@@ -302,7 +389,7 @@ struct HomeView: View {
                       AquariumEditorDropCoordinator.addFish(from: item, to: player) else {
                     continue
                 }
-                try? modelContext.save()
+                markAquariumEditorChanged()
                 return true
 
             case .decoration:
@@ -315,8 +402,10 @@ struct HomeView: View {
                         placement: placement,
                         at: location,
                         aquariumSize: aquariumSize,
-                        in: modelContext
+                        in: modelContext,
+                        persistChanges: mode != .aquariumEditor
                     )
+                    markAquariumEditorChanged()
                     return true
                 } catch {
                     return false
@@ -326,7 +415,14 @@ struct HomeView: View {
                 guard let theme = AquariumEditorDropCoordinator.backgroundTheme(from: item) else {
                     continue
                 }
-                backgroundThemeRawValue = theme.rawValue
+                if mode == .aquariumEditor {
+                    if displayedBackgroundTheme != theme {
+                        draftBackgroundTheme = theme
+                        markAquariumEditorChanged()
+                    }
+                } else {
+                    backgroundThemeRawValue = theme.rawValue
+                }
                 return true
             }
         }
@@ -364,7 +460,7 @@ struct HomeView: View {
                 aquariumSize: aquariumSize,
                 player: player
               ) else { return }
-        try? modelContext.save()
+        markAquariumEditorChanged()
     }
 
     private func cancelFishDrag() {
@@ -376,7 +472,7 @@ struct HomeView: View {
               let player,
               player.removeFishFromAquarium(playerFishID: selectedAquariumFishID) else { return }
         self.selectedAquariumFishID = nil
-        try? modelContext.save()
+        markAquariumEditorChanged()
     }
 
     @ViewBuilder
@@ -408,11 +504,269 @@ struct HomeView: View {
         }
     }
 
-    private func finishAquariumEditing() {
+    @ViewBuilder
+    private var aquariumEditingEntryControl: some View {
+        VStack {
+            HStack {
+                Spacer(minLength: 0)
+                Button {
+                    showsAquariumEditConfirmation = true
+                } label: {
+                    Label("編集", systemImage: "pencil")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.regularMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.32), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("水槽を編集")
+                .accessibilityIdentifier("aquariumEditor.start")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 12)
+        .padding(.trailing, 12)
+        .zIndex(20)
+    }
+
+    @ViewBuilder
+    private func editorCompletionControl(aquariumWidth: CGFloat) -> some View {
+        if mode == .aquariumEditor {
+            VStack {
+                HStack {
+                    Button(action: finishAquariumEditing) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("完了")
+                            if hasUnsavedAquariumEditorChanges {
+                                Circle()
+                                    .fill(.orange)
+                                    .frame(width: 7, height: 7)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 10)
+                        .background(.blue.opacity(0.86), in: Capsule())
+                        .shadow(color: .black.opacity(0.22), radius: 6, y: 3)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(
+                        hasUnsavedAquariumEditorChanges
+                            ? "保存、破棄、編集を続けるから選択します"
+                            : "水槽編集を終了します"
+                    )
+                    .accessibilityIdentifier("aquariumEditor.done")
+
+                    Spacer(minLength: 0)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 12)
+            .padding(.leading, 12)
+            .frame(width: aquariumWidth)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .zIndex(26)
+        }
+    }
+
+    private var collapsedEditorHandle: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.22)) {
+                isEditorPanelExpanded = true
+            }
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.subheadline.weight(.bold))
+                .frame(
+                    width: AquariumSideEditorLayout.collapsedHandleWidth,
+                    height: AquariumSideEditorLayout.collapsedHandleHeight
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .background(.thinMaterial)
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 14,
+                bottomLeadingRadius: 14
+            )
+        )
+        .shadow(color: .black.opacity(0.2), radius: 7, x: -3)
+        .frame(
+            width: AquariumSideEditorLayout.collapsedHandleWidth,
+            height: AquariumSideEditorLayout.collapsedHandleHeight
+        )
+        .fixedSize()
+        .contentShape(Rectangle())
+        .accessibilityLabel("編集パネルを開く")
+        .accessibilityIdentifier("aquariumEditor.expandPanel")
+    }
+
+    private func aquariumEditorTutorial(aquariumWidth: CGFloat) -> some View {
+        VStack(spacing: 12) {
+            Text("水槽編集の操作")
+                .font(.headline)
+
+            Label("魚や置物を左へスライドして、水槽へ追加できます", systemImage: "hand.draw.fill")
+            Label("水槽内の魚をタップすると、その個体を戻せます", systemImage: "hand.tap.fill")
+            Label("右パネルを閉じると、水槽全体を確認できます", systemImage: "rectangle.compress.vertical")
+
+            Button("わかった", action: dismissAquariumEditorTutorial)
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("aquariumEditor.tutorial.dismiss")
+        }
+        .font(.subheadline)
+        .multilineTextAlignment(.leading)
+        .foregroundStyle(.primary)
+        .padding(18)
+        .frame(maxWidth: 300)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(.white.opacity(0.35), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
+        .frame(width: aquariumWidth)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("aquariumEditor.tutorial")
+    }
+
+    private func collapseEditorPanel() {
         selectedAquariumFishID = nil
         fishDragSession = nil
         withAnimation(.easeInOut(duration: 0.22)) {
-            isEditingAquarium = false
+            isEditorPanelExpanded = false
+        }
+    }
+
+    private func dismissAquariumEditorTutorial() {
+        hasSeenAquariumEditorTutorial = true
+        withAnimation(.easeOut(duration: 0.18)) {
+            showsAquariumEditorTutorial = false
+        }
+    }
+
+    private func showAquariumEditorTutorial() {
+        // 手動再表示では「初回表示済み」の保存値を変更しない。
+        withAnimation(.easeIn(duration: 0.18)) {
+            showsAquariumEditorTutorial = true
+        }
+    }
+
+    private func markAquariumEditorChanged() {
+        guard mode == .aquariumEditor else { return }
+        aquariumEditorNavigation?.markChanged()
+    }
+
+    private func beginAquariumEditorSessionIfNeeded(player: Player?) {
+        guard mode == .aquariumEditor,
+              isAquariumEditorActive,
+              aquariumEditorNavigation?.tabMode == .viewing,
+              editorSessionSnapshot == nil,
+              let player else { return }
+
+        _ = try? AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
+        let currentPlacements = (try? modelContext.fetch(
+            FetchDescriptor<AquariumDecorationPlacement>()
+        )) ?? decorationPlacements
+
+        draftBackgroundTheme = savedBackgroundTheme
+        editorSessionSnapshot = AquariumEditorSessionSnapshot.capture(
+            player: player,
+            decorationPlacements: currentPlacements,
+            backgroundTheme: savedBackgroundTheme
+        )
+        aquariumEditorCategory = .fish
+        selectedAquariumFishID = nil
+        fishDragSession = nil
+        isEditorPanelExpanded = true
+        showsAquariumEditorTutorial = !hasSeenAquariumEditorTutorial
+        aquariumEditorNavigation?.beginSession()
+    }
+
+    private func saveAquariumEditorSession() {
+        guard mode == .aquariumEditor else { return }
+        let destination = aquariumEditorNavigation?.pendingTabSelection
+        backgroundThemeRawValue = displayedBackgroundTheme.rawValue
+        try? modelContext.save()
+        endAquariumEditorSession(selecting: destination)
+    }
+
+    private func discardAquariumEditorSession(closeEditor: Bool) {
+        guard mode == .aquariumEditor,
+              let editorSessionSnapshot else { return }
+
+        let destination = aquariumEditorNavigation?.pendingTabSelection
+        if hasUnsavedAquariumEditorChanges {
+            editorSessionSnapshot.restore(
+                player: player,
+                decorationPlacements: decorationPlacements
+            )
+            draftBackgroundTheme = editorSessionSnapshot.backgroundTheme
+            // SwiftDataのautosaveが途中で走っていても、破棄状態を正式値として戻す。
+            try? modelContext.save()
+        }
+
+        if closeEditor {
+            endAquariumEditorSession(selecting: destination)
+        } else {
+            resetAquariumEditorSession()
+        }
+    }
+
+    private func continueAquariumEditing() {
+        aquariumEditorNavigation?.continueEditing()
+        showsEditorSaveConfirmation = false
+    }
+
+    private func resetAquariumEditorSession() {
+        editorSessionSnapshot = nil
+        draftBackgroundTheme = nil
+        selectedAquariumFishID = nil
+        fishDragSession = nil
+        showsAquariumEditConfirmation = false
+        showsEditorSaveConfirmation = false
+        showsAquariumEditorTutorial = false
+        aquariumEditorNavigation?.finishSession()
+    }
+
+    private func endAquariumEditorSession(selecting destination: MainAppTab?) {
+        resetAquariumEditorSession()
+        if let destination {
+            onFinishAquariumEditing(destination)
+        }
+    }
+
+    private func requestAquariumEditorExit(to destination: MainAppTab) {
+        aquariumEditorNavigation?.requestConfirmation(beforeSelecting: destination)
+        // dirty flagの参照だけで即時に表示し、snapshot比較や保存はここでは行わない。
+        showsEditorSaveConfirmation = true
+    }
+
+    private func finishAquariumEditing() {
+        guard mode == .aquariumEditor else {
+            selectedAquariumFishID = nil
+            fishDragSession = nil
+            withAnimation(.easeInOut(duration: 0.22)) {
+                isEditingAquarium = false
+            }
+            return
+        }
+
+        if hasUnsavedAquariumEditorChanges {
+            aquariumEditorNavigation?.requestFinishConfirmation()
+            // dirty flagの参照だけで即時に表示し、snapshot比較や保存は行わない。
+            showsEditorSaveConfirmation = true
+        } else {
+            endAquariumEditorSession(selecting: nil)
         }
     }
 

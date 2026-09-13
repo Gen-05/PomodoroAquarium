@@ -32,6 +32,8 @@ enum AquariumSideEditorLayout {
     static let minimumWidth: CGFloat = 130
     static let maximumWidth: CGFloat = 160
     static let categoryTabWidth: CGFloat = 42
+    static let collapsedHandleWidth: CGFloat = 38
+    static let collapsedHandleHeight: CGFloat = 88
     static let excludedDropTopHeight: CGFloat = 52
     static let excludedDropBottomHeight: CGFloat = 82
 
@@ -39,8 +41,21 @@ enum AquariumSideEditorLayout {
         min(max(screenWidth * widthRatio, minimumWidth), maximumWidth)
     }
 
-    static func aquariumWidth(for screenWidth: CGFloat, isEditing: Bool) -> CGFloat {
-        max(screenWidth - (isEditing ? width(for: screenWidth) : 0), 1)
+    static func aquariumWidth(
+        for screenWidth: CGFloat,
+        isEditing: Bool,
+        isPanelExpanded: Bool = true
+    ) -> CGFloat {
+        let occupiedWidth: CGFloat
+        if !isEditing {
+            occupiedWidth = 0
+        } else if isPanelExpanded {
+            occupiedWidth = width(for: screenWidth)
+        } else {
+            // 格納ハンドルは水槽の上へ重ね、描画領域を差し引かない。
+            occupiedWidth = 0
+        }
+        return max(screenWidth - occupiedWidth, 1)
     }
 
     /// 右サイドバーの画面内X座標。レイアウト検証用にも同じ計算を利用する。
@@ -173,7 +188,8 @@ enum AquariumEditorDropCoordinator {
         placement: AquariumDecorationPlacement,
         at location: CGPoint,
         aquariumSize: CGSize,
-        in context: ModelContext
+        in context: ModelContext,
+        persistChanges: Bool = true
     ) throws {
         guard item.kind == .decoration,
               item.identifier == placement.decorationID else {
@@ -187,7 +203,8 @@ enum AquariumEditorDropCoordinator {
         try AquariumDecorationService.confirmPlacement(
             placement,
             at: position,
-            in: context
+            in: context,
+            persistChanges: persistChanges
         )
     }
 
@@ -212,6 +229,8 @@ struct AquariumSideEditor: View {
     let finishFishDrag: (FishSpecies, CGPoint) -> Void
     let cancelFishDrag: () -> Void
     let finishEditing: () -> Void
+    let collapse: () -> Void
+    let showTutorial: () -> Void
     var showsFinishButton = true
 
     private var contentWidth: CGFloat {
@@ -222,9 +241,23 @@ struct AquariumSideEditor: View {
         HStack(alignment: .top, spacing: 0) {
             VStack(spacing: 8) {
                 HStack(spacing: 4) {
-                    Text("編集")
-                        .font(.headline)
                     Spacer(minLength: 0)
+                    Button(action: showTutorial) {
+                        Image(systemName: "questionmark.circle")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("水槽編集の使い方")
+                    .accessibilityIdentifier("aquariumEditor.help")
+                    Button(action: collapse) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("編集パネルを閉じる")
+                    .accessibilityIdentifier("aquariumEditor.collapsePanel")
                     if showsFinishButton {
                         Button(action: finishEditing) {
                             Image(systemName: "checkmark")
@@ -324,6 +357,12 @@ struct AquariumSideEditor: View {
 
             Text("\(activeCount) / \(ownedCount)")
                 .font(.caption2.monospacedDigit())
+
+            if canAdd {
+                Label("水槽へ", systemImage: "arrow.left")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 7)
@@ -377,6 +416,10 @@ struct AquariumSideEditor: View {
 
             Text(placement.isPlaced ? "配置中" : "収納中")
                 .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+
+            Label("水槽へ", systemImage: "arrow.left")
+                .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)

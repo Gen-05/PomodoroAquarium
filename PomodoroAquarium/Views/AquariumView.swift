@@ -19,9 +19,11 @@ struct AquariumView: View {
     var backgroundTheme: AquariumBackgroundTheme = .aquarium
     var isSimulationPaused = false
     var isEditing = false
+    var defersDecorationPersistence = false
     var isFishSelectionEnabled = false
     var selectedFishID: UUID?
     var onFishSelected: (UUID) -> Void = { _ in }
+    var onDecorationChanged: () -> Void = {}
     var onDecorationEditingChanged: (Bool) -> Void = { _ in }
     var decorationRestoreRequestID: String?
     var onDecorationRestoreRequestHandled: () -> Void = {}
@@ -176,17 +178,28 @@ struct AquariumView: View {
     }
 
     private func storeDecoration(_ placement: AquariumDecorationPlacement) {
-        try? AquariumDecorationService.store(placement, in: modelContext)
+        do {
+            try AquariumDecorationService.store(
+                placement,
+                in: modelContext,
+                persistChanges: !defersDecorationPersistence
+            )
+            onDecorationChanged()
+        } catch {}
         finishDecorationEditing()
     }
 
     private func confirmDecoration(_ placement: AquariumDecorationPlacement) {
         guard editingDecorationID == placement.decorationID, let previewPosition else { return }
-        try? AquariumDecorationService.confirmPlacement(
-            placement,
-            at: previewPosition,
-            in: modelContext
-        )
+        do {
+            try AquariumDecorationService.confirmPlacement(
+                placement,
+                at: previewPosition,
+                in: modelContext,
+                persistChanges: !defersDecorationPersistence
+            )
+            onDecorationChanged()
+        } catch {}
         finishDecorationEditing()
     }
 

@@ -162,7 +162,31 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertFalse(app.buttons["設定"].exists)
         app.buttons["mainTab.aquarium"].tap()
 
+        let tutorial = app.descendants(matching: .any)["aquariumEditor.tutorial"]
         let panel = app.descendants(matching: .any)["aquariumEditor.panel"]
+        let editButton = app.buttons["aquariumEditor.start"]
+        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(panel.exists)
+        XCTAssertFalse(app.buttons["aquariumEditor.done"].exists)
+        XCTAssertFalse(app.buttons["aquariumEditor.help"].exists)
+        XCTAssertFalse(tutorial.exists)
+
+        editButton.tap()
+        let editAlert = app.alerts["水槽を編集しますか？"]
+        XCTAssertTrue(editAlert.waitForExistence(timeout: 2))
+        editAlert.buttons["キャンセル"].tap()
+        XCTAssertTrue(editButton.waitForExistence(timeout: 2))
+        XCTAssertFalse(panel.exists)
+
+        editButton.tap()
+        XCTAssertTrue(editAlert.waitForExistence(timeout: 2))
+        editAlert.buttons["編集する"].tap()
+
+        if tutorial.waitForExistence(timeout: 1) {
+            app.buttons["aquariumEditor.tutorial.dismiss"].tap()
+            XCTAssertTrue(tutorial.waitForNonExistence(timeout: 2))
+        }
+
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
         XCTAssertLessThan(panel.frame.width, app.frame.width / 2)
         XCTAssertGreaterThan(app.frame.width - panel.frame.width, app.frame.width / 2)
@@ -172,6 +196,28 @@ final class PomodoroAquariumUITests: XCTestCase {
             app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "戻す")).count,
             0
         )
+
+        let helpButton = app.buttons["aquariumEditor.help"]
+        XCTAssertTrue(helpButton.exists)
+        helpButton.tap()
+        XCTAssertTrue(tutorial.waitForExistence(timeout: 2))
+        app.buttons["aquariumEditor.tutorial.dismiss"].tap()
+        XCTAssertTrue(tutorial.waitForNonExistence(timeout: 2))
+        helpButton.tap()
+        XCTAssertTrue(tutorial.waitForExistence(timeout: 2))
+        app.buttons["aquariumEditor.tutorial.dismiss"].tap()
+
+        app.buttons["aquariumEditor.collapsePanel"].tap()
+        XCTAssertTrue(panel.waitForNonExistence(timeout: 2))
+        let expandPanel = app.buttons["aquariumEditor.expandPanel"]
+        XCTAssertTrue(expandPanel.waitForExistence(timeout: 2))
+        XCTAssertLessThan(expandPanel.frame.width, app.frame.width * 0.15)
+        XCTAssertGreaterThanOrEqual(expandPanel.frame.height, 70)
+        XCTAssertLessThanOrEqual(expandPanel.frame.height, 110)
+        XCTAssertLessThanOrEqual(abs(expandPanel.frame.maxX - app.frame.maxX), 2)
+        XCTAssertFalse(app.buttons["aquariumEditor.help"].exists)
+        expandPanel.tap()
+        XCTAssertTrue(panel.waitForExistence(timeout: 2))
 
         app.buttons["aquariumEditor.category.decoration"].tap()
         XCTAssertTrue(app.staticTexts["水槽へドラッグ"].waitForExistence(timeout: 5))
@@ -183,8 +229,14 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["水槽の魚"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["水槽編集を終了"].exists)
 
-        app.buttons["mainTab.home"].tap()
-        XCTAssertTrue(app.buttons["勉強をはじめる"].waitForExistence(timeout: 5))
+        app.buttons["aquariumEditor.done"].tap()
+        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(panel.waitForNonExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["aquariumEditor.done"].exists)
+        XCTAssertFalse(app.buttons["aquariumEditor.help"].exists)
+
+        app.buttons["mainTab.shop"].tap()
+        XCTAssertTrue(app.navigationBars["ショップ"].waitForExistence(timeout: 5))
     }
 
     private func repeatedlyTap(

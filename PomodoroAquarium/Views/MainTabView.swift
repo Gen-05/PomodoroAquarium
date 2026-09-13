@@ -52,6 +52,20 @@ enum MainTabNavigationPolicy {
     static func opacity(for tab: MainAppTab, whileStudyLocked: Bool) -> Double {
         canSelect(tab, whileStudyLocked: whileStudyLocked) ? 1 : lockedTabOpacity
     }
+
+    static func requiresAquariumSaveConfirmation(
+        from selectedTab: MainAppTab,
+        to requestedTab: MainAppTab,
+        whileStudyLocked: Bool,
+        hasUnsavedAquariumChanges: Bool
+    ) -> Bool {
+        guard !whileStudyLocked else {
+            return false
+        }
+        return selectedTab == .aquarium &&
+            requestedTab != .aquarium &&
+            hasUnsavedAquariumChanges
+    }
 }
 
 enum MainTabBarHitShieldLayout {
@@ -97,6 +111,7 @@ struct MainTabView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var timerViewModel: TimerViewModel
     @State private var tabSelectionState = MainTabSelectionState()
+    @State private var aquariumEditorNavigation = AquariumEditorNavigationCoordinator()
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -125,10 +140,7 @@ struct MainTabView: View {
         Binding(
             get: { tabSelectionState.selection },
             set: { requestedTab in
-                tabSelectionState.select(
-                    requestedTab,
-                    whileStudyLocked: timerViewModel.locksMainTabNavigation
-                )
+                _ = requestTabSelection(requestedTab)
             }
         )
     }
@@ -158,7 +170,15 @@ struct MainTabView: View {
                             .isSimulationPaused(
                                 for: .aquarium,
                                 selectedTab: tabSelectionState.selection
+                            ),
+                        isAquariumEditorActive: tabSelectionState.selection == .aquarium,
+                        aquariumEditorNavigation: aquariumEditorNavigation,
+                        onFinishAquariumEditing: { destination in
+                            tabSelectionState.select(
+                                destination,
+                                whileStudyLocked: timerViewModel.locksMainTabNavigation
                             )
+                        }
                     )
                 } label: {
                     Label("水槽", systemImage: "fish.fill")
@@ -238,10 +258,7 @@ struct MainTabView: View {
         HStack(spacing: 0) {
             ForEach(MainAppTab.allCases) { tab in
                 Button {
-                    guard tabSelectionState.select(
-                        tab,
-                        whileStudyLocked: timerViewModel.locksMainTabNavigation
-                    ) else { return }
+                    guard requestTabSelection(tab) else { return }
                 } label: {
                     VStack(spacing: 3) {
                         Image(systemName: tab.systemImage)
@@ -277,6 +294,35 @@ struct MainTabView: View {
         .overlay(alignment: .top) {
             Divider()
         }
+    }
+
+    @discardableResult
+    private func requestTabSelection(_ requestedTab: MainAppTab) -> Bool {
+        let isStudyLocked = timerViewModel.locksMainTabNavigation
+        guard MainTabNavigationPolicy.canSelect(
+            requestedTab,
+            whileStudyLocked: isStudyLocked
+        ) else {
+            return false
+        }
+
+        if MainTabNavigationPolicy.requiresAquariumSaveConfirmation(
+            from: tabSelectionState.selection,
+            to: requestedTab,
+            whileStudyLocked: isStudyLocked,
+            hasUnsavedAquariumChanges: aquariumEditorNavigation.hasUnsavedChanges
+        ) {
+            aquariumEditorNavigation.requestConfirmation(beforeSelecting: requestedTab)
+            return false
+        }
+
+        if tabSelectionState.selection == .aquarium,
+           requestedTab != .aquarium,
+           aquariumEditorNavigation.tabMode == .editing {
+            aquariumEditorNavigation.finishSession()
+        }
+        aquariumEditorNavigation.continueEditing()
+        return tabSelectionState.select(requestedTab, whileStudyLocked: false)
     }
 }
 

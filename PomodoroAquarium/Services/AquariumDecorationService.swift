@@ -74,20 +74,26 @@ enum AquariumDecorationService {
     static func confirmPlacement(
         _ placement: AquariumDecorationPlacement,
         at position: CGPoint,
-        in context: ModelContext
+        in context: ModelContext,
+        persistChanges: Bool = true
     ) throws {
         placement.relativeX = Double(position.x)
         placement.relativeY = Double(position.y)
         placement.isPlaced = true
-        try context.save()
+        if persistChanges {
+            try context.save()
+        }
     }
 
     static func store(
         _ placement: AquariumDecorationPlacement,
-        in context: ModelContext
+        in context: ModelContext,
+        persistChanges: Bool = true
     ) throws {
         placement.isPlaced = false
-        try context.save()
+        if persistChanges {
+            try context.save()
+        }
     }
 }
 
