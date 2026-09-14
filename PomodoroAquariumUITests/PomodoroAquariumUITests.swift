@@ -35,6 +35,34 @@ final class PomodoroAquariumUITests: XCTestCase {
 
         let studyButton = app.buttons["勉強をはじめる"]
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
+        let dailyFishProgress = app.descendants(matching: .any)["home.dailyFishProgress"]
+        let increaseFishLimitButton = app.buttons["home.increaseDailyFishLimit"]
+        let studySummary = app.descendants(matching: .any)["home.studySummary"]
+        let todayStudyMinutes = app.staticTexts["home.todayStudyMinutes"]
+        let yesterdayStudyMinutes = app.staticTexts["home.yesterdayStudyMinutes"]
+        let coinBalance = app.descendants(matching: .any)["home.coinBalance"]
+        let customTabBar = app.descendants(matching: .any)["mainTab.customTabBar"]
+        XCTAssertTrue(dailyFishProgress.exists)
+        XCTAssertTrue(increaseFishLimitButton.exists)
+        XCTAssertTrue(studySummary.exists)
+        XCTAssertTrue(todayStudyMinutes.exists)
+        XCTAssertTrue(yesterdayStudyMinutes.exists)
+        XCTAssertTrue(coinBalance.exists)
+        XCTAssertTrue(customTabBar.exists)
+        XCTAssertLessThanOrEqual(studyButton.frame.maxY, customTabBar.frame.minY)
+        XCTAssertLessThanOrEqual(dailyFishProgress.frame.maxX, studySummary.frame.minX)
+        XCTAssertLessThanOrEqual(studySummary.frame.maxX, coinBalance.frame.minX)
+        let statusBar = app.statusBars.firstMatch
+        if statusBar.exists {
+            XCTAssertGreaterThanOrEqual(dailyFishProgress.frame.minY, statusBar.frame.maxY)
+            XCTAssertGreaterThanOrEqual(studySummary.frame.minY, statusBar.frame.maxY)
+            XCTAssertGreaterThanOrEqual(coinBalance.frame.minY, statusBar.frame.maxY)
+        }
+
+        increaseFishLimitButton.tap()
+        let fishLimitAlert = app.alerts["魚の獲得上限"]
+        XCTAssertTrue(fishLimitAlert.waitForExistence(timeout: 2))
+        fishLimitAlert.buttons["OK"].tap()
         for tabIdentifier in [
             "mainTab.home",
             "mainTab.aquarium",
@@ -76,6 +104,9 @@ final class PomodoroAquariumUITests: XCTestCase {
         studyButton.tap()
 
         XCTAssertTrue(app.buttons["ポモドーロ"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["timer.startStudy"].exists)
+        app.buttons["mainTab.home"].tap()
+        XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -221,15 +252,33 @@ final class PomodoroAquariumUITests: XCTestCase {
 
         app.buttons["aquariumEditor.category.decoration"].tap()
         XCTAssertTrue(app.staticTexts["水槽へドラッグ"].waitForExistence(timeout: 5))
+        let placedRock = app.descendants(matching: .any)[
+            "aquariumEditor.placedDecoration.default-rock"
+        ]
+        let removeDecorationButton = app.buttons["aquariumEditor.removeSelectedDecoration"]
+        let emptyCanvas = app.descendants(matching: .any)["aquariumEditor.emptyCanvas"]
+        XCTAssertTrue(placedRock.waitForExistence(timeout: 5))
+        XCTAssertTrue(emptyCanvas.exists)
+        placedRock.tap()
+        XCTAssertTrue(removeDecorationButton.waitForExistence(timeout: 2))
+        emptyCanvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)).tap()
+        XCTAssertTrue(removeDecorationButton.waitForNonExistence(timeout: 2))
 
         app.buttons["aquariumEditor.category.background"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["aquariumEditor.background.deepSea"].waitForExistence(timeout: 5))
+        let deepSeaBackground = app.buttons["aquariumEditor.background.deepSea"]
+        XCTAssertTrue(deepSeaBackground.waitForExistence(timeout: 5))
+        deepSeaBackground.tap()
+        XCTAssertEqual(deepSeaBackground.value as? String, "選択中")
 
         app.buttons["aquariumEditor.category.fish"].tap()
         XCTAssertTrue(app.staticTexts["水槽の魚"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["水槽編集を終了"].exists)
 
         app.buttons["aquariumEditor.done"].tap()
+        let saveConfirmation = app.sheets.firstMatch
+        if saveConfirmation.waitForExistence(timeout: 1) {
+            saveConfirmation.buttons["変更を破棄"].tap()
+        }
         XCTAssertTrue(editButton.waitForExistence(timeout: 5))
         XCTAssertTrue(panel.waitForNonExistence(timeout: 2))
         XCTAssertFalse(app.buttons["aquariumEditor.done"].exists)
@@ -237,6 +286,87 @@ final class PomodoroAquariumUITests: XCTestCase {
 
         app.buttons["mainTab.shop"].tap()
         XCTAssertTrue(app.navigationBars["ショップ"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testAquariumViewingControlsAutoHideAndEditingKeepsThemVisible() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.buttons["startButton"].waitForExistence(timeout: 5))
+        app.buttons["startButton"].tap()
+        app.buttons["mainTab.aquarium"].tap()
+
+        let editButton = app.buttons["aquariumEditor.start"]
+        let homeTab = app.buttons["mainTab.home"]
+        let tapSurface = app.descendants(matching: .any)["aquariumViewing.tapSurface"]
+        let customTabBar = app.descendants(matching: .any)["mainTab.customTabBar"]
+        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(homeTab.exists)
+        XCTAssertTrue(tapSurface.exists)
+        XCTAssertTrue(customTabBar.exists)
+        XCTAssertEqual(app.tabBars.count, 0)
+
+        let editButtonHidden = expectation(
+            for: NSPredicate(format: "hittable == false"),
+            evaluatedWith: editButton
+        )
+        let tabBarHidden = expectation(
+            for: NSPredicate(format: "hittable == false"),
+            evaluatedWith: homeTab
+        )
+        wait(for: [editButtonHidden, tabBarHidden], timeout: 6)
+        XCTAssertFalse(customTabBar.isHittable)
+
+        tapSurface.tap()
+        XCTAssertTrue(editButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(homeTab.waitForExistence(timeout: 2))
+        XCTAssertTrue(customTabBar.isHittable)
+
+        Thread.sleep(forTimeInterval: 3)
+        tapSurface.tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertTrue(editButton.exists)
+        XCTAssertTrue(homeTab.exists)
+
+        editButton.tap()
+        let editAlert = app.alerts["水槽を編集しますか？"]
+        XCTAssertTrue(editAlert.waitForExistence(timeout: 2))
+        editAlert.buttons["編集する"].tap()
+
+        let tutorial = app.descendants(matching: .any)["aquariumEditor.tutorial"]
+        if tutorial.waitForExistence(timeout: 1) {
+            app.buttons["aquariumEditor.tutorial.dismiss"].tap()
+        }
+
+        let panel = app.descendants(matching: .any)["aquariumEditor.panel"]
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["aquariumEditor.done"].exists)
+        XCTAssertTrue(app.buttons["aquariumEditor.help"].exists)
+        XCTAssertTrue(homeTab.exists)
+
+        Thread.sleep(forTimeInterval: 10.5)
+        XCTAssertTrue(panel.exists)
+        XCTAssertTrue(app.buttons["aquariumEditor.done"].exists)
+        XCTAssertTrue(app.buttons["aquariumEditor.help"].exists)
+        XCTAssertTrue(homeTab.exists)
+
+        app.buttons["aquariumEditor.done"].tap()
+        XCTAssertTrue(editButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(homeTab.exists)
+        Thread.sleep(forTimeInterval: 4.5)
+        XCTAssertFalse(editButton.isHittable)
+        XCTAssertFalse(homeTab.isHittable)
+
+        tapSurface.tap()
+        XCTAssertTrue(homeTab.waitForExistence(timeout: 2))
+        homeTab.tap()
+        let studyButton = app.buttons["勉強をはじめる"]
+        XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 4.5)
+        XCTAssertTrue(studyButton.exists)
+        XCTAssertTrue(app.buttons["mainTab.aquarium"].exists)
+        XCTAssertTrue(app.buttons["mainTab.aquarium"].isHittable)
     }
 
     private func repeatedlyTap(

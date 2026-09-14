@@ -53,6 +53,14 @@ enum MainTabNavigationPolicy {
         canSelect(tab, whileStudyLocked: whileStudyLocked) ? 1 : lockedTabOpacity
     }
 
+    static func shouldResetHomeNavigation(
+        currentTab: MainAppTab,
+        requestedTab: MainAppTab,
+        whileStudyLocked: Bool
+    ) -> Bool {
+        !whileStudyLocked && currentTab == .home && requestedTab == .home
+    }
+
     static func requiresAquariumSaveConfirmation(
         from selectedTab: MainAppTab,
         to requestedTab: MainAppTab,
@@ -91,6 +99,23 @@ enum MainTabAquariumActivityPolicy {
     }
 }
 
+enum AquariumViewingControlsPolicy {
+    static let autoHideDelay: TimeInterval = 4
+    static let fadeDuration: TimeInterval = 0.25
+
+    static func isEnabled(selectedTab: MainAppTab, tabMode: AquariumTabMode) -> Bool {
+        selectedTab == .aquarium && tabMode == .viewing
+    }
+
+    static func shouldShowBottomTabBar(
+        selectedTab: MainAppTab,
+        tabMode: AquariumTabMode,
+        areControlsVisible: Bool
+    ) -> Bool {
+        !isEnabled(selectedTab: selectedTab, tabMode: tabMode) || areControlsVisible
+    }
+}
+
 struct MainTabSelectionState {
     private(set) var selection: MainAppTab = .home
 
@@ -112,6 +137,9 @@ struct MainTabView: View {
     @State private var timerViewModel: TimerViewModel
     @State private var tabSelectionState = MainTabSelectionState()
     @State private var aquariumEditorNavigation = AquariumEditorNavigationCoordinator()
+    @State private var homeNavigationResetRequestID: UUID?
+    @State private var areAquariumViewingControlsVisible = true
+    @State private var aquariumViewingControlsAutoHideTask: Task<Void, Never>?
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -156,8 +184,10 @@ struct MainTabView: View {
                             .isSimulationPaused(
                                 for: .home,
                                 selectedTab: tabSelectionState.selection
-                            )
+                            ),
+                        homeNavigationResetRequestID: homeNavigationResetRequestID
                     )
+                    .toolbarVisibility(.hidden, for: .tabBar)
                 } label: {
                     Label("ホーム", systemImage: "house.fill")
                 }
@@ -178,8 +208,11 @@ struct MainTabView: View {
                                 destination,
                                 whileStudyLocked: timerViewModel.locksMainTabNavigation
                             )
-                        }
+                        },
+                        areAquariumViewingControlsVisible: areAquariumViewingControlsVisible,
+                        onAquariumViewingInteraction: showAndScheduleAquariumViewingControls
                     )
+                    .toolbarVisibility(.hidden, for: .tabBar)
                 } label: {
                     Label("水槽", systemImage: "fish.fill")
                 }
@@ -188,6 +221,7 @@ struct MainTabView: View {
                     NavigationStack {
                         ShopView()
                     }
+                    .toolbarVisibility(.hidden, for: .tabBar)
                 } label: {
                     Label("ショップ", systemImage: "storefront.fill")
                 }
@@ -196,6 +230,7 @@ struct MainTabView: View {
                     NavigationStack {
                         StatisticsView(player: player)
                     }
+                    .toolbarVisibility(.hidden, for: .tabBar)
                 } label: {
                     Label("統計", systemImage: "chart.bar.fill")
                 }
@@ -204,13 +239,21 @@ struct MainTabView: View {
                     NavigationStack {
                         MoreView()
                     }
+                    .toolbarVisibility(.hidden, for: .tabBar)
                 } label: {
                     Label("その他", systemImage: "ellipsis.circle.fill")
                 }
             }
-            .toolbar(.hidden, for: .tabBar)
+            .toolbarVisibility(.hidden, for: .tabBar)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 customTabBar
+                    .opacity(shouldShowBottomTabBar ? 1 : 0)
+                    .allowsHitTesting(shouldShowBottomTabBar)
+                    .accessibilityHidden(!shouldShowBottomTabBar)
+                    .animation(
+                        .easeInOut(duration: AquariumViewingControlsPolicy.fadeDuration),
+                        value: shouldShowBottomTabBar
+                    )
             }
             .overlay(alignment: .bottom) {
                 if MainTabBarHitShieldLayout.isActive(
@@ -226,14 +269,27 @@ struct MainTabView: View {
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     timerViewModel.synchronizeTime()
+                    updateAquariumViewingControlsAutoHide()
                 } else {
                     timerViewModel.recordLastActiveTime()
+                    stopAquariumViewingControlsAutoHide()
                 }
             }
             .onChange(of: timerViewModel.locksMainTabNavigation) { _, isLocked in
                 if isLocked {
+                    stopAquariumViewingControlsAutoHide()
                     tabSelectionState.select(.home, whileStudyLocked: false)
                 }
+            }
+            .onChange(of: tabSelectionState.selection) { _, _ in
+                updateAquariumViewingControlsAutoHide()
+            }
+            .onChange(of: aquariumEditorNavigation.tabMode) { _, _ in
+                updateAquariumViewingControlsAutoHide()
+            }
+            .onDisappear {
+                aquariumViewingControlsAutoHideTask?.cancel()
+                aquariumViewingControlsAutoHideTask = nil
             }
         }
     }
@@ -294,6 +350,62 @@ struct MainTabView: View {
         .overlay(alignment: .top) {
             Divider()
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("mainTab.customTabBar")
+    }
+
+    private var isAquariumViewingControlsAutoHideActive: Bool {
+        AquariumViewingControlsPolicy.isEnabled(
+            selectedTab: tabSelectionState.selection,
+            tabMode: aquariumEditorNavigation.tabMode
+        )
+    }
+
+    private var shouldShowBottomTabBar: Bool {
+        AquariumViewingControlsPolicy.shouldShowBottomTabBar(
+            selectedTab: tabSelectionState.selection,
+            tabMode: aquariumEditorNavigation.tabMode,
+            areControlsVisible: areAquariumViewingControlsVisible
+        )
+    }
+
+    private func showAndScheduleAquariumViewingControls() {
+        aquariumViewingControlsAutoHideTask?.cancel()
+        aquariumViewingControlsAutoHideTask = nil
+
+        withAnimation(.easeInOut(duration: AquariumViewingControlsPolicy.fadeDuration)) {
+            areAquariumViewingControlsVisible = true
+        }
+
+        guard isAquariumViewingControlsAutoHideActive else { return }
+        aquariumViewingControlsAutoHideTask = Task { @MainActor in
+            do {
+                try await Task.sleep(
+                    for: .seconds(AquariumViewingControlsPolicy.autoHideDelay)
+                )
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, isAquariumViewingControlsAutoHideActive else { return }
+            withAnimation(.easeInOut(duration: AquariumViewingControlsPolicy.fadeDuration)) {
+                areAquariumViewingControlsVisible = false
+            }
+            aquariumViewingControlsAutoHideTask = nil
+        }
+    }
+
+    private func stopAquariumViewingControlsAutoHide() {
+        aquariumViewingControlsAutoHideTask?.cancel()
+        aquariumViewingControlsAutoHideTask = nil
+        areAquariumViewingControlsVisible = true
+    }
+
+    private func updateAquariumViewingControlsAutoHide() {
+        if isAquariumViewingControlsAutoHideActive {
+            showAndScheduleAquariumViewingControls()
+        } else {
+            stopAquariumViewingControlsAutoHide()
+        }
     }
 
     @discardableResult
@@ -304,6 +416,23 @@ struct MainTabView: View {
             whileStudyLocked: isStudyLocked
         ) else {
             return false
+        }
+
+        if MainTabNavigationPolicy.shouldResetHomeNavigation(
+            currentTab: tabSelectionState.selection,
+            requestedTab: requestedTab,
+            whileStudyLocked: isStudyLocked
+        ) {
+            homeNavigationResetRequestID = UUID()
+            return true
+        }
+
+        if isAquariumViewingControlsAutoHideActive {
+            if requestedTab == .aquarium {
+                showAndScheduleAquariumViewingControls()
+            } else {
+                stopAquariumViewingControlsAutoHide()
+            }
         }
 
         if MainTabNavigationPolicy.requiresAquariumSaveConfirmation(
@@ -322,7 +451,11 @@ struct MainTabView: View {
             aquariumEditorNavigation.finishSession()
         }
         aquariumEditorNavigation.continueEditing()
-        return tabSelectionState.select(requestedTab, whileStudyLocked: false)
+        let didSelect = tabSelectionState.select(requestedTab, whileStudyLocked: false)
+        if didSelect {
+            updateAquariumViewingControlsAutoHide()
+        }
+        return didSelect
     }
 }
 

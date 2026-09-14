@@ -200,10 +200,23 @@ struct TimerView: View {
                     }
                     .buttonStyle(AquariumSecondaryButtonStyle())
                 } else {
-                    Button(viewModel.isRunning ? "一時停止" : (viewModel.isStudyTime ? "勉強開始" : "休憩開始")) {
-                        handlePrimaryTimerAction()
+                    if viewModel.isRunning {
+                        Button("一時停止") {
+                            handlePrimaryTimerAction()
+                        }
+                        .buttonStyle(AquariumPrimaryButtonStyle())
+                    } else if viewModel.isStudyTime {
+                        Button("勉強開始") {
+                            handlePrimaryTimerAction()
+                        }
+                        .buttonStyle(AquariumStudyStartButtonStyle())
+                        .accessibilityIdentifier("timer.startStudy")
+                    } else {
+                        Button("休憩開始") {
+                            handlePrimaryTimerAction()
+                        }
+                        .buttonStyle(AquariumPrimaryButtonStyle())
                     }
-                    .buttonStyle(AquariumPrimaryButtonStyle())
                 }
 
                 Spacer()
@@ -392,6 +405,9 @@ struct TimerView: View {
                 FishRewardService.awardFish(for: completedStudyMinutes, to: player)
             }
             pendingFishAcquisition = fishResult
+            if fishResult != nil {
+                DailyFishAcquisitionStore.recordAcquisition()
+            }
 
             var awardedStudyReward = 0
             if coinReward > 0 {

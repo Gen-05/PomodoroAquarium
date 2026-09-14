@@ -20,6 +20,9 @@ struct HomeView: View {
     var isAquariumEditorActive = false
     var aquariumEditorNavigation: AquariumEditorNavigationCoordinator?
     var onFinishAquariumEditing: (MainAppTab) -> Void = { _ in }
+    var areAquariumViewingControlsVisible = true
+    var onAquariumViewingInteraction: () -> Void = {}
+    var homeNavigationResetRequestID: UUID?
     
     @AppStorage("studyTime") private var studyTime = "25"
     @AppStorage("breakTime") private var breakTime = "5"
@@ -28,6 +31,10 @@ struct HomeView: View {
     private var backgroundThemeRawValue = AquariumBackgroundTheme.aquarium.rawValue
     @AppStorage(AquariumEditorTutorialState.storageKey)
     private var hasSeenAquariumEditorTutorial = false
+    @AppStorage(DailyFishAcquisitionStorageKey.count)
+    private var storedDailyFishAcquisitionCount = 0
+    @AppStorage(DailyFishAcquisitionStorageKey.dayIdentifier)
+    private var storedDailyFishAcquisitionDayIdentifier = ""
     
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
@@ -35,11 +42,13 @@ struct HomeView: View {
     @Query private var players: [Player]
     @Query private var decorationPlacements: [AquariumDecorationPlacement]
     @State private var showsInterruptionBanner = false
-    @State private var resumesPersistedTimer = false
+    @State private var showsTimerScreen = false
     @State private var isEditingAquarium = false
     @State private var aquariumEditorCategory: AquariumEditorCategory = .fish
     @State private var selectedAquariumFishID: UUID?
+    @State private var aquariumSelectionResetRequestID: UUID?
     @State private var fishDragSession: AquariumFishDragSession?
+    @State private var decorationDragSession: AquariumDecorationDragSession?
     @State private var isEditorPanelExpanded = true
     @State private var editorSessionSnapshot: AquariumEditorSessionSnapshot?
     @State private var draftBackgroundTheme: AquariumBackgroundTheme?
@@ -54,6 +63,7 @@ struct HomeView: View {
     @State private var showsBackgroundThemePicker = false
     @State private var originalBackgroundTheme: AquariumBackgroundTheme?
     @State private var previewBackgroundTheme: AquariumBackgroundTheme?
+    @State private var showsDailyFishLimitInformation = false
     
     private var player: Player? {
         players.first
@@ -113,7 +123,14 @@ struct HomeView: View {
                         isFishSelectionEnabled: isAquariumEditorPresented && aquariumEditorCategory == .fish,
                         selectedFishID: selectedAquariumFishID,
                         onFishSelected: selectAquariumFish,
-                        onDecorationChanged: markAquariumEditorChanged
+                        onCanvasTapped: clearAquariumSelections,
+                        onDecorationChanged: markAquariumEditorChanged,
+                        onDecorationEditingChanged: { isEditingDecoration in
+                            if isEditingDecoration {
+                                selectedAquariumFishID = nil
+                            }
+                        },
+                        selectionResetRequestID: aquariumSelectionResetRequestID
                     )
                     .frame(width: aquariumWidth, height: geometry.size.height)
                     .contentShape(Rectangle())
@@ -127,16 +144,29 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .animation(.easeInOut(duration: 0.22), value: isAquariumEditorPresented)
 
-                    if mode == .home {
-                        coinBalanceOverlay
-                    }
-
                     if mode == .home, !isAquariumEditorPresented {
                         regularHomeControls
                     }
 
                     if mode == .aquariumEditor, !isAquariumEditorPresented {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                onAquariumViewingInteraction()
+                            }
+                            .accessibilityElement()
+                            .accessibilityLabel("水槽")
+                            .accessibilityIdentifier("aquariumViewing.tapSurface")
+                            .zIndex(15)
+
                         aquariumEditingEntryControl
+                            .opacity(areAquariumViewingControlsVisible ? 1 : 0)
+                            .allowsHitTesting(areAquariumViewingControlsVisible)
+                            .accessibilityHidden(!areAquariumViewingControlsVisible)
+                            .animation(
+                                .easeInOut(duration: AquariumViewingControlsPolicy.fadeDuration),
+                                value: areAquariumViewingControlsVisible
+                            )
                     }
 
                     if isAquariumEditorPresented {
@@ -159,6 +189,16 @@ struct HomeView: View {
                                     )
                                 },
                                 cancelFishDrag: cancelFishDrag,
+                                updateDecorationDrag: updateDecorationDrag,
+                                finishDecorationDrag: { decorationID, location in
+                                    finishDecorationDrag(
+                                        decorationID: decorationID,
+                                        at: location,
+                                        aquariumSize: aquariumSize
+                                    )
+                                },
+                                cancelDecorationDrag: cancelDecorationDrag,
+                                selectBackground: selectBackground,
                                 finishEditing: finishAquariumEditing,
                                 collapse: collapseEditorPanel,
                                 showTutorial: showAquariumEditorTutorial,
@@ -176,6 +216,15 @@ struct HomeView: View {
                         if let fishDragSession {
                             AquariumFishDragPreview(species: fishDragSession.species)
                                 .position(fishDragSession.location)
+                                .zIndex(50)
+                        }
+
+                        if let decorationDragSession,
+                           let placement = decorationPlacements.first(where: {
+                               $0.decorationID == decorationDragSession.decorationID
+                           }) {
+                            AquariumDecorationDragPreview(decoration: placement.decoration)
+                                .position(decorationDragSession.location)
                                 .zIndex(50)
                         }
 
@@ -199,7 +248,7 @@ struct HomeView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .navigationDestination(isPresented: $resumesPersistedTimer) {
+            .navigationDestination(isPresented: $showsTimerScreen) {
                 TimerView(
                     studyTime: Int(studyTime) ?? 25,
                     breakTime: Int(breakTime) ?? 5,
@@ -211,6 +260,7 @@ struct HomeView: View {
         .onAppear {
             if mode == .home {
                 inspectPersistedTimerSession()
+                DailyFishAcquisitionStore.resetIfNeeded()
             }
             let now = Date()
             let calendar = Calendar.current
@@ -252,15 +302,23 @@ struct HomeView: View {
 
         }
         .onChange(of: aquariumEditorCategory) { _, category in
+            clearAquariumSelections()
             if category != .fish {
-                selectedAquariumFishID = nil
                 fishDragSession = nil
             }
+            if category != .decoration {
+                decorationDragSession = nil
+            }
+        }
+        .onChange(of: homeNavigationResetRequestID) { _, requestID in
+            guard mode == .home, requestID != nil else { return }
+            showsTimerScreen = false
         }
         .onChange(of: isAquariumEditorPresented) { _, isEditing in
             if !isEditing {
-                selectedAquariumFishID = nil
+                clearAquariumSelections()
                 fishDragSession = nil
+                decorationDragSession = nil
             }
         }
         .onChange(of: player?.activeAquariumFishIDs ?? []) { _, activeFishIDs in
@@ -290,6 +348,11 @@ struct HomeView: View {
             }
             Button("キャンセル", role: .cancel) {}
         }
+        .alert("魚の獲得上限", isPresented: $showsDailyFishLimitInformation) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("今後、広告を見て今日の魚獲得上限を増やせるようになります。")
+        }
         .confirmationDialog(
             "この編集内容を保存しますか？",
             isPresented: $showsEditorSaveConfirmation,
@@ -307,56 +370,14 @@ struct HomeView: View {
         }
     }
 
-    private var coinBalanceOverlay: some View {
-        VStack {
-            HStack {
-                Spacer()
-
-                HStack(spacing: 6) {
-                    Image(systemName: "circle.hexagongrid.fill")
-                    Text("\(CurrencyService.balance(of: player))")
-                        .monospacedDigit()
-                }
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(.yellow)
-                .fixedSize(horizontal: true, vertical: false)
-                .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("所持コイン \(CurrencyService.balance(of: player))枚")
-                .allowsHitTesting(false)
-            }
-            .padding(.trailing, 16)
-
-            Spacer()
-        }
-        .padding(.top, 8)
-        .offset(y: -52)
-        .zIndex(10)
-    }
-
     private var regularHomeControls: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        VStack(spacing: 0) {
+            homeStatusRow
 
-            VStack(spacing: 8) {
-                Text("今日の勉強時間")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.8))
-                Text("\((player?.todayStudyMinutes ?? 0) / 60)時間\((player?.todayStudyMinutes ?? 0) % 60)分")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 14)
-            .aquariumGlass(cornerRadius: 18)
+            Spacer(minLength: 24)
 
-            NavigationLink {
-                TimerView(
-                    studyTime: Int(studyTime) ?? 25,
-                    breakTime: Int(breakTime) ?? 5,
-                    player: player,
-                    viewModel: timerViewModel
-                )
+            Button {
+                showsTimerScreen = true
             } label: {
                 Label(
                     HomeTimerEntryPresentation.title(
@@ -366,10 +387,97 @@ struct HomeView: View {
                     systemImage: "timer"
                 )
             }
-            .buttonStyle(AquariumPrimaryButtonStyle())
+            .buttonStyle(AquariumStudyStartButtonStyle())
+            .frame(maxWidth: 290)
+            .accessibilityIdentifier("home.startStudy")
+
+            Spacer(minLength: 24)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 24)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        // AquariumViewは全面描画するため、Homeの主要操作だけ実TabBar高ぶん確実に退避する。
+        .padding(.bottom, 24 + MainTabBarHitShieldLayout.tabBarHeight)
+    }
+
+    private var homeStatusRow: some View {
+        HStack(alignment: .top, spacing: 8) {
+            dailyFishProgress
+
+            Spacer(minLength: 2)
+
+            VStack(spacing: 2) {
+                Text("今日 \(HomeDashboardPresentation.studyDurationText(minutes: player?.todayStudyMinutes ?? 0))")
+                    .accessibilityIdentifier("home.todayStudyMinutes")
+                Text("昨日 \(HomeDashboardPresentation.studyDurationText(minutes: player?.yesterdayStudyMinutes ?? 0))")
+                    .accessibilityIdentifier("home.yesterdayStudyMinutes")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.center)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .aquariumGlass(cornerRadius: 14)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("home.studySummary")
+
+            Spacer(minLength: 2)
+
+            HStack(spacing: 5) {
+                Image(systemName: "circle.hexagongrid.fill")
+                Text("\(CurrencyService.balance(of: player))")
+                    .monospacedDigit()
+            }
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.yellow)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 8)
+            .aquariumGlass(cornerRadius: 14)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("所持コイン \(CurrencyService.balance(of: player))枚")
+            .accessibilityIdentifier("home.coinBalance")
+            .allowsHitTesting(false)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var dailyFishProgress: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "fish.fill")
+            Text("\(todayFishAcquisitionCount) / \(DailyFishAcquisitionPolicy.basicLimit)")
+                .monospacedDigit()
+
+            Button {
+                showsDailyFishLimitInformation = true
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.body)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("魚の獲得上限を増やす")
+            .accessibilityIdentifier("home.increaseDailyFishLimit")
+        }
+        .font(.caption.weight(.bold))
+        .foregroundStyle(.white)
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .aquariumGlass(cornerRadius: 14)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            "今日の魚獲得数 \(todayFishAcquisitionCount)匹、基本上限 \(DailyFishAcquisitionPolicy.basicLimit)匹"
+        )
+        .accessibilityIdentifier("home.dailyFishProgress")
+    }
+
+    private var todayFishAcquisitionCount: Int {
+        DailyFishAcquisitionStore.todayCount(
+            storedCount: storedDailyFishAcquisitionCount,
+            storedDayIdentifier: storedDailyFishAcquisitionDayIdentifier
+        )
     }
 
     private func handleAquariumDrop(
@@ -411,19 +519,6 @@ struct HomeView: View {
                     return false
                 }
 
-            case .background:
-                guard let theme = AquariumEditorDropCoordinator.backgroundTheme(from: item) else {
-                    continue
-                }
-                if mode == .aquariumEditor {
-                    if displayedBackgroundTheme != theme {
-                        draftBackgroundTheme = theme
-                        markAquariumEditorChanged()
-                    }
-                } else {
-                    backgroundThemeRawValue = theme.rawValue
-                }
-                return true
             }
         }
         return false
@@ -433,7 +528,13 @@ struct HomeView: View {
         guard isAquariumEditorPresented,
               aquariumEditorCategory == .fish,
               player?.activeAquariumFishIDs.contains(playerFishID) == true else { return }
+        aquariumSelectionResetRequestID = UUID()
         selectedAquariumFishID = playerFishID
+    }
+
+    private func clearAquariumSelections() {
+        selectedAquariumFishID = nil
+        aquariumSelectionResetRequestID = UUID()
     }
 
     private func updateFishDrag(species: FishSpecies, location: CGPoint) {
@@ -465,6 +566,63 @@ struct HomeView: View {
 
     private func cancelFishDrag() {
         fishDragSession = nil
+    }
+
+    private func updateDecorationDrag(decorationID: String, location: CGPoint) {
+        guard isAquariumEditorPresented,
+              aquariumEditorCategory == .decoration,
+              decorationPlacements.contains(where: {
+                  $0.decorationID == decorationID && !$0.isPlaced
+              }) else {
+            decorationDragSession = nil
+            return
+        }
+        decorationDragSession = AquariumDecorationDragSession(
+            decorationID: decorationID,
+            location: location
+        )
+    }
+
+    private func finishDecorationDrag(
+        decorationID: String,
+        at location: CGPoint,
+        aquariumSize: CGSize
+    ) {
+        defer { decorationDragSession = nil }
+        guard isAquariumEditorPresented,
+              aquariumEditorCategory == .decoration,
+              decorationDragSession?.decorationID == decorationID,
+              AquariumSideEditorLayout.acceptsDrop(at: location, in: aquariumSize),
+              let placement = decorationPlacements.first(where: {
+                  $0.decorationID == decorationID && !$0.isPlaced
+              }) else { return }
+
+        do {
+            try AquariumEditorDropCoordinator.placeDecoration(
+                from: .decoration(id: decorationID),
+                placement: placement,
+                at: location,
+                aquariumSize: aquariumSize,
+                in: modelContext,
+                persistChanges: mode != .aquariumEditor
+            )
+            markAquariumEditorChanged()
+        } catch {}
+    }
+
+    private func cancelDecorationDrag() {
+        decorationDragSession = nil
+    }
+
+    private func selectBackground(_ theme: AquariumBackgroundTheme) {
+        guard isAquariumEditorPresented, aquariumEditorCategory == .background else { return }
+        if mode == .aquariumEditor {
+            guard displayedBackgroundTheme != theme else { return }
+            draftBackgroundTheme = theme
+            markAquariumEditorChanged()
+        } else {
+            backgroundThemeRawValue = theme.rawValue
+        }
     }
 
     private func removeSelectedAquariumFish() {
@@ -510,6 +668,7 @@ struct HomeView: View {
             HStack {
                 Spacer(minLength: 0)
                 Button {
+                    onAquariumViewingInteraction()
                     showsAquariumEditConfirmation = true
                 } label: {
                     Label("編集", systemImage: "pencil")
@@ -640,8 +799,9 @@ struct HomeView: View {
     }
 
     private func collapseEditorPanel() {
-        selectedAquariumFishID = nil
+        clearAquariumSelections()
         fishDragSession = nil
+        decorationDragSession = nil
         withAnimation(.easeInOut(duration: 0.22)) {
             isEditorPanelExpanded = false
         }
@@ -685,8 +845,9 @@ struct HomeView: View {
             backgroundTheme: savedBackgroundTheme
         )
         aquariumEditorCategory = .fish
-        selectedAquariumFishID = nil
+        clearAquariumSelections()
         fishDragSession = nil
+        decorationDragSession = nil
         isEditorPanelExpanded = true
         showsAquariumEditorTutorial = !hasSeenAquariumEditorTutorial
         aquariumEditorNavigation?.beginSession()
@@ -730,8 +891,9 @@ struct HomeView: View {
     private func resetAquariumEditorSession() {
         editorSessionSnapshot = nil
         draftBackgroundTheme = nil
-        selectedAquariumFishID = nil
+        clearAquariumSelections()
         fishDragSession = nil
+        decorationDragSession = nil
         showsAquariumEditConfirmation = false
         showsEditorSaveConfirmation = false
         showsAquariumEditorTutorial = false
@@ -1076,7 +1238,7 @@ struct HomeView: View {
     private func inspectPersistedTimerSession() {
         switch TimerSessionStore.shared.launchStatus(at: Date()) {
         case .recoverable, .expired:
-            resumesPersistedTimer = true
+            showsTimerScreen = true
         case .none, .sameProcess:
             break
         }

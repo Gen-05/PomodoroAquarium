@@ -120,6 +120,11 @@ struct AquariumFishDragSession: Equatable {
     var location: CGPoint
 }
 
+struct AquariumDecorationDragSession: Equatable {
+    let decorationID: String
+    var location: CGPoint
+}
+
 extension UTType {
     static let aquariumEditorItem = UTType(
         exportedAs: "com.genkiboo0511.pomodoro-aquarium.editor-item"
@@ -130,7 +135,6 @@ struct AquariumEditorDragItem: Codable, Hashable, Transferable {
     enum Kind: String, Codable {
         case fish
         case decoration
-        case background
     }
 
     let kind: Kind
@@ -148,18 +152,9 @@ struct AquariumEditorDragItem: Codable, Hashable, Transferable {
         Self(kind: .decoration, identifier: id)
     }
 
-    static func background(_ theme: AquariumBackgroundTheme) -> Self {
-        Self(kind: .background, identifier: theme.rawValue)
-    }
-
     var fishSpecies: FishSpecies? {
         guard kind == .fish else { return nil }
         return FishSpecies(rawValue: identifier)
-    }
-
-    var backgroundTheme: AquariumBackgroundTheme? {
-        guard kind == .background else { return nil }
-        return AquariumBackgroundTheme(rawValue: identifier)
     }
 }
 
@@ -208,11 +203,6 @@ enum AquariumEditorDropCoordinator {
         )
     }
 
-    static func backgroundTheme(
-        from item: AquariumEditorDragItem
-    ) -> AquariumBackgroundTheme? {
-        item.backgroundTheme
-    }
 }
 
 private enum AquariumEditorDropError: Error {
@@ -228,6 +218,10 @@ struct AquariumSideEditor: View {
     let updateFishDrag: (FishSpecies, CGPoint) -> Void
     let finishFishDrag: (FishSpecies, CGPoint) -> Void
     let cancelFishDrag: () -> Void
+    let updateDecorationDrag: (String, CGPoint) -> Void
+    let finishDecorationDrag: (String, CGPoint) -> Void
+    let cancelDecorationDrag: () -> Void
+    let selectBackground: (AquariumBackgroundTheme) -> Void
     let finishEditing: () -> Void
     let collapse: () -> Void
     let showTutorial: () -> Void
@@ -407,9 +401,14 @@ struct AquariumSideEditor: View {
 
     private func decorationCard(_ placement: AquariumDecorationPlacement) -> some View {
         VStack(spacing: 4) {
-            AquariumDecorationView(decoration: placement.decoration)
-                .scaleEffect(0.42)
-                .frame(width: 66, height: 54)
+            AquariumDecorationDragHandle(
+                placement: placement,
+                canDrag: !placement.isPlaced,
+                updateDrag: updateDecorationDrag,
+                finishDrag: finishDecorationDrag,
+                cancelDrag: cancelDecorationDrag
+            )
+            .frame(width: 66, height: 54)
 
             Text(placement.kind.displayName)
                 .font(.caption2.weight(.semibold))
@@ -418,21 +417,17 @@ struct AquariumSideEditor: View {
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
 
-            Label("水槽へ", systemImage: "arrow.left")
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(.secondary)
+            if !placement.isPlaced {
+                Label("水槽へ", systemImage: "arrow.left")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 6)
         .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
         .accessibilityIdentifier("aquariumEditor.decoration.\(placement.decorationID)")
-        .draggable(AquariumEditorDragItem.decoration(id: placement.decorationID)) {
-            AquariumDecorationView(decoration: placement.decoration)
-                .scaleEffect(0.55)
-                .frame(width: 86, height: 72)
-                .padding(8)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        }
+        .opacity(placement.isPlaced ? 0.62 : 1)
     }
 
     private func lockedDecorationCard(_ kind: AquariumDecorationKind) -> some View {
@@ -453,7 +448,7 @@ struct AquariumSideEditor: View {
 
     private var backgroundEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("水槽へドラッグ")
+            Text("タップして背景を選択")
                 .font(.caption.weight(.semibold))
 
             ScrollView(showsIndicators: false) {
@@ -469,37 +464,39 @@ struct AquariumSideEditor: View {
 
     private func backgroundCard(_ theme: AquariumBackgroundTheme) -> some View {
         let isSelected = selectedBackgroundTheme == theme
-        return VStack(spacing: 5) {
-            LinearGradient(
-                colors: theme.fallbackColors,
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 52)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(alignment: .topTrailing) {
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.white, .blue)
-                        .padding(4)
+        return Button {
+            selectBackground(theme)
+        } label: {
+            VStack(spacing: 5) {
+                LinearGradient(
+                    colors: theme.fallbackColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(alignment: .topTrailing) {
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.white, .blue)
+                            .padding(4)
+                    }
                 }
-            }
 
-            Text(theme.displayName)
-                .font(.caption2.weight(.semibold))
+                Text(theme.displayName)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+            .padding(6)
+            .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? Color.blue : .clear, lineWidth: 2)
+            }
         }
-        .padding(6)
-        .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+        .buttonStyle(.plain)
         .accessibilityIdentifier("aquariumEditor.background.\(theme.rawValue)")
-        .draggable(AquariumEditorDragItem.background(theme)) {
-            LinearGradient(
-                colors: theme.fallbackColors,
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(width: 100, height: 72)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-        }
+        .accessibilityValue(isSelected ? "選択中" : "未選択")
     }
 
     private func categoryButton(_ category: AquariumEditorCategory) -> some View {
@@ -525,6 +522,58 @@ struct AquariumSideEditor: View {
         .buttonStyle(.plain)
         .accessibilityLabel(category.title)
         .accessibilityIdentifier("aquariumEditor.category.\(category.rawValue)")
+    }
+}
+
+private struct AquariumDecorationDragHandle: View {
+    let placement: AquariumDecorationPlacement
+    let canDrag: Bool
+    let updateDrag: (String, CGPoint) -> Void
+    let finishDrag: (String, CGPoint) -> Void
+    let cancelDrag: () -> Void
+
+    @State private var dragIntent: AquariumFishDragIntent?
+
+    var body: some View {
+        AquariumDecorationView(decoration: placement.decoration)
+            .scaleEffect(0.42)
+            .contentShape(Rectangle())
+            .simultaneousGesture(decorationDragGesture, isEnabled: canDrag)
+            .accessibilityHint(canDrag ? "左へ滑らせて水槽へ追加" : "すでに水槽へ配置中です")
+    }
+
+    private var decorationDragGesture: some Gesture {
+        DragGesture(
+            minimumDistance: AquariumFishDragInteraction.minimumDistance,
+            coordinateSpace: .named(AquariumEditorCoordinateSpace.name)
+        )
+        .onChanged { value in
+            if dragIntent == nil {
+                dragIntent = AquariumFishDragInteraction.intent(for: value.translation)
+            }
+            guard dragIntent == .aquarium else { return }
+            updateDrag(placement.decorationID, value.location)
+        }
+        .onEnded { value in
+            defer { dragIntent = nil }
+            guard dragIntent == .aquarium else {
+                cancelDrag()
+                return
+            }
+            finishDrag(placement.decorationID, value.location)
+        }
+    }
+}
+
+struct AquariumDecorationDragPreview: View {
+    let decoration: AquariumDecoration
+
+    var body: some View {
+        AquariumDecorationView(decoration: decoration)
+            .scaleEffect(0.72)
+            .frame(width: 110, height: 110)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 

@@ -6,6 +6,37 @@ import Testing
 
 @MainActor
 struct AquariumSideEditorTests {
+    @Test func viewingControlsAutoHideIsLimitedToAquariumViewing() {
+        #expect(AquariumViewingControlsPolicy.autoHideDelay == 4)
+        #expect(AquariumViewingControlsPolicy.isEnabled(selectedTab: .aquarium, tabMode: .viewing))
+        #expect(!AquariumViewingControlsPolicy.isEnabled(selectedTab: .aquarium, tabMode: .editing))
+        #expect(!AquariumViewingControlsPolicy.isEnabled(selectedTab: .home, tabMode: .viewing))
+        #expect(!AquariumViewingControlsPolicy.isEnabled(selectedTab: .shop, tabMode: .viewing))
+        #expect(!AquariumViewingControlsPolicy.isEnabled(selectedTab: .statistics, tabMode: .viewing))
+        #expect(!AquariumViewingControlsPolicy.isEnabled(selectedTab: .more, tabMode: .viewing))
+
+        #expect(!AquariumViewingControlsPolicy.shouldShowBottomTabBar(
+            selectedTab: .aquarium,
+            tabMode: .viewing,
+            areControlsVisible: false
+        ))
+        #expect(AquariumViewingControlsPolicy.shouldShowBottomTabBar(
+            selectedTab: .aquarium,
+            tabMode: .viewing,
+            areControlsVisible: true
+        ))
+        #expect(AquariumViewingControlsPolicy.shouldShowBottomTabBar(
+            selectedTab: .aquarium,
+            tabMode: .editing,
+            areControlsVisible: false
+        ))
+        #expect(AquariumViewingControlsPolicy.shouldShowBottomTabBar(
+            selectedTab: .home,
+            tabMode: .viewing,
+            areControlsVisible: false
+        ))
+    }
+
     @Test func sidePanelUsesAboutOneThirdOfPhoneWidthWithoutCoveringHalf() {
         let compactWidth = AquariumSideEditorLayout.width(for: 320)
         let regularWidth = AquariumSideEditorLayout.width(for: 390)
@@ -414,9 +445,8 @@ struct AquariumSideEditorTests {
         #expect(!placement.isPlaced)
     }
 
-    @Test func backgroundDragResolvesAndExistingStorePersistsSelection() throws {
-        let item = AquariumEditorDragItem.background(.deepSea)
-        let theme = try #require(AquariumEditorDropCoordinator.backgroundTheme(from: item))
+    @Test func tappedBackgroundUsesExistingStoreWhenTheEditorIsSaved() throws {
+        let theme = AquariumBackgroundTheme.deepSea
         let suiteName = "AquariumSideEditorTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -424,9 +454,22 @@ struct AquariumSideEditorTests {
         AquariumThemeStore(defaults: defaults).save(theme)
 
         #expect(AquariumThemeStore(defaults: defaults).selectedTheme == .deepSea)
-        #expect(AquariumEditorDropCoordinator.backgroundTheme(
-            from: .fish(.clownfish)
-        ) == nil)
+    }
+
+    @Test func decorationDragUsesTheFishDragThresholdAndDirectionRule() {
+        #expect(AquariumFishDragInteraction.minimumDistance == 6)
+        #expect(AquariumFishDragInteraction.intent(
+            for: CGSize(width: -14, height: 2)
+        ) == .aquarium)
+        #expect(AquariumFishDragInteraction.intent(
+            for: CGSize(width: -3, height: 14)
+        ) == .scrolling)
+
+        let session = AquariumDecorationDragSession(
+            decorationID: "stored-rock",
+            location: CGPoint(x: 120, y: 480)
+        )
+        #expect(session.decorationID == "stored-rock")
     }
 
     private func makeDecorationContainer() throws -> ModelContainer {

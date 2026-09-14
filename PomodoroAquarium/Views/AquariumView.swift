@@ -23,8 +23,10 @@ struct AquariumView: View {
     var isFishSelectionEnabled = false
     var selectedFishID: UUID?
     var onFishSelected: (UUID) -> Void = { _ in }
+    var onCanvasTapped: () -> Void = {}
     var onDecorationChanged: () -> Void = {}
     var onDecorationEditingChanged: (Bool) -> Void = { _ in }
+    var selectionResetRequestID: UUID?
     var decorationRestoreRequestID: String?
     var onDecorationRestoreRequestHandled: () -> Void = {}
 
@@ -59,6 +61,7 @@ struct AquariumView: View {
                 AquariumBackground(theme: backgroundTheme)
                 BubbleLayer()
                 AquariumFloor()
+                selectionClearingLayer
                 decorationLayer(in: geometry.size)
                 fishLayer(in: geometry.size)
 
@@ -102,6 +105,25 @@ struct AquariumView: View {
             beginEditing(placement, at: placement.kind.restorationPosition)
             onDecorationRestoreRequestHandled()
         }
+        .onChange(of: selectionResetRequestID) { _, requestID in
+            guard requestID != nil else { return }
+            cancelDecorationEditing()
+        }
+    }
+
+    @ViewBuilder
+    private var selectionClearingLayer: some View {
+        if isEditing || isFishSelectionEnabled {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    cancelDecorationEditing()
+                    onCanvasTapped()
+                }
+                .accessibilityElement()
+                .accessibilityLabel("水槽の空いている場所")
+                .accessibilityIdentifier("aquariumEditor.emptyCanvas")
+        }
     }
 
     private func updateDisplayedFish() {
@@ -133,9 +155,8 @@ struct AquariumView: View {
                     position: position(for: placement),
                     select: { beginEditing(placement) },
                     updatePreview: { previewPosition = $0 },
-                    cancel: cancelDecorationEditing,
-                    store: { storeDecoration(placement) },
-                    confirm: { confirmDecoration(placement) }
+                    move: { moveDecoration(placement, to: $0) },
+                    store: { storeDecoration(placement) }
                 )
             }
         }
@@ -189,18 +210,23 @@ struct AquariumView: View {
         finishDecorationEditing()
     }
 
-    private func confirmDecoration(_ placement: AquariumDecorationPlacement) {
-        guard editingDecorationID == placement.decorationID, let previewPosition else { return }
+    private func moveDecoration(
+        _ placement: AquariumDecorationPlacement,
+        to position: CGPoint
+    ) {
+        guard isEditing else { return }
+        editingDecorationID = placement.decorationID
         do {
             try AquariumDecorationService.confirmPlacement(
                 placement,
-                at: previewPosition,
+                at: position,
                 in: modelContext,
                 persistChanges: !defersDecorationPersistence
             )
+            originalPosition = position
+            previewPosition = nil
             onDecorationChanged()
         } catch {}
-        finishDecorationEditing()
     }
 
     private func finishDecorationEditing() {
@@ -282,9 +308,8 @@ private struct EditableAquariumDecorationView: View {
     let position: CGPoint
     let select: () -> Void
     let updatePreview: (CGPoint) -> Void
-    let cancel: () -> Void
+    let move: (CGPoint) -> Void
     let store: () -> Void
-    let confirm: () -> Void
 
     @State private var dragStartPosition: CGPoint?
 
@@ -318,16 +343,20 @@ private struct EditableAquariumDecorationView: View {
                             .padding(-8)
                     }
                 }
+                .accessibilityElement()
+                .accessibilityLabel(isSelected ? "選択中の水槽装飾" : "水槽装飾")
+                .accessibilityIdentifier("aquariumEditor.placedDecoration.\(placement.decorationID)")
                 .position(absolutePosition)
                 .onTapGesture {
                     if isEditing { select() }
                 }
-                .gesture(
-                    DragGesture()
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: AquariumFishDragInteraction.minimumDistance)
                         .onChanged { value in
-                            guard isEditing, isSelected else { return }
+                            guard isEditing else { return }
                             if dragStartPosition == nil {
                                 dragStartPosition = position
+                                select()
                             }
                             guard let dragStartPosition else { return }
                             updatePreview(AquariumDecorationEditor.relativePosition(
@@ -339,55 +368,50 @@ private struct EditableAquariumDecorationView: View {
                                 isEditing: true
                             ))
                         }
-                        .onEnded { _ in
-                            dragStartPosition = nil
+                        .onEnded { value in
+                            guard isEditing, let dragStartPosition else {
+                                self.dragStartPosition = nil
+                                return
+                            }
+                            let finalPosition = AquariumDecorationEditor.relativePosition(
+                                originalX: dragStartPosition.x,
+                                originalY: dragStartPosition.y,
+                                translation: value.translation,
+                                aquariumSize: aquariumSize,
+                                kind: decoration.kind,
+                                isEditing: true
+                            )
+                            updatePreview(finalPosition)
+                            move(finalPosition)
+                            self.dragStartPosition = nil
                         }
                 )
 
             if isSelected {
-                DecorationEditingControls(cancel: cancel, store: store, confirm: confirm)
+                DecorationEditingControls(store: store)
                     .position(controlsPosition)
                     .transition(.scale.combined(with: .opacity))
             }
         }
         .frame(width: aquariumSize.width, height: aquariumSize.height)
-        .accessibilityLabel(isSelected ? "編集中の水槽装飾" : "水槽装飾")
     }
 }
 
 private struct DecorationEditingControls: View {
-    let cancel: () -> Void
     let store: () -> Void
-    let confirm: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            controlButton(title: "キャンセル", systemImage: "xmark", action: cancel)
-            controlButton(title: "収納", systemImage: "shippingbox.fill", action: store)
-            controlButton(title: "確定", systemImage: "checkmark", action: confirm)
-        }
-        .padding(8)
-        .background(.black.opacity(0.42), in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.35)))
-    }
-
-    private func controlButton(
-        title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(spacing: 2) {
-                Image(systemName: systemImage)
-                    .font(.headline)
-                Text(title)
-                    .font(.system(size: 9, weight: .semibold))
-            }
-            .foregroundStyle(.white)
-            .frame(width: 50, height: 40)
-            .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
+        Button(action: store) {
+            Label("水槽から戻す", systemImage: "arrow.uturn.backward.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .background(.red.opacity(0.82), in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.35)))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("aquariumEditor.removeSelectedDecoration")
     }
 }
 
@@ -850,6 +874,25 @@ struct AquariumPrimaryButtonStyle: ButtonStyle {
             .shadow(color: .blue.opacity(0.35), radius: 10, y: 5)
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .opacity(configuration.isPressed ? 0.85 : 1)
+    }
+}
+
+struct AquariumStudyStartButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.38), radius: 2, y: 1)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 15)
+            .background(
+                Color.cyan.opacity(configuration.isPressed ? 0.28 : 0.22),
+                in: Capsule()
+            )
+            .overlay(Capsule().stroke(.white.opacity(0.68), lineWidth: 1))
+            .shadow(color: .cyan.opacity(0.18), radius: 8, y: 3)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.9 : 1)
     }
 }
 
