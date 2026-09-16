@@ -23,6 +23,86 @@ final class PomodoroAquariumUITests: XCTestCase {
     }
 
     @MainActor
+    func testRewardFishAndGlowShareTheScreenCenter() throws {
+        let app = XCUIApplication()
+        app.launchArguments.append("-reward-layout-debug")
+        app.launch()
+        XCTAssertTrue(app.buttons["startButton"].waitForExistence(timeout: 5))
+        app.buttons["startButton"].tap()
+        XCTAssertTrue(app.buttons["mainTab.more"].waitForExistence(timeout: 5))
+        app.buttons["mainTab.more"].tap()
+        app.buttons["more.rewardPreview"].tap()
+
+        for rarity in ["epic", "legendary", "common", "rare"] {
+            if rarity == "rare" {
+                let newFishSwitch = app.switches["rewardPreview.newFish"]
+                newFishSwitch.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+                let duplicatePreviewReady = XCTNSPredicateExpectation(
+                    predicate: NSPredicate(format: "value == %@", "0"),
+                    object: newFishSwitch
+                )
+                XCTAssertEqual(XCTWaiter.wait(for: [duplicatePreviewReady], timeout: 3), .completed)
+            }
+            let previewButton = app.buttons["rewardPreview.\(rarity)"]
+            XCTAssertTrue(previewButton.waitForExistence(timeout: 5))
+            previewButton.tap()
+            let prompt = app.staticTexts["fishReward.tapPrompt"]
+            XCTAssertTrue(prompt.waitForExistence(timeout: 5))
+            assertRewardCenters(app, names: ["container"])
+            XCTAssertFalse(app.staticTexts["fishRarity"].exists)
+            XCTAssertFalse(app.staticTexts["fishReward.getMessage"].exists)
+            XCTAssertFalse(app.staticTexts["fishReward.newBadge"].exists)
+            let anticipationAttachment = XCTAttachment(screenshot: app.screenshot())
+            anticipationAttachment.name = "Reward anticipation \(rarity)"
+            anticipationAttachment.lifetime = .keepAlways
+            add(anticipationAttachment)
+            prompt.tap()
+            let geometryReady = XCTNSPredicateExpectation(
+                predicate: NSPredicate(
+                    format: "label CONTAINS %@ AND NOT (label CONTAINS %@)",
+                    "fish=", "fish=0.00"
+                ),
+                object: app.staticTexts["fishReward.debugCoordinates"]
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [geometryReady], timeout: 3), .completed)
+            assertRewardCenters(app, names: ["container", "composite", "fish", "glow"])
+            XCTAssertTrue(app.staticTexts["fishReward.getMessage"].waitForExistence(timeout: 8))
+            XCTAssertEqual(app.staticTexts["fishReward.newBadge"].exists, rarity != "rare")
+
+            let coordinates = app.staticTexts["fishReward.debugCoordinates"]
+            XCTAssertTrue(coordinates.exists)
+            assertRewardCenters(app, names: ["container", "composite", "fish", "glow"])
+            print("REWARD CENTER \(rarity): \(coordinates.label)")
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "Reward center \(rarity)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            app.buttons["fishReward.close"].tap()
+        }
+    }
+
+    @MainActor
+    private func assertRewardCenters(_ app: XCUIApplication, names: [String]) {
+        let label = app.staticTexts["fishReward.debugCoordinates"].label
+        let values: [String: Double] = Dictionary(uniqueKeysWithValues: label.split(separator: "\n").compactMap { line in
+            let pair = line.split(separator: "=")
+            guard pair.count == 2, let value = Double(pair[1]) else { return nil }
+            return (String(pair[0]), value)
+        })
+        guard let screenCenter = values["screen"] else {
+            XCTFail("Missing screen center: \(label)")
+            return
+        }
+        for name in names {
+            guard let center = values[name] else {
+                XCTFail("Missing \(name) center: \(label)")
+                continue
+            }
+            XCTAssertEqual(center, screenCenter, accuracy: 0.5, "\(name): \(label)")
+        }
+    }
+
+    @MainActor
     func testExample() throws {
         let app = XCUIApplication()
         app.launch()

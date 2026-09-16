@@ -16,6 +16,17 @@ struct MoreView: View {
                 Label("設定", systemImage: "gearshape.fill")
             }
             .accessibilityIdentifier("more.settings")
+
+#if DEBUG
+            Section("開発") {
+                NavigationLink {
+                    RewardPreviewView()
+                } label: {
+                    Label("Reward Preview", systemImage: "sparkles")
+                }
+                .accessibilityIdentifier("more.rewardPreview")
+            }
+#endif
         }
         .navigationTitle("その他")
     }

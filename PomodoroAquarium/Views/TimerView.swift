@@ -322,7 +322,7 @@ struct TimerView: View {
                 StudyCompletionRewardView(reward: completionReward)
             }
         }
-        .sheet(
+        .fullScreenCover(
             isPresented: Binding(
                 get: { fishAcquisition != nil },
                 set: { isPresented in
