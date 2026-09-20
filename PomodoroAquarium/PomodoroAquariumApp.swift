@@ -10,6 +10,15 @@ import SwiftData
 
 @main
 struct PomodoroAquariumApp: App {
+    init() {
+#if DEBUG
+        // UI Test専用。Releaseの起動・保存フローには影響しない。
+        if ProcessInfo.processInfo.arguments.contains("-reset-onboarding") {
+            UserDefaults.standard.removeObject(forKey: OnboardingStore.storageKey)
+        }
+#endif
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

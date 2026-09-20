@@ -425,7 +425,7 @@ private struct FishRewardRevealFlash: View {
     }
 }
 
-private struct FishRewardNewBadge: View {
+struct FishRewardNewBadge: View {
     let glowColor: Color
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

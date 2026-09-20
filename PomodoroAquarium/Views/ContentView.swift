@@ -8,17 +8,17 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var hasStarted = false
+    @AppStorage(OnboardingStore.storageKey) private var hasCompletedOnboarding = false
 
     var body: some View {
         Group {
-            if hasStarted {
+            if hasCompletedOnboarding {
                 MainTabView()
                     .transition(.opacity)
             } else {
-                StartView {
+                OnboardingView {
                     withAnimation(.easeInOut(duration: 0.35)) {
-                        hasStarted = true
+                        hasCompletedOnboarding = true
                     }
                 }
                 .transition(.opacity)

@@ -39,6 +39,8 @@ private struct RewardPreviewPresentation: Identifiable {
 struct RewardPreviewView: View {
     @State private var presentation: RewardPreviewPresentation?
     @State private var previewsNewFish = true
+    @State private var showsOnboardingPreview = false
+    @State private var onboardingPreviewSessionID = UUID()
 
     var body: some View {
         List {
@@ -82,10 +84,27 @@ struct RewardPreviewView: View {
             } footer: {
                 Text("演出だけを再生します。所持魚、今日の獲得数、コイン、勉強記録は変更されません。")
             }
+            Section {
+                Button {
+                    onboardingPreviewSessionID = UUID()
+                    showsOnboardingPreview = true
+                } label: {
+                    Label("Onboarding Preview", systemImage: "rectangle.on.rectangle")
+                }
+                .accessibilityIdentifier("rewardPreview.onboarding")
+            } footer: {
+                Text("全3ページを確認できます。初回起動の完了状態は変更しません。")
+            }
         }
         .navigationTitle("Reward Preview")
         .fullScreenCover(item: $presentation) { presentation in
             FishRewardView(result: presentation.result)
+        }
+        .fullScreenCover(isPresented: $showsOnboardingPreview) {
+            OnboardingView(completionButtonTitle: "プレビュー終了") {
+                showsOnboardingPreview = false
+            }
+            .id(onboardingPreviewSessionID)
         }
     }
 }

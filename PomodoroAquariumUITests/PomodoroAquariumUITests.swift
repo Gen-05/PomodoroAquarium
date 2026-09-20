@@ -23,12 +23,81 @@ final class PomodoroAquariumUITests: XCTestCase {
     }
 
     @MainActor
+    private func launchReturningUser(_ app: XCUIApplication) {
+        app.launchArguments += ["-hasCompletedOnboarding", "YES"]
+        app.launch()
+        XCTAssertTrue(app.buttons["勉強をはじめる"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testOnboardingCompletesOnceAndRelaunchesDirectlyIntoHome() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-reset-onboarding"]
+        app.launch()
+        for page in 0..<3 {
+            XCTAssertTrue(app.staticTexts["onboarding.title.\(page)"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["勉強をはじめる"].exists)
+            if page == 0 {
+                for step in ["集中", "魚をゲット", "水族館が育つ"] {
+                    XCTAssertTrue(app.staticTexts[step].exists)
+                }
+            }
+            if page == 1 {
+                XCTAssertTrue(app.staticTexts["onboarding.rewardStudyDuration"].exists)
+                XCTAssertFalse(app.staticTexts["マンタをゲット！"].exists)
+                XCTAssertTrue(app.images["onboarding.rewardSilhouette"].exists)
+                XCTAssertEqual(app.staticTexts["onboarding.rewardRarity"].label, "RARE")
+                XCTAssertTrue(app.staticTexts["fishReward.newBadge"].exists)
+            }
+            if page == 2 {
+                XCTAssertEqual(app.staticTexts["onboarding.rareChanceBoost"].label, "レア率UP ↑")
+                for rarity in ["RARE", "EPIC", "LEGENDARY"] {
+                    XCTAssertTrue(app.staticTexts[rarity].exists)
+                }
+            }
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "Onboarding page \(page + 1)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            if page == 0 {
+                app.collectionViews["onboarding.pages"].swipeLeft()
+            } else {
+                app.buttons["onboarding.next"].tap()
+            }
+        }
+        let studyButton = app.buttons["勉強をはじめる"]
+        XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
+        let homeIDs = ["home.dailyFishProgress", "home.coinBalance", "home.todayStudyMinutes"]
+        let before = homeIDs.map { app.descendants(matching: .any)[$0].label }
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+        XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["onboarding.title.0"].exists)
+        XCTAssertFalse(app.buttons["startButton"].exists)
+        XCTAssertEqual(homeIDs.map { app.descendants(matching: .any)[$0].label }, before)
+        XCTAssertTrue(app.buttons["mainTab.home"].exists)
+
+        app.buttons["mainTab.more"].tap()
+        app.buttons["more.rewardPreview"].tap()
+        app.buttons["rewardPreview.onboarding"].tap()
+        for page in 0..<3 {
+            XCTAssertTrue(app.staticTexts["onboarding.title.\(page)"].waitForExistence(timeout: 5))
+            app.buttons["onboarding.next"].tap()
+        }
+        XCTAssertTrue(app.buttons["rewardPreview.onboarding"].waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["onboarding.title.0"].exists)
+        XCTAssertEqual(homeIDs.map { app.descendants(matching: .any)[$0].label }, before)
+    }
+
+    @MainActor
     func testRewardFishAndGlowShareTheScreenCenter() throws {
         let app = XCUIApplication()
         app.launchArguments.append("-reward-layout-debug")
-        app.launch()
-        XCTAssertTrue(app.buttons["startButton"].waitForExistence(timeout: 5))
-        app.buttons["startButton"].tap()
+        launchReturningUser(app)
         XCTAssertTrue(app.buttons["mainTab.more"].waitForExistence(timeout: 5))
         app.buttons["mainTab.more"].tap()
         app.buttons["more.rewardPreview"].tap()
@@ -105,13 +174,7 @@ final class PomodoroAquariumUITests: XCTestCase {
     @MainActor
     func testExample() throws {
         let app = XCUIApplication()
-        app.launch()
-
-        XCTAssertTrue(app.staticTexts["ポモドーロ水族館"].waitForExistence(timeout: 5))
-
-        let startButton = app.buttons["startButton"]
-        XCTAssertTrue(startButton.exists)
-        startButton.tap()
+        launchReturningUser(app)
 
         let studyButton = app.buttons["勉強をはじめる"]
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
@@ -192,10 +255,7 @@ final class PomodoroAquariumUITests: XCTestCase {
     @MainActor
     func testStudyLocksTabsAndZeroRewardStillPresents() throws {
         let app = XCUIApplication()
-        app.launch()
-
-        XCTAssertTrue(app.buttons["startButton"].waitForExistence(timeout: 5))
-        app.buttons["startButton"].tap()
+        launchReturningUser(app)
 
         XCTAssertTrue(app.buttons["勉強をはじめる"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["mainTab.hitShield"].exists)
@@ -264,10 +324,7 @@ final class PomodoroAquariumUITests: XCTestCase {
     @MainActor
     func testAquariumSideEditorKeepsTheAquariumVisibleAndSwitchesCategories() throws {
         let app = XCUIApplication()
-        app.launch()
-
-        XCTAssertTrue(app.buttons["startButton"].waitForExistence(timeout: 5))
-        app.buttons["startButton"].tap()
+        launchReturningUser(app)
 
         XCTAssertFalse(app.buttons["水槽編集"].exists)
         XCTAssertFalse(app.buttons["設定"].exists)
@@ -371,10 +428,7 @@ final class PomodoroAquariumUITests: XCTestCase {
     @MainActor
     func testAquariumViewingControlsAutoHideAndEditingKeepsThemVisible() throws {
         let app = XCUIApplication()
-        app.launch()
-
-        XCTAssertTrue(app.buttons["startButton"].waitForExistence(timeout: 5))
-        app.buttons["startButton"].tap()
+        launchReturningUser(app)
         app.buttons["mainTab.aquarium"].tap()
 
         let editButton = app.buttons["aquariumEditor.start"]
