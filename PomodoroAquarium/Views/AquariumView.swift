@@ -10,7 +10,6 @@ import UIKit
 private struct AquariumFishSelectionRevision: Equatable {
     let ownedFishIDs: [UUID]
     let activeFishIDs: [UUID]
-    let favoriteFishID: UUID?
     let isInitialized: Bool
 }
 
@@ -38,10 +37,6 @@ struct AquariumView: View {
     @State private var fishPositions: [UUID: CGPoint] = [:]
     @State private var displayedFish: [PlayerFish] = []
 
-    private var favoriteFish: PlayerFish? {
-        player?.favoriteFish
-    }
-
     private var displayedFishIDs: [UUID] {
         displayedFish.map(\.id)
     }
@@ -50,7 +45,6 @@ struct AquariumView: View {
         AquariumFishSelectionRevision(
             ownedFishIDs: player?.ownedFish.map(\.id) ?? [],
             activeFishIDs: player?.activeAquariumFishIDs ?? [],
-            favoriteFishID: player?.favoriteFish?.id,
             isInitialized: player?.hasInitializedActiveAquariumFish ?? false
         )
     }
@@ -64,15 +58,6 @@ struct AquariumView: View {
                 selectionClearingLayer
                 decorationLayer(in: geometry.size)
                 fishLayer(in: geometry.size)
-
-                if displayedFish.isEmpty {
-                    emptyAquariumGuide
-                        .offset(y: -geometry.size.height * 0.16)
-                } else if favoriteFish == nil {
-                    favoriteFishGuide
-                        .scaleEffect(0.8)
-                        .offset(y: -geometry.size.height * 0.36)
-                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
@@ -248,12 +233,10 @@ struct AquariumView: View {
 
             ZStack {
                 ForEach(displayedFish) { playerFish in
-                    let isFavorite = playerFish.id == favoriteFish?.id
-
                     SwimmingFishView(
                         fishID: playerFish.id,
                         species: playerFish.species,
-                        isFavorite: isFavorite,
+                        isFavorite: false,
                         aquariumSize: size,
                         updateDate: timeline.date,
                         isSimulationPaused: isSimulationPaused,
@@ -268,34 +251,6 @@ struct AquariumView: View {
                 }
             }
         }
-    }
-
-    private var emptyAquariumGuide: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "fish")
-                .font(.system(size: 42))
-
-            Text("水槽編集から魚を追加してください")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-        }
-        .padding()
-        .aquariumGlass(cornerRadius: 20)
-        .padding(.horizontal, 32)
-    }
-
-    private var favoriteFishGuide: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "fish")
-                .font(.system(size: 42))
-
-            Text("図鑑からお気に入りの魚を選んでください")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-        }
-        .padding()
-        .aquariumGlass(cornerRadius: 20)
-        .padding(.horizontal, 32)
     }
 
 }

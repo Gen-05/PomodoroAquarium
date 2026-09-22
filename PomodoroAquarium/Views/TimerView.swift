@@ -76,6 +76,8 @@ struct TimerView: View {
     let studyTime: Int
     let breakTime: Int
     let player: Player?
+    let coreTutorial: CoreTutorialCoordinator?
+    private let defaults: UserDefaults
 
     @AppStorage(AquariumThemeStore.storageKey)
     private var backgroundThemeRawValue = AquariumBackgroundTheme.aquarium.rawValue
@@ -94,13 +96,17 @@ struct TimerView: View {
         studyTime: Int,
         breakTime: Int,
         player: Player?,
-        viewModel: TimerViewModel? = nil
+        viewModel: TimerViewModel? = nil,
+        coreTutorial: CoreTutorialCoordinator? = nil,
+        defaults: UserDefaults = .standard
     ) {
         self.studyTime = studyTime
         self.breakTime = breakTime
         self.player = player
+        self.coreTutorial = coreTutorial
+        self.defaults = defaults
         
-        let configuredSetCount = PomodoroBreakConfiguration.configuredSetCount()
+        let configuredSetCount = PomodoroBreakConfiguration.configuredSetCount(in: defaults)
         let tempViewModel = viewModel ?? TimerViewModel(
             studyTime: studyTime,
             breakTime: PomodoroBreakConfiguration.effectiveBreakMinutes(
@@ -126,6 +132,8 @@ struct TimerView: View {
     @State private var showsEndConfirmation = false
     @State private var showsTimeSettings = false
     @State private var showsNotificationIntroduction = false
+    @State private var tutorialCompletionTask: Task<Void, Never>?
+    @State private var isCompletingCoreTutorialStudy = false
     
     var body: some View {
         ZStack {
@@ -150,6 +158,8 @@ struct TimerView: View {
                     .pickerStyle(.segmented)
                     .padding(5)
                     .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                    .coreTutorialTarget(.studyMode)
+                    .disabled(isCoreTutorialStudy)
                 }
 
                 Text(viewModel.isStudyTime ? "FOCUS" : "BREAK")
@@ -182,6 +192,9 @@ struct TimerView: View {
                                 .background(.black.opacity(0.18), in: Circle())
                         }
                         .accessibilityLabel("時間設定")
+                        .accessibilityIdentifier("timer.timeSettings")
+                        .coreTutorialTarget(.studySettings)
+                        .disabled(isCoreTutorialStudy)
                     }
                 }
 
@@ -210,6 +223,18 @@ struct TimerView: View {
                             handlePrimaryTimerAction()
                         }
                         .buttonStyle(AquariumStudyStartButtonStyle())
+                        .coreTutorialTarget(.studyStart)
+                        .disabled(
+                            isCompletingCoreTutorialStudy ||
+                                (isCoreTutorialStudy &&
+                                    (coreTutorial?.step != .waitingForStudyStartTap ||
+                                        coreTutorial?.conversationIndex != CoreTutorialConversationScript.studyStart.count - 1))
+                        )
+                        .accessibilityHidden(
+                            isCoreTutorialStudy &&
+                                (coreTutorial?.step != .waitingForStudyStartTap ||
+                                    coreTutorial?.conversationIndex != CoreTutorialConversationScript.studyStart.count - 1)
+                        )
                         .accessibilityIdentifier("timer.startStudy")
                     } else {
                         Button("休憩開始") {
@@ -223,15 +248,47 @@ struct TimerView: View {
             }
             .padding(.horizontal, 32)
             .padding(.vertical, 24)
+            // 背景の魚・泡やTutorial overlayの局所animationを、
+            // 固定すべきTimer操作UIへ伝播させない。
+            .transaction { transaction in
+                transaction.animation = nil
+            }
+        }
+        .overlayPreferenceValue(CoreTutorialTargetPreferenceKey.self) { targets in
+            GeometryReader { geometry in
+                coreTutorialStudyOverlay(targets: targets, geometry: geometry)
+            }
+        }
+        .overlay {
+            if isCompletingCoreTutorialStudy {
+                CoreTutorialStudyStartingShield()
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(viewModel.locksMainTabNavigation)
+        .navigationBarBackButtonHidden(
+            viewModel.locksMainTabNavigation || isCoreTutorialStudy || isCompletingCoreTutorialStudy
+        )
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .onAppear {
             configureStudyCompletion()
+            prepareCoreTutorialStudyIfNeeded()
             viewModel.restorePersistedSessionIfNeeded()
             viewModel.synchronizeTime()
+        }
+        .onDisappear {
+            tutorialCompletionTask?.cancel()
+            tutorialCompletionTask = nil
+            if isCompletingCoreTutorialStudy {
+                isCompletingCoreTutorialStudy = false
+                restoreStoredTimerConfiguration()
+            }
+            if coreTutorial?.step == .studySetupIntro ||
+                coreTutorial?.step == .studySettingsIntro ||
+                coreTutorial?.step == .waitingForStudyStartTap {
+                coreTutorial?.didLeaveStudySetupBeforeStarting()
+                restoreStoredTimerConfiguration()
+            }
         }
         .alert(viewModel.isStudyTime ? "勉強を終了しますか？" : "休憩を終了しますか？", isPresented: $showsEndConfirmation) {
             Button("キャンセル", role: .cancel) {}
@@ -340,6 +397,24 @@ struct TimerView: View {
     }
 
     private func handlePrimaryTimerAction() {
+        if coreTutorial?.isActive == true {
+            guard coreTutorial?.step == .waitingForStudyStartTap,
+                  coreTutorial?.conversationIndex == CoreTutorialConversationScript.studyStart.count - 1,
+                  !isCompletingCoreTutorialStudy,
+                  viewModel.state == .idle,
+                  viewModel.isStudyTime else { return }
+
+            isCompletingCoreTutorialStudy = true
+            coreTutorial?.didTapStudyStart()
+            tutorialCompletionTask?.cancel()
+            tutorialCompletionTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(700))
+                guard !Task.isCancelled else { return }
+                _ = viewModel.completeCoreTutorialStudyWithoutStartingSession()
+            }
+            return
+        }
+
         if viewModel.isRunning {
             viewModel.pauseTimer()
             return
@@ -371,6 +446,24 @@ struct TimerView: View {
                     streakReward: 0,
                     streakDays: 0,
                     didEarnFish: false
+                )
+                return
+            }
+
+            if coreTutorial?.step == .reward {
+                let fishResult = try? coreTutorial?.grantRewardIfNeeded(
+                    to: player,
+                    in: modelContext
+                )
+                pendingFishAcquisition = fishResult
+                pendingCompletionReward = StudyCompletionReward(
+                    studyReward: CurrencyService.studyCompletionReward(
+                        for: CoreTutorialRewardService.studyMinutes,
+                        todayStudyMinutesBeforeCompletion: 0
+                    ),
+                    streakReward: 0,
+                    streakDays: player.studyStreakDays,
+                    didEarnFish: fishResult != nil
                 )
                 return
             }
@@ -485,11 +578,120 @@ struct TimerView: View {
     }
 
     private func finishStudyFlow() {
+        if coreTutorial?.step == .reward {
+            coreTutorial?.didDismissReward()
+            isCompletingCoreTutorialStudy = false
+            restoreStoredTimerConfiguration()
+            dismiss()
+            return
+        }
         if viewModel.shouldBeginPomodoroBreak {
             viewModel.beginPomodoroBreak()
         } else {
             dismiss()
         }
+    }
+
+    private var isCoreTutorialStudy: Bool {
+        coreTutorial?.usesTutorialStudySetup == true
+    }
+
+    @ViewBuilder
+    private func coreTutorialStudyOverlay(
+        targets: [CoreTutorialTarget: Anchor<CGRect>],
+        geometry: GeometryProxy
+    ) -> some View {
+        if coreTutorial?.step == .studySetupIntro {
+            let pages = CoreTutorialConversationScript.studyMode
+            let index = coreTutorial?.conversationIndex ?? 0
+            CoreTutorialSpotlightStep(
+                targetFrame: targets[.studyMode].map { geometry[$0] },
+                page: coreTutorialConversationPage(in: pages, at: index),
+                pageIndex: index,
+                onConversationAdvance: {
+                    if coreTutorial?.advanceConversation(totalCount: pages.count) == true {
+                        coreTutorial?.dismissStudySetupIntro()
+                    }
+                },
+                accessibilityIdentifier: "coreTutorial.studyModeIntro"
+            )
+        } else if coreTutorial?.step == .studySettingsIntro {
+            let pages = CoreTutorialConversationScript.studySettings
+            let index = coreTutorial?.conversationIndex ?? 0
+            CoreTutorialSpotlightStep(
+                targetFrame: targets[.studySettings].map { geometry[$0] },
+                page: coreTutorialConversationPage(in: pages, at: index),
+                pageIndex: index,
+                onConversationAdvance: {
+                    if coreTutorial?.advanceConversation(totalCount: pages.count) == true {
+                        coreTutorial?.dismissStudySetupIntro()
+                    }
+                },
+                accessibilityIdentifier: "coreTutorial.studySettingsIntro"
+            )
+        } else if coreTutorial?.step == .waitingForStudyStartTap {
+            let pages = CoreTutorialConversationScript.studyStart
+            let index = coreTutorial?.conversationIndex ?? 0
+            CoreTutorialSpotlightStep(
+                targetFrame: targets[.studyStart].map { geometry[$0] },
+                page: coreTutorialConversationPage(in: pages, at: index),
+                pageIndex: index,
+                showsPointingHand: index == pages.count - 1,
+                allowsConversationAdvance: index < pages.count - 1,
+                allowsTargetInteraction: index == pages.count - 1,
+                onConversationAdvance: {
+                    _ = coreTutorial?.advanceConversation(totalCount: pages.count)
+                },
+                accessibilityIdentifier: "coreTutorial.studyStartPrompt"
+            )
+        }
+    }
+
+    private func prepareCoreTutorialStudyIfNeeded() {
+        guard coreTutorial?.usesTutorialStudySetup == true else { return }
+        viewModel.resetTimer()
+        viewModel.selectMode(.pomodoro)
+        viewModel.updateConfiguration(
+            studyTime: CoreTutorialRewardService.studyMinutes,
+            breakTime: PomodoroBreakConfiguration.defaultBreakMinutes,
+            totalSets: PomodoroBreakConfiguration.defaultSetCount
+        )
+    }
+
+    private func restoreStoredTimerConfiguration() {
+        guard !viewModel.isRunning else { return }
+        let setCount = PomodoroBreakConfiguration.configuredSetCount(in: defaults)
+        let storedBreakMinutes = Int(storedBreakTime) ?? breakTime
+        viewModel.resetTimer()
+        viewModel.updateConfiguration(
+            studyTime: Int(storedStudyTime) ?? studyTime,
+            breakTime: PomodoroBreakConfiguration.effectiveBreakMinutes(
+                preferredMinutes: storedBreakMinutes,
+                setCount: setCount
+            ),
+            totalSets: setCount
+        )
+    }
+}
+
+private struct CoreTutorialStudyStartingShield: View {
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.12)
+                .contentShape(Rectangle())
+
+            ProgressView()
+                .tint(.white)
+                .controlSize(.large)
+                .padding(18)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("集中完了を準備中")
+        .accessibilityAddTraits(.isModal)
+        .accessibilityIdentifier("coreTutorial.studyStartingShield")
     }
 }
 

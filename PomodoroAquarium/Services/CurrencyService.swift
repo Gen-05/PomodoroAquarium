@@ -54,10 +54,19 @@ enum CurrencyService {
             return currentBalance
         }
 
-        let (newBalance, overflowed) = currentBalance.addingReportingOverflow(amount)
-        player.coins = overflowed ? Int.max : newBalance
+        creditWithoutSaving(amount, to: player)
         try context.save()
         return player.coins
+    }
+
+    /// 複数のモデル変更を1回の保存にまとめる処理向け。通常の報酬計算値は変更しない。
+    static func creditWithoutSaving(_ amount: Int, to player: Player) {
+        guard amount > 0 else {
+            player.coins = balance(of: player)
+            return
+        }
+        let (newBalance, overflowed) = balance(of: player).addingReportingOverflow(amount)
+        player.coins = overflowed ? Int.max : newBalance
     }
 
     /// 将来のショップ購入判定で共通利用するための残高確認。

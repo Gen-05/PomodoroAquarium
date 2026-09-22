@@ -7,6 +7,17 @@
 
 import XCTest
 
+private enum CoreTutorialConversationPageCount {
+    static let homeIntro = 5
+    static let homePoints = 2
+    static let homeStudySummary = 2
+    static let studyMode = 2
+    static let studySettings = 2
+    static let rewardFollowUp = 3
+    static let aquariumReturnHome = 3
+    static let finishing = 3
+}
+
 final class PomodoroAquariumUITests: XCTestCase {
 
     override func setUpWithError() throws {
@@ -24,7 +35,10 @@ final class PomodoroAquariumUITests: XCTestCase {
 
     @MainActor
     private func launchReturningUser(_ app: XCUIApplication) {
-        app.launchArguments += ["-hasCompletedOnboarding", "YES"]
+        app.launchArguments += [
+            "-hasCompletedOnboarding", "YES",
+            "-hasCompletedCoreTutorial", "YES"
+        ]
         app.launch()
         XCTAssertTrue(app.buttons["勉強をはじめる"].waitForExistence(timeout: 5))
     }
@@ -32,7 +46,10 @@ final class PomodoroAquariumUITests: XCTestCase {
     @MainActor
     func testOnboardingCompletesOnceAndRelaunchesDirectlyIntoHome() {
         let app = XCUIApplication()
-        app.launchArguments = ["-reset-onboarding"]
+        app.launchArguments = [
+            "-reset-onboarding",
+            "-hasCompletedCoreTutorial", "YES"
+        ]
         app.launch()
         for page in 0..<3 {
             XCTAssertTrue(app.staticTexts["onboarding.title.\(page)"].waitForExistence(timeout: 5))
@@ -70,7 +87,7 @@ final class PomodoroAquariumUITests: XCTestCase {
         let homeIDs = ["home.dailyFishProgress", "home.coinBalance", "home.todayStudyMinutes"]
         let before = homeIDs.map { app.descendants(matching: .any)[$0].label }
         app.terminate()
-        app.launchArguments = []
+        app.launchArguments = ["-hasCompletedCoreTutorial", "YES"]
         app.launch()
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["onboarding.title.0"].exists)
@@ -91,6 +108,260 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["onboarding.title.0"].exists)
         XCTAssertEqual(homeIDs.map { app.descendants(matching: .any)[$0].label }, before)
+    }
+
+    @MainActor
+    func testCoreTutorialUsesRealControlsAndCompletesWithoutWaiting25Minutes() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-core-tutorial-ui-test"]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.homeFishIntro"].waitForExistence(timeout: 5))
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.homeIntro)
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.homePointsIntro"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.descendants(matching: .any)["coreTutorial.homeFishIntro"].exists)
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.homePoints)
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.homeStudySummaryIntro"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.descendants(matching: .any)["coreTutorial.homePointsIntro"].exists)
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.homeStudySummary)
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.homeStartPrompt"].exists)
+        advanceConversation(in: app, pageCount: 1)
+        waitForConversationReady(in: app)
+        app.buttons["home.startStudy"].tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studyModeIntro"].waitForExistence(timeout: 5))
+        sleep(1)
+        let fixedTimerElements: [(String, XCUIElement)] = [
+            ("mode switcher", app.segmentedControls.firstMatch),
+            ("FOCUS", app.staticTexts["FOCUS"]),
+            ("25:00", app.staticTexts["25:00"]),
+            ("settings", app.buttons["timer.timeSettings"]),
+            ("start", app.buttons["timer.startStudy"])
+        ]
+        for (name, element) in fixedTimerElements {
+            XCTAssertTrue(element.exists, "Missing fixed Timer element: \(name)")
+        }
+        let initialTimerFrames = Dictionary(
+            uniqueKeysWithValues: fixedTimerElements.map { ($0.0, $0.1.frame) }
+        )
+        for second in 1...10 {
+            sleep(1)
+            for (name, element) in fixedTimerElements {
+                guard let initialFrame = initialTimerFrames[name] else {
+                    XCTFail("Missing initial frame for \(name)")
+                    continue
+                }
+                XCTAssertEqual(
+                    element.frame.minY,
+                    initialFrame.minY,
+                    accuracy: 1,
+                    "\(name) moved vertically after \(second) seconds"
+                )
+            }
+        }
+        let studyButtonY = app.buttons["timer.startStudy"].frame.minY
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.studyMode)
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studySettingsIntro"].waitForExistence(timeout: 2))
+        sleep(1)
+        XCTAssertEqual(app.buttons["timer.startStudy"].frame.minY, studyButtonY, accuracy: 1)
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.studySettings)
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studyStartPrompt"].waitForExistence(timeout: 2))
+        sleep(1)
+        XCTAssertEqual(app.buttons["timer.startStudy"].frame.minY, studyButtonY, accuracy: 1)
+        advanceConversation(in: app, pageCount: 2)
+        waitForConversationReady(in: app)
+        XCTAssertTrue(app.buttons["timer.startStudy"].exists)
+        app.buttons["timer.startStudy"].tap()
+
+        XCTAssertTrue(app.buttons["報酬を見る"].waitForExistence(timeout: 5))
+        app.buttons["報酬を見る"].tap()
+        XCTAssertTrue(app.buttons["閉じる"].waitForExistence(timeout: 8))
+        app.buttons["閉じる"].tap()
+
+        let tapPrompt = app.staticTexts["fishReward.tapPrompt"]
+        XCTAssertTrue(tapPrompt.waitForExistence(timeout: 5))
+        tapPrompt.tap()
+        XCTAssertTrue(app.staticTexts["fishReward.getMessage"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["fishReward.newBadge"].exists)
+        app.buttons["fishReward.close"].tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.openAquarium"].waitForExistence(timeout: 5))
+        advanceConversation(
+            in: app,
+            pageCount: CoreTutorialConversationPageCount.rewardFollowUp - 1
+        )
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.aquariumTabPrompt"].waitForExistence(timeout: 3))
+        app.buttons["mainTab.aquarium"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["図鑑からお気に入りの魚を選んでください"].exists)
+        advanceConversation(in: app, pageCount: 2)
+        waitForConversationReady(in: app)
+        app.buttons["aquariumEditor.start"].tap()
+        let editAlert = app.alerts["水槽を編集しますか？"]
+        XCTAssertTrue(editAlert.waitForExistence(timeout: 3))
+        editAlert.buttons["編集する"].tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.ghostHand"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.fish.pufferfish"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.fish.seahorse"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.fish.manta"].exists)
+        let clownfishHandle = app.images
+            .matching(identifier: "aquariumEditor.fish.clownfish")
+            .matching(NSPredicate(format: "label == %@", "クマノミ"))
+            .firstMatch
+        XCTAssertTrue(clownfishHandle.waitForExistence(timeout: 5))
+        let destination = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            .withOffset(CGVector(dx: 100, dy: clownfishHandle.frame.midY))
+        clownfishHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.2, thenDragTo: destination)
+
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.savePrompt"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["coreTutorial.ghostHand"].exists)
+        advanceConversation(in: app, pageCount: 1)
+        waitForConversationReady(in: app)
+        app.buttons["aquariumEditor.done"].tap()
+        XCTAssertTrue(app.buttons["保存する"].waitForExistence(timeout: 3))
+        app.buttons["保存する"].tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.returnHome"].waitForExistence(timeout: 5))
+        advanceConversation(
+            in: app,
+            pageCount: CoreTutorialConversationPageCount.aquariumReturnHome - 1
+        )
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.homeTabPrompt"].waitForExistence(timeout: 3))
+        app.buttons["mainTab.home"].tap()
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.finishing)
+        XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["home.dailyFishProgress"].label.contains("0"))
+        XCTAssertFalse(app.descendants(matching: .any)["coreTutorial.homeFishIntro"].exists)
+
+        app.terminate()
+        app.launchArguments = [
+            "-core-tutorial-in-memory",
+            "-hasCompletedOnboarding", "YES"
+        ]
+        app.launch()
+        XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["coreTutorial.homeFishIntro"].exists)
+    }
+
+    @MainActor
+    func testCoreTutorialPreviewRunsFullFlowWithoutChangingProductionDashboard() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-core-tutorial-in-memory",
+            "-hasCompletedOnboarding", "YES",
+            "-hasCompletedCoreTutorial", "YES"
+        ]
+        app.launch()
+
+        let dashboardIDs = [
+            "home.dailyFishProgress",
+            "home.coinBalance",
+            "home.todayStudyMinutes"
+        ]
+        XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
+        let dashboardBeforePreview = dashboardIDs.map {
+            app.descendants(matching: .any)[$0].label
+        }
+
+        app.buttons["mainTab.more"].tap()
+        app.buttons["more.rewardPreview"].tap()
+        let previewButton = app.buttons["rewardPreview.coreTutorial"]
+        XCTAssertTrue(previewButton.waitForExistence(timeout: 5))
+        previewButton.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.homeFishIntro"].waitForExistence(timeout: 5))
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.homeIntro)
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.homePointsIntro"].waitForExistence(timeout: 2))
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.homePoints)
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.homeStudySummaryIntro"].waitForExistence(timeout: 2))
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.homeStudySummary)
+        advanceConversation(in: app, pageCount: 1)
+        waitForConversationReady(in: app)
+        app.buttons["home.startStudy"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studyModeIntro"].waitForExistence(timeout: 5))
+        sleep(1)
+        let previewStudyButtonY = app.buttons["timer.startStudy"].frame.minY
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.studyMode)
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studySettingsIntro"].waitForExistence(timeout: 2))
+        sleep(1)
+        XCTAssertEqual(app.buttons["timer.startStudy"].frame.minY, previewStudyButtonY, accuracy: 1)
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.studySettings)
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studyStartPrompt"].waitForExistence(timeout: 2))
+        advanceConversation(in: app, pageCount: 2)
+        waitForConversationReady(in: app)
+        app.buttons["timer.startStudy"].tap()
+
+        XCTAssertTrue(app.buttons["報酬を見る"].waitForExistence(timeout: 5))
+        app.buttons["報酬を見る"].tap()
+        XCTAssertTrue(app.buttons["閉じる"].waitForExistence(timeout: 5))
+        app.buttons["閉じる"].tap()
+        let tapPrompt = app.staticTexts["fishReward.tapPrompt"]
+        XCTAssertTrue(tapPrompt.waitForExistence(timeout: 5))
+        tapPrompt.tap()
+        XCTAssertTrue(app.staticTexts["fishReward.getMessage"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["fishReward.newBadge"].exists)
+        app.buttons["fishReward.close"].tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.openAquarium"].waitForExistence(timeout: 5))
+        advanceConversation(
+            in: app,
+            pageCount: CoreTutorialConversationPageCount.rewardFollowUp - 1
+        )
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.aquariumTabPrompt"].waitForExistence(timeout: 3))
+        tapPresentedButton(in: app, identifier: "mainTab.aquarium")
+        advanceConversation(in: app, pageCount: 2)
+        waitForConversationReady(in: app)
+        app.buttons["aquariumEditor.start"].tap()
+        let editAlert = app.alerts["水槽を編集しますか？"]
+        XCTAssertTrue(editAlert.waitForExistence(timeout: 3))
+        editAlert.buttons["編集する"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.ghostHand"].waitForExistence(timeout: 5))
+
+        let clownfishHandle = app.images
+            .matching(identifier: "aquariumEditor.fish.clownfish")
+            .matching(NSPredicate(format: "label == %@", "クマノミ"))
+            .firstMatch
+        XCTAssertTrue(clownfishHandle.waitForExistence(timeout: 5))
+        let destination = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            .withOffset(CGVector(dx: 100, dy: clownfishHandle.frame.midY))
+        clownfishHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.2, thenDragTo: destination)
+
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.savePrompt"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["coreTutorial.ghostHand"].exists)
+        advanceConversation(in: app, pageCount: 1)
+        waitForConversationReady(in: app)
+        app.buttons["aquariumEditor.done"].tap()
+        XCTAssertTrue(app.buttons["保存する"].waitForExistence(timeout: 3))
+        app.buttons["保存する"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.returnHome"].waitForExistence(timeout: 5))
+        advanceConversation(
+            in: app,
+            pageCount: CoreTutorialConversationPageCount.aquariumReturnHome - 1
+        )
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.homeTabPrompt"].waitForExistence(timeout: 3))
+        tapPresentedButton(in: app, identifier: "mainTab.home")
+        advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.finishing)
+        XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
+        app.buttons["coreTutorialPreview.exit"].tap()
+
+        XCTAssertTrue(previewButton.waitForExistence(timeout: 5))
+        app.buttons["mainTab.home"].tap()
+        XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
+        XCTAssertEqual(
+            dashboardIDs.map { app.descendants(matching: .any)[$0].label },
+            dashboardBeforePreview
+        )
+        XCTAssertFalse(app.descendants(matching: .any)["coreTutorial.homeFishIntro"].exists)
+
+        app.buttons["mainTab.more"].tap()
+        XCTAssertTrue(app.buttons["rewardPreview.coreTutorial"].waitForExistence(timeout: 5))
+        app.buttons["rewardPreview.coreTutorial"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.homeFishIntro"].waitForExistence(timeout: 5))
+        app.buttons["coreTutorialPreview.exit"].tap()
+        XCTAssertTrue(app.buttons["rewardPreview.coreTutorial"].waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -512,6 +783,61 @@ final class PomodoroAquariumUITests: XCTestCase {
         for _ in 0..<count {
             coordinate.tap()
         }
+    }
+
+    @MainActor
+    private func tapPresentedButton(
+        in app: XCUIApplication,
+        identifier: String,
+        timeout: TimeInterval = 3
+    ) {
+        let query = app.buttons.matching(identifier: identifier)
+        let deadline = Date().addingTimeInterval(timeout)
+
+        repeat {
+            let count = query.count
+            if count > 0 {
+                // Previewは本番画面の上にMainTabViewを表示するため同じidentifierが2つある。
+                // accessibility treeの末尾にある、前面Preview側の実Button座標をtapする。
+                let button = query.element(boundBy: count - 1)
+                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        } while Date() < deadline
+
+        XCTFail("No presented button found for \(identifier)")
+    }
+
+    @MainActor
+    private func advanceConversation(in app: XCUIApplication, pageCount: Int) {
+        for _ in 0..<pageCount {
+            let card = waitForConversationReady(in: app)
+            card.tap()
+            Thread.sleep(forTimeInterval: 0.22)
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    private func waitForConversationReady(in app: XCUIApplication) -> XCUIElement {
+        // Spotlightのstep要素が会話カードのaccessibility valueを持つため、
+        // 固定identifierではなく会話状態で現在のカードを取得する。
+        let card = app.descendants(matching: .any)
+            .matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND (value == %@ OR value == %@)",
+                "coreTutorial.",
+                "入力中",
+                "全文表示済み"
+            ))
+            .firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        let ready = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "全文表示済み"),
+            object: card
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 4), .completed)
+        return card
     }
 
     private func repeatedlyTap(

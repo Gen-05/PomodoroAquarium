@@ -6,6 +6,31 @@ import Testing
 
 @MainActor
 struct AquariumSideEditorTests {
+    @Test func fishEditorListsOnlyOwnedSpeciesInCatalogOrder() {
+        let ownedFish = [
+            PlayerFish(species: .manta),
+            PlayerFish(species: .clownfish),
+            PlayerFish(species: .manta)
+        ]
+
+        let visibleSpecies = AquariumFishEditorPresentation.ownedSpecies(from: ownedFish)
+
+        #expect(visibleSpecies == FishSpecies.allCases.filter {
+            $0 == .clownfish || $0 == .manta
+        })
+        #expect(!visibleSpecies.contains(.pufferfish))
+        #expect(!visibleSpecies.contains(.seahorse))
+    }
+
+    @Test func fishEditorHasNoZeroOwnedRows() {
+        #expect(AquariumFishEditorPresentation.ownedSpecies(from: []).isEmpty)
+        #expect(
+            AquariumFishEditorPresentation.ownedSpecies(
+                from: [PlayerFish(species: .clownfish)]
+            ) == [.clownfish]
+        )
+    }
+
     @Test func viewingControlsAutoHideIsLimitedToAquariumViewing() {
         #expect(AquariumViewingControlsPolicy.autoHideDelay == 4)
         #expect(AquariumViewingControlsPolicy.isEnabled(selectedTab: .aquarium, tabMode: .viewing))

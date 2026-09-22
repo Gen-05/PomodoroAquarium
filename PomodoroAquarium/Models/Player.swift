@@ -16,6 +16,11 @@ class Player {
     var activeAquariumFishIDs: [UUID] = []
     /// `activeAquariumFishIDs.isEmpty`を「未移行」と「0匹選択済み」の判定に兼用しないためのフラグ。
     var hasInitializedActiveAquariumFish = false
+    /// Core Tutorial報酬は通常抽選と独立し、同一トランザクションで重複を防ぐ。
+    var hasGrantedCoreTutorialReward = false
+    var coreTutorialRewardFishID: UUID?
+    var hasGrantedCoreTutorialPoints = false
+    var hasSavedCoreTutorialAquarium = false
     
     var totalStudyMinutes = 0
     var todayStudyMinutes = 0
@@ -32,6 +37,10 @@ class Player {
         favoriteFish: PlayerFish? = nil,
         activeAquariumFishIDs: [UUID] = [],
         hasInitializedActiveAquariumFish: Bool = false,
+        hasGrantedCoreTutorialReward: Bool = false,
+        coreTutorialRewardFishID: UUID? = nil,
+        hasGrantedCoreTutorialPoints: Bool = false,
+        hasSavedCoreTutorialAquarium: Bool = false,
         totalStudyMinutes: Int = 0,
         todayStudyMinutes: Int = 0,
         yesterdayStudyMinutes: Int = 0,
@@ -46,6 +55,10 @@ class Player {
         self.favoriteFish = favoriteFish
         self.activeAquariumFishIDs = activeAquariumFishIDs
         self.hasInitializedActiveAquariumFish = hasInitializedActiveAquariumFish
+        self.hasGrantedCoreTutorialReward = hasGrantedCoreTutorialReward
+        self.coreTutorialRewardFishID = coreTutorialRewardFishID
+        self.hasGrantedCoreTutorialPoints = hasGrantedCoreTutorialPoints
+        self.hasSavedCoreTutorialAquarium = hasSavedCoreTutorialAquarium
         self.totalStudyMinutes = totalStudyMinutes
         self.todayStudyMinutes = todayStudyMinutes
         self.yesterdayStudyMinutes = yesterdayStudyMinutes

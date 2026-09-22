@@ -76,6 +76,29 @@ enum MainTabNavigationPolicy {
     }
 }
 
+enum CoreTutorialTabInteractionPolicy {
+    static func canSelect(
+        _ tab: MainAppTab,
+        step: CoreTutorialStep,
+        conversationIndex: Int,
+        selectedTab: MainAppTab
+    ) -> Bool {
+        if step == .aquariumIntro,
+           selectedTab == .home,
+           conversationIndex == CoreTutorialConversationScript.rewardFollowUp.count - 1 {
+            return tab == .aquarium
+        }
+
+        if step == .finishing,
+           selectedTab == .aquarium,
+           conversationIndex == CoreTutorialConversationScript.aquariumReturnHome.count - 1 {
+            return tab == .home
+        }
+
+        return false
+    }
+}
+
 enum MainTabBarHitShieldLayout {
     static let tabBarHeight: CGFloat = 54
     static let upperOverflow: CGFloat = 32
@@ -140,11 +163,27 @@ struct MainTabView: View {
     @State private var homeNavigationResetRequestID: UUID?
     @State private var areAquariumViewingControlsVisible = true
     @State private var aquariumViewingControlsAutoHideTask: Task<Void, Never>?
+    @State private var coreTutorial: CoreTutorialCoordinator
+    @State private var showsCoreTutorialCompletion = false
+    @State private var hasReconciledCoreTutorial = false
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let appDefaults: UserDefaults
+    private let coreTutorialMode: CoreTutorialMode
+    private let onCoreTutorialPreviewFinished: () -> Void
 
-    init() {
-        let defaults = UserDefaults.standard
+    init(
+        coreTutorialMode: CoreTutorialMode = .production,
+        defaults: UserDefaults = .standard,
+        timerSessionStore: TimerSessionStore? = nil,
+        notificationService: TimerNotificationScheduling? = nil,
+        onCoreTutorialPreviewFinished: @escaping () -> Void = {}
+    ) {
+        let resolvedSessionStore = timerSessionStore ?? (
+            coreTutorialMode == .production
+                ? TimerSessionStore.shared
+                : TimerSessionStore(defaults: defaults)
+        )
         let studyMinutes = Int(defaults.string(
             forKey: TimerConfigurationStorageKey.studyTime
         ) ?? "") ?? 25
@@ -158,8 +197,19 @@ struct MainTabView: View {
                 preferredMinutes: preferredBreakMinutes,
                 setCount: setCount
             ),
-            totalSets: setCount
+            totalSets: setCount,
+            now: Date.init,
+            sessionStore: resolvedSessionStore,
+            notificationService: notificationService ?? NotificationService.appDefault
         ))
+        _coreTutorial = State(initialValue: CoreTutorialCoordinator(
+            mode: coreTutorialMode,
+            defaults: defaults,
+            timerSessionStore: resolvedSessionStore
+        ))
+        self.appDefaults = defaults
+        self.coreTutorialMode = coreTutorialMode
+        self.onCoreTutorialPreviewFinished = onCoreTutorialPreviewFinished
     }
 
     private var player: Player? { players.first }
@@ -185,7 +235,20 @@ struct MainTabView: View {
                                 for: .home,
                                 selectedTab: tabSelectionState.selection
                             ),
-                        homeNavigationResetRequestID: homeNavigationResetRequestID
+                        homeNavigationResetRequestID: homeNavigationResetRequestID,
+                        appDefaults: appDefaults,
+                        coreTutorial: coreTutorial,
+                        showsCoreTutorialCompletion: showsCoreTutorialCompletion,
+                        coreTutorialCompletionButtonTitle: coreTutorialMode == .preview
+                            ? "プレビュー終了"
+                            : "はじめる",
+                        onDismissCoreTutorialCompletion: {
+                            if coreTutorialMode == .preview {
+                                onCoreTutorialPreviewFinished()
+                            } else {
+                                showsCoreTutorialCompletion = false
+                            }
+                        }
                     )
                     .toolbarVisibility(.hidden, for: .tabBar)
                 } label: {
@@ -210,7 +273,9 @@ struct MainTabView: View {
                             )
                         },
                         areAquariumViewingControlsVisible: areAquariumViewingControlsVisible,
-                        onAquariumViewingInteraction: showAndScheduleAquariumViewingControls
+                        onAquariumViewingInteraction: showAndScheduleAquariumViewingControls,
+                        appDefaults: appDefaults,
+                        coreTutorial: coreTutorial
                     )
                     .toolbarVisibility(.hidden, for: .tabBar)
                 } label: {
@@ -255,6 +320,14 @@ struct MainTabView: View {
                         value: shouldShowBottomTabBar
                     )
             }
+            .overlayPreferenceValue(CoreTutorialTargetPreferenceKey.self) { targets in
+                GeometryReader { tutorialGeometry in
+                    coreTutorialTabOverlay(
+                        geometry: tutorialGeometry,
+                        targets: targets
+                    )
+                }
+            }
             .overlay(alignment: .bottom) {
                 if MainTabBarHitShieldLayout.isActive(
                     whileStudyLocked: timerViewModel.locksMainTabNavigation
@@ -290,6 +363,12 @@ struct MainTabView: View {
             .onDisappear {
                 aquariumViewingControlsAutoHideTask?.cancel()
                 aquariumViewingControlsAutoHideTask = nil
+            }
+            .onAppear {
+                reconcileCoreTutorialIfNeeded()
+            }
+            .onChange(of: players.count) { _, _ in
+                reconcileCoreTutorialIfNeeded()
             }
         }
     }
@@ -336,12 +415,26 @@ struct MainTabView: View {
                 .disabled(!MainTabNavigationPolicy.canSelect(
                     tab,
                     whileStudyLocked: timerViewModel.locksMainTabNavigation
-                ))
+                ) || !coreTutorialAllowsSelecting(tab))
+                .accessibilityHidden(coreTutorial.isActive && !coreTutorialAllowsSelecting(tab))
                 .accessibilityLabel(tab.title)
                 .accessibilityIdentifier(tab.accessibilityIdentifier)
                 .accessibilityAddTraits(
                     tabSelectionState.selection == tab ? .isSelected : []
                 )
+                .anchorPreference(
+                    key: CoreTutorialTargetPreferenceKey.self,
+                    value: .bounds
+                ) { anchor in
+                    switch tab {
+                    case .home:
+                        [.homeTab: anchor]
+                    case .aquarium:
+                        [.aquariumTab: anchor]
+                    default:
+                        [:]
+                    }
+                }
             }
         }
         .frame(height: MainTabBarHitShieldLayout.tabBarHeight)
@@ -355,7 +448,11 @@ struct MainTabView: View {
     }
 
     private var isAquariumViewingControlsAutoHideActive: Bool {
-        AquariumViewingControlsPolicy.isEnabled(
+        if coreTutorial.isActive,
+           coreTutorial.step == .aquariumIntro || coreTutorial.step == .finishing {
+            return false
+        }
+        return AquariumViewingControlsPolicy.isEnabled(
             selectedTab: tabSelectionState.selection,
             tabMode: aquariumEditorNavigation.tabMode
         )
@@ -410,6 +507,7 @@ struct MainTabView: View {
 
     @discardableResult
     private func requestTabSelection(_ requestedTab: MainAppTab) -> Bool {
+        guard coreTutorialAllowsSelecting(requestedTab) else { return false }
         let isStudyLocked = timerViewModel.locksMainTabNavigation
         guard MainTabNavigationPolicy.canSelect(
             requestedTab,
@@ -450,12 +548,74 @@ struct MainTabView: View {
            aquariumEditorNavigation.tabMode == .editing {
             aquariumEditorNavigation.finishSession()
         }
+        let previousTab = tabSelectionState.selection
         aquariumEditorNavigation.continueEditing()
         let didSelect = tabSelectionState.select(requestedTab, whileStudyLocked: false)
         if didSelect {
+            if previousTab == .home,
+               requestedTab == .aquarium,
+               coreTutorial.step == .aquariumIntro,
+               coreTutorial.conversationIndex == CoreTutorialConversationScript.rewardFollowUp.count - 1 {
+                coreTutorial.didSelectAquariumTab()
+            } else if previousTab == .aquarium,
+                      requestedTab == .home,
+                      coreTutorial.step == .finishing,
+                      coreTutorial.conversationIndex == CoreTutorialConversationScript.aquariumReturnHome.count - 1 {
+                coreTutorial.didSelectHomeTabAfterAquarium()
+            }
             updateAquariumViewingControlsAutoHide()
         }
         return didSelect
+    }
+
+    private func reconcileCoreTutorialIfNeeded() {
+        guard !hasReconciledCoreTutorial, let player else { return }
+        coreTutorial.reconcile(with: player)
+        hasReconciledCoreTutorial = true
+    }
+
+    private func coreTutorialAllowsSelecting(_ tab: MainAppTab) -> Bool {
+        guard coreTutorial.isActive else { return true }
+        return CoreTutorialTabInteractionPolicy.canSelect(
+            tab,
+            step: coreTutorial.step,
+            conversationIndex: coreTutorial.conversationIndex,
+            selectedTab: tabSelectionState.selection
+        )
+    }
+
+    @ViewBuilder
+    private func coreTutorialTabOverlay(
+        geometry: GeometryProxy,
+        targets: [CoreTutorialTarget: Anchor<CGRect>]
+    ) -> some View {
+        if coreTutorial.isActive,
+           coreTutorial.step == .aquariumIntro,
+           tabSelectionState.selection == .home,
+           coreTutorial.conversationIndex == CoreTutorialConversationScript.rewardFollowUp.count - 1 {
+            CoreTutorialSpotlightStep(
+                targetFrame: targets[.aquariumTab].map { geometry[$0] },
+                page: CoreTutorialConversationScript.rewardFollowUp.last!,
+                pageIndex: coreTutorial.conversationIndex,
+                showsPointingHand: true,
+                allowsConversationAdvance: false,
+                allowsTargetInteraction: true,
+                accessibilityIdentifier: "coreTutorial.aquariumTabPrompt"
+            )
+        } else if coreTutorial.isActive,
+                  coreTutorial.step == .finishing,
+                  tabSelectionState.selection == .aquarium,
+                  coreTutorial.conversationIndex == CoreTutorialConversationScript.aquariumReturnHome.count - 1 {
+            CoreTutorialSpotlightStep(
+                targetFrame: targets[.homeTab].map { geometry[$0] },
+                page: CoreTutorialConversationScript.aquariumReturnHome.last!,
+                pageIndex: coreTutorial.conversationIndex,
+                showsPointingHand: true,
+                allowsConversationAdvance: false,
+                allowsTargetInteraction: true,
+                accessibilityIdentifier: "coreTutorial.homeTabPrompt"
+            )
+        }
     }
 }
 

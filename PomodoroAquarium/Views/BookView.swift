@@ -46,7 +46,6 @@ struct BookView: View {
     var body: some View {
         List(FishSpecies.allCases) { species in
             let ownedCount = Self.ownedCount(for: species, in: player)
-            let isFavorite = player?.favoriteFish?.species == species
 
             NavigationLink {
                 FishDetailView(species: species, player: player)
@@ -90,12 +89,6 @@ struct BookView: View {
                     }
 
                     Spacer()
-
-                    if isFavorite {
-                        Label("お気に入り", systemImage: "star.fill")
-                            .font(.caption)
-                            .foregroundStyle(.yellow)
-                    }
                 }
             }
             .disabled(ownedCount == 0)

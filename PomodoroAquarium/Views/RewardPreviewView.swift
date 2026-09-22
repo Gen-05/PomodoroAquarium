@@ -1,5 +1,6 @@
 #if DEBUG
 import SwiftUI
+import SwiftData
 
 struct RewardPreviewCatalog {
     struct Item: Identifiable {
@@ -41,6 +42,8 @@ struct RewardPreviewView: View {
     @State private var previewsNewFish = true
     @State private var showsOnboardingPreview = false
     @State private var onboardingPreviewSessionID = UUID()
+    @State private var showsCoreTutorialPreview = false
+    @State private var coreTutorialPreviewSessionID = UUID()
 
     var body: some View {
         List {
@@ -92,8 +95,16 @@ struct RewardPreviewView: View {
                     Label("Onboarding Preview", systemImage: "rectangle.on.rectangle")
                 }
                 .accessibilityIdentifier("rewardPreview.onboarding")
+
+                Button {
+                    coreTutorialPreviewSessionID = UUID()
+                    showsCoreTutorialPreview = true
+                } label: {
+                    Label("Core Tutorial Preview", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
+                }
+                .accessibilityIdentifier("rewardPreview.coreTutorial")
             } footer: {
-                Text("全3ページを確認できます。初回起動の完了状態は変更しません。")
+                Text("OnboardingとCore Tutorialを確認できます。本番の完了状態やPlayerDataは変更しません。")
             }
         }
         .navigationTitle("Reward Preview")
@@ -106,6 +117,83 @@ struct RewardPreviewView: View {
             }
             .id(onboardingPreviewSessionID)
         }
+        .fullScreenCover(isPresented: $showsCoreTutorialPreview) {
+            CoreTutorialPreviewHost {
+                showsCoreTutorialPreview = false
+            }
+            .id(coreTutorialPreviewSessionID)
+        }
+    }
+}
+
+private struct CoreTutorialPreviewHost: View {
+    let onFinish: () -> Void
+
+    private let suiteName: String
+    private let defaults: UserDefaults
+    private let sessionStore: TimerSessionStore
+
+    init(onFinish: @escaping () -> Void) {
+        let suiteName = "CoreTutorialPreview.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName) ?? UserDefaults()
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set("25", forKey: TimerConfigurationStorageKey.studyTime)
+        defaults.set("5", forKey: TimerConfigurationStorageKey.breakTime)
+        defaults.set(
+            PomodoroBreakConfiguration.defaultSetCount,
+            forKey: TimerConfigurationStorageKey.pomodoroSetCount
+        )
+        defaults.set(true, forKey: OnboardingStore.storageKey)
+
+        self.onFinish = onFinish
+        self.suiteName = suiteName
+        self.defaults = defaults
+        self.sessionStore = TimerSessionStore(
+            defaults: defaults,
+            processIdentifier: "core-tutorial-preview"
+        )
+    }
+
+    var body: some View {
+        MainTabView(
+            coreTutorialMode: .preview,
+            defaults: defaults,
+            timerSessionStore: sessionStore,
+            notificationService: DisabledTimerNotificationService.shared,
+            onCoreTutorialPreviewFinished: finish
+        )
+        .defaultAppStorage(defaults)
+        .modelContainer(
+            for: [
+                Player.self,
+                PlayerFish.self,
+                AquariumDecorationPlacement.self,
+                StudyDailyRecord.self
+            ],
+            inMemory: true
+        )
+        .overlay(alignment: .top) {
+            Button(action: finish) {
+                Label("プレビュー終了", systemImage: "xmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
+            .accessibilityIdentifier("coreTutorialPreview.exit")
+        }
+        .onDisappear(perform: clearTemporaryDefaults)
+    }
+
+    private func finish() {
+        clearTemporaryDefaults()
+        onFinish()
+    }
+
+    private func clearTemporaryDefaults() {
+        defaults.removePersistentDomain(forName: suiteName)
     }
 }
 

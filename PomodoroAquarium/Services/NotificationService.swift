@@ -172,7 +172,7 @@ final class NotificationService: NSObject, TimerNotificationScheduling,
 
 }
 
-private final class DisabledTimerNotificationService: TimerNotificationScheduling {
+final class DisabledTimerNotificationService: TimerNotificationScheduling {
     static let shared = DisabledTimerNotificationService()
 
     var notificationsEnabled: Bool { false }

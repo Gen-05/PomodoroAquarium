@@ -154,10 +154,6 @@ struct FishDetailView: View {
         BookView.ownedCount(for: species, in: player)
     }
 
-    private var isFavorite: Bool {
-        player?.favoriteFish?.species == species
-    }
-
     var body: some View {
         ScrollView {
             VStack(spacing: 28) {
@@ -193,26 +189,6 @@ struct FishDetailView: View {
                 .padding(20)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20))
 
-                if isFavorite {
-                    Label("現在の水槽表示魚", systemImage: "star.fill")
-                        .font(.headline)
-                        .foregroundStyle(.yellow)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 15)
-                        .background(Color.yellow.opacity(0.12), in: Capsule())
-                } else {
-                    Button {
-                        if let player {
-                            BookView.setFavorite(species, for: player)
-                        }
-                    } label: {
-                        Label("お気に入りに設定", systemImage: "star")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(player == nil || ownedCount == 0)
-                }
             }
             .padding()
         }

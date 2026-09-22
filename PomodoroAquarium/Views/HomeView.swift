@@ -13,6 +13,40 @@ enum HomeViewMode {
     case aquariumEditor
 }
 
+private enum HomeStatusRowLayout {
+    static let spacing: CGFloat = 8
+    static let cardHeight: CGFloat = 36
+    static let cornerRadius: CGFloat = 13
+    static let sideWidthRatio: CGFloat = 0.25
+}
+
+private extension View {
+    func homeStatusGlass() -> some View {
+        background {
+            RoundedRectangle(
+                cornerRadius: HomeStatusRowLayout.cornerRadius,
+                style: .continuous
+            )
+            .fill(.ultraThinMaterial)
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: HomeStatusRowLayout.cornerRadius,
+                    style: .continuous
+                )
+                .fill(.cyan.opacity(0.1))
+            }
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: HomeStatusRowLayout.cornerRadius,
+                    style: .continuous
+                )
+                .stroke(.white.opacity(0.5), lineWidth: 1)
+            }
+            .shadow(color: .cyan.opacity(0.1), radius: 5, y: 2)
+        }
+    }
+}
+
 struct HomeView: View {
     let timerViewModel: TimerViewModel
     var mode: HomeViewMode = .home
@@ -23,6 +57,11 @@ struct HomeView: View {
     var areAquariumViewingControlsVisible = true
     var onAquariumViewingInteraction: () -> Void = {}
     var homeNavigationResetRequestID: UUID?
+    var appDefaults: UserDefaults = .standard
+    var coreTutorial: CoreTutorialCoordinator?
+    var showsCoreTutorialCompletion = false
+    var coreTutorialCompletionButtonTitle = "はじめる"
+    var onDismissCoreTutorialCompletion: () -> Void = {}
     
     @AppStorage("studyTime") private var studyTime = "25"
     @AppStorage("breakTime") private var breakTime = "5"
@@ -67,6 +106,24 @@ struct HomeView: View {
     
     private var player: Player? {
         players.first
+    }
+
+    private var isHomeStartTutorialInteractionAllowed: Bool {
+        coreTutorial?.isActive == true &&
+            coreTutorial?.step == .waitingForHomeStartTap &&
+            coreTutorial?.conversationIndex == CoreTutorialConversationScript.homeStart.count - 1
+    }
+
+    private var isAquariumEditTutorialInteractionAllowed: Bool {
+        coreTutorial?.isActive == true &&
+            coreTutorial?.step == .aquariumIntro &&
+            coreTutorial?.conversationIndex == CoreTutorialConversationScript.aquariumIntro.count - 1
+    }
+
+    private var isAquariumDoneTutorialInteractionAllowed: Bool {
+        coreTutorial?.isActive == true &&
+            coreTutorial?.step == .waitingForAquariumSave &&
+            coreTutorial?.conversationIndex == CoreTutorialConversationScript.aquariumSave.count - 1
     }
 
     private var storedDecorations: [AquariumDecorationPlacement] {
@@ -141,6 +198,7 @@ struct HomeView: View {
                             aquariumSize: aquariumSize
                         )
                     }
+                    .accessibilityHidden(coreTutorial?.isActive == true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .animation(.easeInOut(duration: 0.22), value: isAquariumEditorPresented)
 
@@ -156,6 +214,7 @@ struct HomeView: View {
                             }
                             .accessibilityElement()
                             .accessibilityLabel("水槽")
+                            .accessibilityHidden(coreTutorial?.isActive == true)
                             .accessibilityIdentifier("aquariumViewing.tapSurface")
                             .zIndex(15)
 
@@ -202,7 +261,8 @@ struct HomeView: View {
                                 finishEditing: finishAquariumEditing,
                                 collapse: collapseEditorPanel,
                                 showTutorial: showAquariumEditorTutorial,
-                                showsFinishButton: mode != .aquariumEditor
+                                showsFinishButton: mode != .aquariumEditor,
+                                isCoreTutorialActive: coreTutorial?.isActive == true
                             )
                             .frame(height: geometry.size.height)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -240,11 +300,21 @@ struct HomeView: View {
                             Spacer()
                         }
                         .padding(.horizontal, 24)
-                        .zIndex(40)
+                            .zIndex(40)
                     }
+
                 }
                 .coordinateSpace(name: AquariumEditorCoordinateSpace.name)
                 .animation(.easeInOut(duration: 0.22), value: isEditorPanelExpanded)
+                .overlayPreferenceValue(CoreTutorialTargetPreferenceKey.self) { targets in
+                    coreTutorialOverlay(
+                        geometry: geometry,
+                        aquariumWidth: aquariumWidth,
+                        editorWidth: editorWidth,
+                        targets: targets
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
@@ -253,14 +323,16 @@ struct HomeView: View {
                     studyTime: Int(studyTime) ?? 25,
                     breakTime: Int(breakTime) ?? 5,
                     player: player,
-                    viewModel: timerViewModel
+                    viewModel: timerViewModel,
+                    coreTutorial: coreTutorial,
+                    defaults: appDefaults
                 )
             }
         }
         .onAppear {
             if mode == .home {
                 inspectPersistedTimerSession()
-                DailyFishAcquisitionStore.resetIfNeeded()
+                DailyFishAcquisitionStore.resetIfNeeded(defaults: appDefaults)
             }
             let now = Date()
             let calendar = Calendar.current
@@ -278,7 +350,6 @@ struct HomeView: View {
             if AquariumFishSelection.initializeIfNeeded(for: currentPlayer) {
                 try? modelContext.save()
             }
-
             if lastStudyDate.isEmpty {
                 lastStudyDate = today
             } else if let lastDate = DateFormatter.yyyyMMdd.date(from: lastStudyDate),
@@ -326,6 +397,10 @@ struct HomeView: View {
                !activeFishIDs.contains(selectedAquariumFishID) {
                 self.selectedAquariumFishID = nil
             }
+            coreTutorial?.didObserveActiveFishIDs(
+                activeFishIDs,
+                tutorialFishID: coreTutorial?.tutorialFishID(in: player)
+            )
         }
         .onChange(of: isAquariumEditorActive) { _, isActive in
             if !isActive, !hasUnsavedAquariumEditorChanges {
@@ -361,11 +436,13 @@ struct HomeView: View {
             Button("保存する") {
                 saveAquariumEditorSession()
             }
-            Button("変更を破棄", role: .destructive) {
-                discardAquariumEditorSession(closeEditor: true)
-            }
-            Button("編集を続ける", role: .cancel) {
-                continueAquariumEditing()
+            if coreTutorial?.isActive != true {
+                Button("変更を破棄", role: .destructive) {
+                    discardAquariumEditorSession(closeEditor: true)
+                }
+                Button("編集を続ける", role: .cancel) {
+                    continueAquariumEditing()
+                }
             }
         }
     }
@@ -377,6 +454,10 @@ struct HomeView: View {
             Spacer(minLength: 24)
 
             Button {
+                guard coreTutorial?.isActive != true || isHomeStartTutorialInteractionAllowed else {
+                    return
+                }
+                coreTutorial?.didTapHomeStart()
                 showsTimerScreen = true
             } label: {
                 Label(
@@ -389,6 +470,11 @@ struct HomeView: View {
             }
             .buttonStyle(AquariumStudyStartButtonStyle())
             .frame(maxWidth: 290)
+            .coreTutorialTarget(.homeStart)
+            .disabled(
+                coreTutorial?.isActive == true && !isHomeStartTutorialInteractionAllowed
+            )
+            .accessibilityHidden(coreTutorial?.isActive == true && !isHomeStartTutorialInteractionAllowed)
             .accessibilityIdentifier("home.startStudy")
 
             Spacer(minLength: 24)
@@ -400,47 +486,67 @@ struct HomeView: View {
     }
 
     private var homeStatusRow: some View {
-        HStack(alignment: .top, spacing: 8) {
-            dailyFishProgress
+        GeometryReader { geometry in
+            let availableWidth = max(
+                geometry.size.width - HomeStatusRowLayout.spacing * 2,
+                0
+            )
+            let sideWidth = availableWidth * HomeStatusRowLayout.sideWidthRatio
+            let centerWidth = availableWidth - sideWidth * 2
 
-            Spacer(minLength: 2)
+            HStack(spacing: HomeStatusRowLayout.spacing) {
+                dailyFishProgress
+                    .frame(width: sideWidth, height: HomeStatusRowLayout.cardHeight)
 
-            VStack(spacing: 2) {
-                Text("今日 \(HomeDashboardPresentation.studyDurationText(minutes: player?.todayStudyMinutes ?? 0))")
-                    .accessibilityIdentifier("home.todayStudyMinutes")
-                Text("昨日 \(HomeDashboardPresentation.studyDurationText(minutes: player?.yesterdayStudyMinutes ?? 0))")
-                    .accessibilityIdentifier("home.yesterdayStudyMinutes")
+                HStack(spacing: 6) {
+                    Text("今日 \(HomeDashboardPresentation.studyDurationText(minutes: player?.todayStudyMinutes ?? 0))")
+                        .accessibilityIdentifier("home.todayStudyMinutes")
+
+                    Rectangle()
+                        .fill(.white.opacity(0.34))
+                        .frame(width: 1, height: 13)
+                        .accessibilityHidden(true)
+
+                    Text("昨日 \(HomeDashboardPresentation.studyDurationText(minutes: player?.yesterdayStudyMinutes ?? 0))")
+                        .accessibilityIdentifier("home.yesterdayStudyMinutes")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.24), radius: 1, y: 1)
+                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .padding(.horizontal, 7)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .homeStatusGlass()
+                .frame(width: centerWidth, height: HomeStatusRowLayout.cardHeight)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("home.studySummary")
+                .coreTutorialTarget(.studySummary)
+
+                HStack(spacing: 5) {
+                    Image(systemName: "circle.hexagongrid.fill")
+                    Text("\(CurrencyService.balance(of: player))")
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.yellow)
+                .shadow(color: .black.opacity(0.22), radius: 1, y: 1)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .homeStatusGlass()
+                .frame(width: sideWidth, height: HomeStatusRowLayout.cardHeight)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("所持コイン \(CurrencyService.balance(of: player))枚")
+                .accessibilityIdentifier("home.coinBalance")
+                .coreTutorialTarget(.coinBalance)
+                .allowsHitTesting(false)
             }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white)
-            .multilineTextAlignment(.center)
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .aquariumGlass(cornerRadius: 14)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("home.studySummary")
-
-            Spacer(minLength: 2)
-
-            HStack(spacing: 5) {
-                Image(systemName: "circle.hexagongrid.fill")
-                Text("\(CurrencyService.balance(of: player))")
-                    .monospacedDigit()
-            }
-            .font(.caption.weight(.bold))
-            .foregroundStyle(.yellow)
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 8)
-            .aquariumGlass(cornerRadius: 14)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("所持コイン \(CurrencyService.balance(of: player))枚")
-            .accessibilityIdentifier("home.coinBalance")
-            .allowsHitTesting(false)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
+        .frame(height: HomeStatusRowLayout.cardHeight)
     }
 
     private var dailyFishProgress: some View {
@@ -448,6 +554,8 @@ struct HomeView: View {
             Image(systemName: "fish.fill")
             Text("\(todayFishAcquisitionCount) / \(DailyFishAcquisitionPolicy.basicLimit)")
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
 
             Button {
                 showsDailyFishLimitInformation = true
@@ -457,20 +565,23 @@ struct HomeView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(coreTutorial?.isActive == true)
+            .accessibilityHidden(coreTutorial?.isActive == true)
             .accessibilityLabel("魚の獲得上限を増やす")
             .accessibilityIdentifier("home.increaseDailyFishLimit")
         }
         .font(.caption.weight(.bold))
         .foregroundStyle(.white)
-        .fixedSize(horizontal: true, vertical: false)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 7)
-        .aquariumGlass(cornerRadius: 14)
+        .shadow(color: .black.opacity(0.24), radius: 1, y: 1)
+        .padding(.horizontal, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .homeStatusGlass()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             "今日の魚獲得数 \(todayFishAcquisitionCount)匹、基本上限 \(DailyFishAcquisitionPolicy.basicLimit)匹"
         )
         .accessibilityIdentifier("home.dailyFishProgress")
+        .coreTutorialTarget(.dailyFish)
     }
 
     private var todayFishAcquisitionCount: Int {
@@ -493,8 +604,16 @@ struct HomeView: View {
         for item in items {
             switch item.kind {
             case .fish:
-                guard let player,
-                      AquariumEditorDropCoordinator.addFish(from: item, to: player) else {
+                guard let player else { continue }
+                let didAddFish: Bool
+                if item.fishSpecies == .clownfish,
+                   coreTutorial?.step == .waitingForFishPlacement,
+                   let tutorialFishID = coreTutorial?.tutorialFishID(in: player) {
+                    didAddFish = player.addFishToAquarium(playerFishID: tutorialFishID)
+                } else {
+                    didAddFish = AquariumEditorDropCoordinator.addFish(from: item, to: player)
+                }
+                guard didAddFish else {
                     continue
                 }
                 markAquariumEditorChanged()
@@ -542,6 +661,14 @@ struct HomeView: View {
             fishDragSession = nil
             return
         }
+        if coreTutorial?.isActive == true {
+            guard coreTutorial?.step == .waitingForFishPlacement,
+                  species == .clownfish else {
+                fishDragSession = nil
+                return
+            }
+        }
+        coreTutorial?.didStartFishDrag(species: species)
         fishDragSession = AquariumFishDragSession(species: species, location: location)
     }
 
@@ -554,13 +681,26 @@ struct HomeView: View {
         guard isAquariumEditorPresented,
               aquariumEditorCategory == .fish,
               fishDragSession?.species == species,
-              let player,
-              AquariumEditorDropCoordinator.completeFishDrag(
+              let player else { return }
+        if coreTutorial?.isActive == true {
+            guard coreTutorial?.step == .waitingForFishPlacement,
+                  species == .clownfish else { return }
+        }
+        let didAddFish: Bool
+        if species == .clownfish,
+           coreTutorial?.step == .waitingForFishPlacement,
+           let tutorialFishID = coreTutorial?.tutorialFishID(in: player),
+           AquariumSideEditorLayout.acceptsDrop(at: location, in: aquariumSize) {
+            didAddFish = player.addFishToAquarium(playerFishID: tutorialFishID)
+        } else {
+            didAddFish = AquariumEditorDropCoordinator.completeFishDrag(
                 species: species,
                 at: location,
                 aquariumSize: aquariumSize,
                 player: player
-              ) else { return }
+            )
+        }
+        guard didAddFish else { return }
         markAquariumEditorChanged()
     }
 
@@ -651,6 +791,12 @@ struct HomeView: View {
                         .shadow(color: .black.opacity(0.24), radius: 8, y: 4)
                 }
                 .buttonStyle(.plain)
+                .disabled(coreTutorial?.isActive == true)
+                .accessibilityHidden(coreTutorial?.isActive == true)
+                .coreTutorialHighlight(
+                    coreTutorial?.isActive == true &&
+                        coreTutorial?.step == .aquariumIntro
+                )
                 .accessibilityIdentifier("aquariumEditor.removeSelectedFish")
             }
             .padding(.bottom, AquariumSideEditorLayout.excludedDropBottomHeight + 8)
@@ -668,6 +814,9 @@ struct HomeView: View {
             HStack {
                 Spacer(minLength: 0)
                 Button {
+                    guard coreTutorial?.isActive != true || isAquariumEditTutorialInteractionAllowed else {
+                        return
+                    }
                     onAquariumViewingInteraction()
                     showsAquariumEditConfirmation = true
                 } label: {
@@ -681,6 +830,16 @@ struct HomeView: View {
                         .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
                 }
                 .buttonStyle(.plain)
+                .coreTutorialTarget(.aquariumEdit)
+                .coreTutorialHighlight(
+                    coreTutorial?.isActive == true &&
+                        coreTutorial?.step == .aquariumIntro &&
+                        coreTutorial?.conversationIndex == CoreTutorialConversationScript.aquariumIntro.count - 1
+                )
+                .disabled(
+                    coreTutorial?.isActive == true && !isAquariumEditTutorialInteractionAllowed
+                )
+                .accessibilityHidden(coreTutorial?.isActive == true && !isAquariumEditTutorialInteractionAllowed)
                 .accessibilityLabel("水槽を編集")
                 .accessibilityIdentifier("aquariumEditor.start")
             }
@@ -696,7 +855,12 @@ struct HomeView: View {
         if mode == .aquariumEditor {
             VStack {
                 HStack {
-                    Button(action: finishAquariumEditing) {
+                    Button {
+                        guard coreTutorial?.isActive != true || isAquariumDoneTutorialInteractionAllowed else {
+                            return
+                        }
+                        finishAquariumEditing()
+                    } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark.circle.fill")
                             Text("完了")
@@ -715,6 +879,15 @@ struct HomeView: View {
                         .shadow(color: .black.opacity(0.22), radius: 6, y: 3)
                     }
                     .buttonStyle(.plain)
+                    .coreTutorialTarget(.aquariumDone)
+                    .coreTutorialHighlight(
+                        coreTutorial?.step == .waitingForAquariumSave &&
+                            coreTutorial?.conversationIndex == CoreTutorialConversationScript.aquariumSave.count - 1
+                    )
+                    .disabled(
+                        coreTutorial?.isActive == true && !isAquariumDoneTutorialInteractionAllowed
+                    )
+                    .accessibilityHidden(coreTutorial?.isActive == true && !isAquariumDoneTutorialInteractionAllowed)
                     .accessibilityHint(
                         hasUnsavedAquariumEditorChanges
                             ? "保存、破棄、編集を続けるから選択します"
@@ -749,6 +922,8 @@ struct HomeView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(coreTutorial?.isActive == true)
+        .accessibilityHidden(coreTutorial?.isActive == true)
         .foregroundStyle(.primary)
         .background(.thinMaterial)
         .clipShape(
@@ -849,16 +1024,43 @@ struct HomeView: View {
         fishDragSession = nil
         decorationDragSession = nil
         isEditorPanelExpanded = true
-        showsAquariumEditorTutorial = !hasSeenAquariumEditorTutorial
+        showsAquariumEditorTutorial = coreTutorial?.isActive == true
+            ? false
+            : !hasSeenAquariumEditorTutorial
         aquariumEditorNavigation?.beginSession()
+        let tutorialFishID = coreTutorial?.tutorialFishID(in: player)
+        coreTutorial?.didEnterAquariumEditing(
+            tutorialFishIsActive: tutorialFishID.map {
+                player.activeAquariumFishIDs.contains($0)
+            } ?? false
+        )
     }
 
     private func saveAquariumEditorSession() {
         guard mode == .aquariumEditor else { return }
         let destination = aquariumEditorNavigation?.pendingTabSelection
         backgroundThemeRawValue = displayedBackgroundTheme.rawValue
-        try? modelContext.save()
-        endAquariumEditorSession(selecting: destination)
+        var markedTutorialAquariumSaved = false
+        do {
+            if let player,
+               coreTutorial?.step == .waitingForAquariumSave,
+               let fishID = player.coreTutorialRewardFishID,
+               player.activeAquariumFishIDs.contains(fishID) {
+                player.hasSavedCoreTutorialAquarium = true
+                markedTutorialAquariumSaved = true
+            }
+            try modelContext.save()
+            if let player,
+               coreTutorial?.step == .waitingForAquariumSave {
+                coreTutorial?.didSaveAquarium(with: player)
+            }
+            endAquariumEditorSession(selecting: destination)
+        } catch {
+            if markedTutorialAquariumSaved {
+                player?.hasSavedCoreTutorialAquarium = false
+            }
+            continueAquariumEditing()
+        }
     }
 
     private func discardAquariumEditorSession(closeEditor: Bool) {
@@ -874,6 +1076,10 @@ struct HomeView: View {
             draftBackgroundTheme = editorSessionSnapshot.backgroundTheme
             // SwiftDataのautosaveが途中で走っていても、破棄状態を正式値として戻す。
             try? modelContext.save()
+        }
+
+        if coreTutorial?.isActive == true {
+            coreTutorial?.didDiscardAquariumChanges()
         }
 
         if closeEditor {
@@ -930,6 +1136,216 @@ struct HomeView: View {
         } else {
             endAquariumEditorSession(selecting: nil)
         }
+    }
+
+    @ViewBuilder
+    private func coreTutorialOverlay(
+        geometry: GeometryProxy,
+        aquariumWidth: CGFloat,
+        editorWidth: CGFloat,
+        targets: [CoreTutorialTarget: Anchor<CGRect>]
+    ) -> some View {
+        if mode == .home, showsCoreTutorialCompletion {
+            Color.black.opacity(0.16)
+                .ignoresSafeArea()
+            CoreTutorialCoachCard(
+                title: "準備完了！",
+                message: "集中して魚を集め、自分だけの水族館を育てよう。",
+                buttonTitle: coreTutorialCompletionButtonTitle,
+                action: onDismissCoreTutorialCompletion
+            )
+            .padding(.horizontal, 24)
+            .accessibilityIdentifier("coreTutorial.completed")
+        } else if coreTutorial?.isActive == true {
+            switch (mode, coreTutorial?.step, isAquariumEditorPresented) {
+            case (.home, .homeIntro, _):
+                let pages = CoreTutorialConversationScript.homeIntro
+                let index = coreTutorial?.conversationIndex ?? 0
+                CoreTutorialSpotlightStep(
+                    targetFrame: index >= 3
+                        ? targetFrame(.dailyFish, in: geometry, targets: targets)
+                        : nil,
+                    page: coreTutorialConversationPage(in: pages, at: index),
+                    pageIndex: index,
+                    onConversationAdvance: {
+                        if coreTutorial?.advanceConversation(totalCount: pages.count) == true {
+                            coreTutorial?.dismissHomeIntro()
+                        }
+                    },
+                    accessibilityIdentifier: "coreTutorial.homeFishIntro"
+                )
+
+            case (.home, .homePointsIntro, _):
+                let pages = CoreTutorialConversationScript.homePoints
+                let index = coreTutorial?.conversationIndex ?? 0
+                CoreTutorialSpotlightStep(
+                    targetFrame: targetFrame(.coinBalance, in: geometry, targets: targets),
+                    page: coreTutorialConversationPage(in: pages, at: index),
+                    pageIndex: index,
+                    onConversationAdvance: {
+                        if coreTutorial?.advanceConversation(totalCount: pages.count) == true {
+                            coreTutorial?.dismissHomeIntro()
+                        }
+                    },
+                    accessibilityIdentifier: "coreTutorial.homePointsIntro"
+                )
+
+            case (.home, .homeStudySummaryIntro, _):
+                let pages = CoreTutorialConversationScript.homeStudySummary
+                let index = coreTutorial?.conversationIndex ?? 0
+                CoreTutorialSpotlightStep(
+                    targetFrame: targetFrame(.studySummary, in: geometry, targets: targets),
+                    page: coreTutorialConversationPage(in: pages, at: index),
+                    pageIndex: index,
+                    onConversationAdvance: {
+                        if coreTutorial?.advanceConversation(totalCount: pages.count) == true {
+                            coreTutorial?.dismissHomeIntro()
+                        }
+                    },
+                    accessibilityIdentifier: "coreTutorial.homeStudySummaryIntro"
+                )
+
+            case (.home, .waitingForHomeStartTap, _):
+                let pages = CoreTutorialConversationScript.homeStart
+                let index = coreTutorial?.conversationIndex ?? 0
+                CoreTutorialSpotlightStep(
+                    targetFrame: targetFrame(.homeStart, in: geometry, targets: targets),
+                    page: coreTutorialConversationPage(in: pages, at: index),
+                    pageIndex: index,
+                    showsPointingHand: index == pages.count - 1,
+                    allowsConversationAdvance: index < pages.count - 1,
+                    allowsTargetInteraction: index == pages.count - 1,
+                    onConversationAdvance: {
+                        _ = coreTutorial?.advanceConversation(totalCount: pages.count)
+                    },
+                    accessibilityIdentifier: "coreTutorial.homeStartPrompt"
+                )
+
+            case (.home, .aquariumIntro, _):
+                let pages = CoreTutorialConversationScript.rewardFollowUp
+                let index = coreTutorial?.conversationIndex ?? 0
+                if index < pages.count - 1 {
+                    CoreTutorialSpotlightStep(
+                        targetFrame: nil,
+                        page: coreTutorialConversationPage(in: pages, at: index),
+                        pageIndex: index,
+                        onConversationAdvance: {
+                            _ = coreTutorial?.advanceConversation(totalCount: pages.count)
+                        },
+                        accessibilityIdentifier: "coreTutorial.openAquarium"
+                    )
+                }
+
+            case (.aquariumEditor, .aquariumIntro, false):
+                let pages = CoreTutorialConversationScript.aquariumIntro
+                let index = coreTutorial?.conversationIndex ?? 0
+                CoreTutorialSpotlightStep(
+                    targetFrame: index == pages.count - 1
+                        ? targetFrame(.aquariumEdit, in: geometry, targets: targets)
+                        : nil,
+                    page: coreTutorialConversationPage(in: pages, at: index),
+                    pageIndex: index,
+                    showsPointingHand: index == pages.count - 1,
+                    allowsConversationAdvance: index < pages.count - 1,
+                    allowsTargetInteraction: index == pages.count - 1,
+                    onConversationAdvance: {
+                        _ = coreTutorial?.advanceConversation(totalCount: pages.count)
+                    },
+                    accessibilityIdentifier: "coreTutorial.aquariumEditPrompt"
+                )
+
+            case (.aquariumEditor, .waitingForFishPlacement, true):
+                let clownfishFrame = targetFrame(
+                    .tutorialClownfish,
+                    in: geometry,
+                    targets: targets
+                )
+                ZStack {
+                    CoreTutorialSpotlightStep(
+                        targetFrame: clownfishFrame,
+                        page: CoreTutorialConversationScript.fishPlacement[0],
+                        pageIndex: 0,
+                        allowsConversationAdvance: false,
+                        allowsTargetInteraction: true,
+                        accessibilityIdentifier: "coreTutorial.fishPlacementPrompt"
+                    )
+
+                    if coreTutorial?.shouldShowGhostHand == true {
+                        CoreTutorialGhostDragHint(
+                            start: clownfishFrame.map {
+                                CGPoint(x: $0.midX, y: $0.midY)
+                            } ?? CGPoint(
+                                x: geometry.size.width - editorWidth * 0.5,
+                                y: min(190, geometry.size.height * 0.27)
+                            ),
+                            end: CGPoint(
+                                x: aquariumWidth * 0.53,
+                                y: geometry.size.height * 0.46
+                            )
+                        )
+                    }
+                }
+
+            case (.aquariumEditor, .waitingForAquariumSave, true):
+                let pages = CoreTutorialConversationScript.aquariumSave
+                let index = coreTutorial?.conversationIndex ?? 0
+                CoreTutorialSpotlightStep(
+                    targetFrame: index == pages.count - 1
+                        ? targetFrame(.aquariumDone, in: geometry, targets: targets)
+                        : nil,
+                    page: coreTutorialConversationPage(in: pages, at: index),
+                    pageIndex: index,
+                    showsPointingHand: index == pages.count - 1,
+                    allowsConversationAdvance: index < pages.count - 1,
+                    allowsTargetInteraction: index == pages.count - 1,
+                    onConversationAdvance: {
+                        _ = coreTutorial?.advanceConversation(totalCount: pages.count)
+                    },
+                    accessibilityIdentifier: "coreTutorial.savePrompt"
+                )
+
+            case (.aquariumEditor, .finishing, false):
+                let pages = CoreTutorialConversationScript.aquariumReturnHome
+                let index = coreTutorial?.conversationIndex ?? 0
+                if index < pages.count - 1 {
+                    CoreTutorialSpotlightStep(
+                        targetFrame: nil,
+                        page: coreTutorialConversationPage(in: pages, at: index),
+                        pageIndex: index,
+                        onConversationAdvance: {
+                            _ = coreTutorial?.advanceConversation(totalCount: pages.count)
+                        },
+                        accessibilityIdentifier: "coreTutorial.returnHome"
+                    )
+                }
+
+            case (.home, .finishing, _):
+                let pages = CoreTutorialConversationScript.finishing
+                let index = coreTutorial?.conversationIndex ?? 0
+                CoreTutorialSpotlightStep(
+                    targetFrame: nil,
+                    page: coreTutorialConversationPage(in: pages, at: index),
+                    pageIndex: index,
+                    onConversationAdvance: {
+                        if coreTutorial?.advanceConversation(totalCount: pages.count) == true {
+                            coreTutorial?.complete()
+                        }
+                    },
+                    accessibilityIdentifier: "coreTutorial.finishing"
+                )
+
+            default:
+                EmptyView()
+            }
+        }
+    }
+
+    private func targetFrame(
+        _ target: CoreTutorialTarget,
+        in geometry: GeometryProxy,
+        targets: [CoreTutorialTarget: Anchor<CGRect>]
+    ) -> CGRect? {
+        targets[target].map { geometry[$0] }
     }
 
     private var decorationEditorControls: some View {

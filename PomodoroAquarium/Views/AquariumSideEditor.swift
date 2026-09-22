@@ -86,6 +86,7 @@ enum AquariumFishDragIntent: Equatable {
 
 enum AquariumFishDragInteraction {
     static let minimumDistance: CGFloat = 6
+    static let hitAreaExpansion: CGFloat = 16
 
     static func intent(for translation: CGSize) -> AquariumFishDragIntent {
         let horizontalDistance = abs(translation.width)
@@ -112,6 +113,14 @@ enum AquariumFishDragPresentation {
 
     static func frameDuration(for species: FishSpecies) -> TimeInterval {
         FishDetailStrokeAnimationState.frameDuration(for: species)
+    }
+}
+
+enum AquariumFishEditorPresentation {
+    static func ownedSpecies(from ownedFish: [PlayerFish]) -> [FishSpecies] {
+        FishSpecies.allCases.filter { species in
+            ownedFish.contains { $0.species == species }
+        }
     }
 }
 
@@ -226,6 +235,7 @@ struct AquariumSideEditor: View {
     let collapse: () -> Void
     let showTutorial: () -> Void
     var showsFinishButton = true
+    var isCoreTutorialActive = false
 
     private var contentWidth: CGFloat {
         max(panelWidth - AquariumSideEditorLayout.categoryTabWidth, 80)
@@ -242,6 +252,8 @@ struct AquariumSideEditor: View {
                             .frame(width: 28, height: 28)
                     }
                     .buttonStyle(.plain)
+                    .disabled(isCoreTutorialActive)
+                    .accessibilityHidden(isCoreTutorialActive)
                     .accessibilityLabel("水槽編集の使い方")
                     .accessibilityIdentifier("aquariumEditor.help")
                     Button(action: collapse) {
@@ -250,6 +262,8 @@ struct AquariumSideEditor: View {
                             .frame(width: 28, height: 28)
                     }
                     .buttonStyle(.plain)
+                    .disabled(isCoreTutorialActive)
+                    .accessibilityHidden(isCoreTutorialActive)
                     .accessibilityLabel("編集パネルを閉じる")
                     .accessibilityIdentifier("aquariumEditor.collapsePanel")
                     if showsFinishButton {
@@ -318,7 +332,9 @@ struct AquariumSideEditor: View {
 
             ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 8) {
-                    ForEach(FishSpecies.allCases) { species in
+                    ForEach(AquariumFishEditorPresentation.ownedSpecies(
+                        from: player?.ownedFish ?? []
+                    )) { species in
                         fishCard(species)
                     }
                 }
@@ -336,13 +352,19 @@ struct AquariumSideEditor: View {
         let card = VStack(spacing: 4) {
             AquariumFishDragHandle(
                 species: species,
-                canDrag: canAdd,
+                canDrag: canAdd && (!isCoreTutorialActive || species == .clownfish),
                 updateDrag: updateFishDrag,
                 finishDrag: finishFishDrag,
                 cancelDrag: cancelFishDrag
             )
                 .frame(width: 56, height: 38)
                 .grayscale(ownedCount == 0 ? 1 : 0)
+                .anchorPreference(
+                    key: CoreTutorialTargetPreferenceKey.self,
+                    value: .bounds
+                ) { anchor in
+                    species == .clownfish ? [.tutorialClownfish: anchor] : [:]
+                }
 
             Text(species.name)
                 .font(.caption2.weight(.semibold))
@@ -369,6 +391,7 @@ struct AquariumSideEditor: View {
             }
         }
         .opacity(ownedCount == 0 ? 0.42 : (canAdd || activeCount > 0 ? 1 : 0.62))
+        .accessibilityHidden(isCoreTutorialActive && species != .clownfish)
         .accessibilityIdentifier("aquariumEditor.fish.\(species.rawValue)")
 
         card
@@ -495,6 +518,8 @@ struct AquariumSideEditor: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(isCoreTutorialActive)
+        .accessibilityHidden(isCoreTutorialActive)
         .accessibilityIdentifier("aquariumEditor.background.\(theme.rawValue)")
         .accessibilityValue(isSelected ? "選択中" : "未選択")
     }
@@ -520,6 +545,8 @@ struct AquariumSideEditor: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(isCoreTutorialActive)
+        .accessibilityHidden(isCoreTutorialActive)
         .accessibilityLabel(category.title)
         .accessibilityIdentifier("aquariumEditor.category.\(category.rawValue)")
     }
@@ -537,8 +564,10 @@ private struct AquariumDecorationDragHandle: View {
     var body: some View {
         AquariumDecorationView(decoration: placement.decoration)
             .scaleEffect(0.42)
+            .padding(AquariumFishDragInteraction.hitAreaExpansion)
             .contentShape(Rectangle())
             .simultaneousGesture(decorationDragGesture, isEnabled: canDrag)
+            .padding(-AquariumFishDragInteraction.hitAreaExpansion)
             .accessibilityHint(canDrag ? "左へ滑らせて水槽へ追加" : "すでに水槽へ配置中です")
     }
 
@@ -588,8 +617,10 @@ private struct AquariumFishDragHandle: View {
 
     var body: some View {
         FishImageView(species: species)
+            .padding(AquariumFishDragInteraction.hitAreaExpansion)
             .contentShape(Rectangle())
             .simultaneousGesture(fishDragGesture, isEnabled: canDrag)
+            .padding(-AquariumFishDragInteraction.hitAreaExpansion)
             .accessibilityHint(canDrag ? "左へ滑らせて水槽へ追加" : "水槽へ追加できません")
     }
 

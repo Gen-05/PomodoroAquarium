@@ -225,6 +225,21 @@ final class TimerViewModel {
         persistSession(at: currentDate)
     }
 
+    /// Core Tutorial専用。通常sessionをrunningへせず、疑似study完了を一度だけ通知する。
+    /// 通常設定を変えず、通知をscheduleせず、pause/stop可能な中間状態を作らない。
+    @discardableResult
+    func completeCoreTutorialStudyWithoutStartingSession() -> Bool {
+        guard state == .idle,
+              phase == .study,
+              !hasHandledCurrentSessionCompletion else { return false }
+        finishCurrentSession(
+            completedStudyMinutes: FishRewardService.minimumStudyMinutes,
+            studyEndReason: .completed,
+            forceFinishPomodoro: true
+        )
+        return true
+    }
+
     func beginPomodoroBreak() {
         guard shouldBeginPomodoroBreak else { return }
         if timeRemaining <= 0 {
@@ -474,7 +489,8 @@ final class TimerViewModel {
 
     private func finishCurrentSession(
         completedStudyMinutes: Int? = nil,
-        studyEndReason: StudySessionEndReason = .completed
+        studyEndReason: StudySessionEndReason = .completed,
+        forceFinishPomodoro: Bool = false
     ) {
         guard !hasHandledCurrentSessionCompletion else { return }
         hasHandledCurrentSessionCompletion = true
@@ -492,6 +508,7 @@ final class TimerViewModel {
         }
 
         if completedStudySession &&
+            !forceFinishPomodoro &&
             mode == .pomodoro &&
             studyEndReason.isNormalCompletion &&
             currentSet < totalSets {
