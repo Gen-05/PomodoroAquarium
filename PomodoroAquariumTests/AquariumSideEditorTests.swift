@@ -339,19 +339,19 @@ struct AquariumSideEditorTests {
         )
 
         #expect(player.activeAquariumFishIDs.isEmpty)
-        #expect(!AquariumEditorDropCoordinator.completeFishDrag(
+        #expect(AquariumEditorDropCoordinator.completeFishDrag(
             species: .clownfish,
             at: CGPoint(x: 270, y: 400),
             aquariumSize: aquariumSize,
             player: player
-        ))
+        ) == .outsideAquarium)
         #expect(player.activeAquariumFishIDs.isEmpty)
         #expect(AquariumEditorDropCoordinator.completeFishDrag(
             species: .clownfish,
             at: CGPoint(x: 200, y: 400),
             aquariumSize: aquariumSize,
             player: player
-        ))
+        ) == .placed)
         #expect(player.activeAquariumFishIDs == [fish.id])
     }
 
@@ -366,16 +366,16 @@ struct AquariumSideEditorTests {
         #expect(AquariumEditorDropCoordinator.addFish(
             from: .fish(.clownfish),
             to: player
-        ))
+        ) == .placed)
         #expect(player.activeAquariumFishIDs == [fish.id])
         #expect(player.aquariumCount(for: .clownfish) == 1)
-        #expect(!AquariumEditorDropCoordinator.addFish(
+        #expect(AquariumEditorDropCoordinator.addFish(
             from: .fish(.clownfish),
             to: player
-        ))
+        ) == .unavailable)
     }
 
-    @Test func fishDragRejectsUnownedSpeciesAndEleventhFish() {
+    @Test func fishDragAtCapacityStartsButDropReturnsFullWithoutMutation() {
         let fish = (0...AquariumDisplayLimits.maxFishCount).map { index in
             PlayerFish(species: index == AquariumDisplayLimits.maxFishCount ? .manta : .clownfish)
         }
@@ -384,18 +384,46 @@ struct AquariumSideEditorTests {
             activeAquariumFishIDs: fish.prefix(AquariumDisplayLimits.maxFishCount).map(\.id),
             hasInitializedActiveAquariumFish: true
         )
+        let activeIDsBeforeDrop = player.activeAquariumFishIDs
 
-        #expect(!AquariumEditorDropCoordinator.addFish(from: .fish(.manta), to: player))
+        #expect(AquariumFishDragAvailability.canBeginDrag(ownedCount: 1, activeCount: 0))
+        #expect(AquariumEditorDropCoordinator.completeFishDrag(
+            species: .manta,
+            at: CGPoint(x: 200, y: 400),
+            aquariumSize: CGSize(width: 250, height: 800),
+            player: player
+        ) == .aquariumFull)
         #expect(player.activeAquariumFish.count == AquariumDisplayLimits.maxFishCount)
+        #expect(player.activeAquariumFishIDs == activeIDsBeforeDrop)
 
         let emptyPlayer = Player(
             activeAquariumFishIDs: [],
             hasInitializedActiveAquariumFish: true
         )
-        #expect(!AquariumEditorDropCoordinator.addFish(
+        #expect(AquariumEditorDropCoordinator.addFish(
             from: .fish(.jellyfish),
             to: emptyPlayer
-        ))
+        ) == .unavailable)
+    }
+
+    @Test func tenthFishDropSucceedsAndFillsTheLastSlot() {
+        let fish = (0..<AquariumDisplayLimits.maxFishCount).map { index in
+            PlayerFish(species: index == AquariumDisplayLimits.maxFishCount - 1 ? .manta : .clownfish)
+        }
+        let player = Player(
+            ownedFish: fish,
+            activeAquariumFishIDs: fish.prefix(AquariumDisplayLimits.maxFishCount - 1).map(\.id),
+            hasInitializedActiveAquariumFish: true
+        )
+
+        #expect(player.activeAquariumFish.count == AquariumDisplayLimits.maxFishCount - 1)
+        #expect(AquariumEditorDropCoordinator.completeFishDrag(
+            species: .manta,
+            at: CGPoint(x: 200, y: 400),
+            aquariumSize: CGSize(width: 250, height: 800),
+            player: player
+        ) == .placed)
+        #expect(player.activeAquariumFish.count == AquariumDisplayLimits.maxFishCount)
     }
 
     @Test func decorationDropUsesOnlyAquariumLocalCoordinatesAndPersists() throws {

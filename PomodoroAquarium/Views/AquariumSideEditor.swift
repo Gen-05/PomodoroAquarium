@@ -116,6 +116,150 @@ enum AquariumFishDragPresentation {
     }
 }
 
+private struct AquariumEditorScrollState: Equatable {
+    var offset: CGFloat = 0
+    var contentHeight: CGFloat = 0
+    var viewportHeight: CGFloat = 0
+
+    var scrollableDistance: CGFloat {
+        max(contentHeight - viewportHeight, 0)
+    }
+
+    var isScrollable: Bool {
+        scrollableDistance > 1
+    }
+
+    var hasMeasurements: Bool {
+        contentHeight > 0 && viewportHeight > 0
+    }
+
+    var progress: CGFloat {
+        guard isScrollable else { return 0 }
+        return min(max(offset / scrollableDistance, 0), 1)
+    }
+
+    var visibleRatio: CGFloat {
+        guard contentHeight > 0 else { return 1 }
+        return min(max(viewportHeight / contentHeight, 0), 1)
+    }
+
+    mutating func update(contentHeight: CGFloat? = nil, viewportHeight: CGFloat? = nil) {
+        if let contentHeight, contentHeight.isFinite, contentHeight >= 0 {
+            self.contentHeight = contentHeight
+        }
+        if let viewportHeight, viewportHeight.isFinite, viewportHeight >= 0 {
+            self.viewportHeight = viewportHeight
+        }
+        offset = min(max(offset, 0), scrollableDistance)
+    }
+
+    mutating func setProgress(_ progress: CGFloat) {
+        guard progress.isFinite, isScrollable else {
+            offset = 0
+            return
+        }
+        offset = min(max(progress, 0), 1) * scrollableDistance
+    }
+}
+
+private enum AquariumEditorScrollBarLayout {
+    static let minimumThumbHeight: CGFloat = 44
+
+    static func thumbHeight(for visibleRatio: CGFloat, trackHeight: CGFloat) -> CGFloat {
+        guard trackHeight.isFinite, trackHeight > 0 else { return 0 }
+        guard visibleRatio.isFinite else { return trackHeight }
+        let proportionalHeight = trackHeight * min(max(visibleRatio, 0), 1)
+        return min(max(proportionalHeight, minimumThumbHeight), trackHeight)
+    }
+}
+
+private struct AquariumEditorControlledScrollView<Content: View>: View {
+    @Binding var state: AquariumEditorScrollState
+    let category: AquariumEditorCategory
+    let visibleItemCount: Int
+    let content: Content
+
+#if DEBUG
+    @State private var lastLoggedMeasurements: AquariumEditorScrollState?
+#endif
+
+    init(
+        state: Binding<AquariumEditorScrollState>,
+        category: AquariumEditorCategory,
+        visibleItemCount: Int,
+        @ViewBuilder content: () -> Content
+    ) {
+        _state = state
+        self.category = category
+        self.visibleItemCount = visibleItemCount
+        self.content = content()
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView(.vertical, showsIndicators: false) {
+                content
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background {
+                        GeometryReader { contentGeometry in
+                            Color.clear
+                                .onAppear {
+                                    updateContentHeight(contentGeometry.size.height)
+                                }
+                                .onChange(of: contentGeometry.size.height) { _, newHeight in
+                                    updateContentHeight(newHeight)
+                                }
+                        }
+                    }
+                    .offset(y: -state.offset)
+            }
+            .scrollDisabled(true)
+            .onAppear {
+                updateViewportHeight(geometry.size.height)
+            }
+            .onChange(of: geometry.size.height) { _, newHeight in
+                updateViewportHeight(newHeight)
+            }
+        }
+    }
+
+    private func updateContentHeight(_ height: CGFloat) {
+        var updatedState = state
+        updatedState.update(contentHeight: height)
+        if updatedState != state {
+            state = updatedState
+            logMeasurementsIfNeeded(updatedState)
+        }
+    }
+
+    private func updateViewportHeight(_ height: CGFloat) {
+        var updatedState = state
+        updatedState.update(viewportHeight: height)
+        if updatedState != state {
+            state = updatedState
+            logMeasurementsIfNeeded(updatedState)
+        }
+    }
+
+    private func logMeasurementsIfNeeded(_ measurements: AquariumEditorScrollState) {
+#if DEBUG
+        guard measurements.hasMeasurements,
+              lastLoggedMeasurements != measurements else {
+            return
+        }
+        lastLoggedMeasurements = measurements
+        NSLog(
+            "[AquariumEditorScroll] category=\(category.rawValue) "
+                + "items=\(visibleItemCount) "
+                + "contentHeight=\(measurements.contentHeight) "
+                + "viewportHeight=\(measurements.viewportHeight) "
+                + "scrollableDistance=\(measurements.scrollableDistance)"
+        )
+#endif
+    }
+}
+
 enum AquariumFishEditorPresentation {
     static func ownedSpecies(from ownedFish: [PlayerFish]) -> [FishSpecies] {
         FishSpecies.allCases.filter { species in
@@ -132,6 +276,12 @@ struct AquariumFishDragSession: Equatable {
 struct AquariumDecorationDragSession: Equatable {
     let decorationID: String
     var location: CGPoint
+}
+
+enum AquariumFishDragAvailability {
+    static func canBeginDrag(ownedCount: Int, activeCount: Int) -> Bool {
+        ownedCount > activeCount
+    }
 }
 
 extension UTType {
@@ -169,22 +319,45 @@ struct AquariumEditorDragItem: Codable, Hashable, Transferable {
 
 @MainActor
 enum AquariumEditorDropCoordinator {
-    static func addFish(from item: AquariumEditorDragItem, to player: Player) -> Bool {
-        guard let species = item.fishSpecies else { return false }
-        return player.addOneFishToAquarium(species: species)
+    static func addFish(
+        from item: AquariumEditorDragItem,
+        preferredFishID: UUID? = nil,
+        to player: Player
+    ) -> AquariumFishDropResult {
+        guard let species = item.fishSpecies else { return .unavailable }
+        return addFish(species: species, preferredFishID: preferredFishID, to: player)
     }
 
     static func completeFishDrag(
         species: FishSpecies,
         at location: CGPoint,
         aquariumSize: CGSize,
-        player: Player
-    ) -> Bool {
+        player: Player,
+        preferredFishID: UUID? = nil
+    ) -> AquariumFishDropResult {
         guard AquariumSideEditorLayout.acceptsDrop(
             at: location,
             in: aquariumSize
-        ) else { return false }
-        return player.addOneFishToAquarium(species: species)
+        ) else { return .outsideAquarium }
+        return addFish(species: species, preferredFishID: preferredFishID, to: player)
+    }
+
+    private static func addFish(
+        species: FishSpecies,
+        preferredFishID: UUID?,
+        to player: Player
+    ) -> AquariumFishDropResult {
+        guard player.activeAquariumFish.count < AquariumDisplayLimits.maxFishCount else {
+            return .aquariumFull
+        }
+
+        let didAddFish: Bool
+        if let preferredFishID {
+            didAddFish = player.addFishToAquarium(playerFishID: preferredFishID)
+        } else {
+            didAddFish = player.addOneFishToAquarium(species: species)
+        }
+        return didAddFish ? .placed : .unavailable
     }
 
     static func placeDecoration(
@@ -214,6 +387,13 @@ enum AquariumEditorDropCoordinator {
 
 }
 
+enum AquariumFishDropResult: Equatable {
+    case placed
+    case outsideAquarium
+    case aquariumFull
+    case unavailable
+}
+
 private enum AquariumEditorDropError: Error {
     case invalidDecoration
 }
@@ -236,6 +416,10 @@ struct AquariumSideEditor: View {
     let showTutorial: () -> Void
     var showsFinishButton = true
     var isCoreTutorialActive = false
+
+    @State private var fishScrollState = AquariumEditorScrollState()
+    @State private var decorationScrollState = AquariumEditorScrollState()
+    @State private var backgroundScrollState = AquariumEditorScrollState()
 
     private var contentWidth: CGFloat {
         max(panelWidth - AquariumSideEditorLayout.categoryTabWidth, 80)
@@ -280,7 +464,8 @@ struct AquariumSideEditor: View {
                 editorContent
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 10 + MainTabBarHitShieldLayout.tabBarHeight)
             .frame(width: contentWidth)
             .frame(maxHeight: .infinity, alignment: .top)
             .background(.ultraThinMaterial)
@@ -289,9 +474,10 @@ struct AquariumSideEditor: View {
                 ForEach(AquariumEditorCategory.allCases) { category in
                     categoryButton(category)
                 }
-                Spacer(minLength: 0)
+                editorScrollBar
             }
-            .padding(.vertical, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 10 + MainTabBarHitShieldLayout.tabBarHeight)
             .frame(width: AquariumSideEditorLayout.categoryTabWidth)
             .background(.thinMaterial)
         }
@@ -330,11 +516,13 @@ struct AquariumSideEditor: View {
                     .accessibilityIdentifier("aquariumActiveFishCount")
             }
 
-            ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: 8) {
-                    ForEach(AquariumFishEditorPresentation.ownedSpecies(
-                        from: player?.ownedFish ?? []
-                    )) { species in
+            AquariumEditorControlledScrollView(
+                state: $fishScrollState,
+                category: .fish,
+                visibleItemCount: ownedFishSpecies.count
+            ) {
+                VStack(spacing: 8) {
+                    ForEach(ownedFishSpecies) { species in
                         fishCard(species)
                     }
                 }
@@ -343,16 +531,62 @@ struct AquariumSideEditor: View {
         }
     }
 
+    private var ownedFishSpecies: [FishSpecies] {
+        AquariumFishEditorPresentation.ownedSpecies(from: player?.ownedFish ?? [])
+    }
+
+    private var activeScrollState: AquariumEditorScrollState {
+        switch selectedCategory {
+        case .fish:
+            fishScrollState
+        case .decoration:
+            decorationScrollState
+        case .background:
+            backgroundScrollState
+        }
+    }
+
+    private var editorScrollBar: some View {
+        AquariumEditorScrollBar(
+            progress: activeScrollState.progress,
+            visibleRatio: activeScrollState.visibleRatio,
+            isScrollable: activeScrollState.isScrollable,
+            isInteractionEnabled: !isCoreTutorialActive,
+            accessibilityLabel: "\(selectedCategory.title)一覧のスクロール",
+            onProgressChanged: updateActiveScrollProgress
+        )
+        .frame(width: 36)
+        .frame(maxHeight: .infinity)
+        .layoutPriority(1)
+        .accessibilityHidden(isCoreTutorialActive)
+        .accessibilityIdentifier("aquariumEditor.\(selectedCategory.rawValue)ScrollBar")
+    }
+
+    private func updateActiveScrollProgress(_ progress: CGFloat) {
+        guard !isCoreTutorialActive, progress.isFinite else { return }
+
+        switch selectedCategory {
+        case .fish:
+            fishScrollState.setProgress(progress)
+        case .decoration:
+            decorationScrollState.setProgress(progress)
+        case .background:
+            backgroundScrollState.setProgress(progress)
+        }
+    }
+
     @ViewBuilder
     private func fishCard(_ species: FishSpecies) -> some View {
         let ownedCount = player?.ownedFish.count { $0.species == species } ?? 0
         let activeCount = player?.aquariumCount(for: species) ?? 0
-        let canAdd = ownedCount > activeCount &&
-            (player?.activeAquariumFish.count ?? 0) < AquariumDisplayLimits.maxFishCount
+        let canDrag = AquariumFishDragAvailability.canBeginDrag(
+            ownedCount: ownedCount,
+            activeCount: activeCount
+        )
         let card = VStack(spacing: 4) {
             AquariumFishDragHandle(
                 species: species,
-                canDrag: canAdd && (!isCoreTutorialActive || species == .clownfish),
+                canDrag: canDrag && (!isCoreTutorialActive || species == .clownfish),
                 updateDrag: updateFishDrag,
                 finishDrag: finishFishDrag,
                 cancelDrag: cancelFishDrag
@@ -374,23 +608,23 @@ struct AquariumSideEditor: View {
             Text("\(activeCount) / \(ownedCount)")
                 .font(.caption2.monospacedDigit())
 
-            if canAdd {
-                Label("水槽へ", systemImage: "arrow.left")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
+            Label("水槽へ", systemImage: "arrow.left")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .opacity(canDrag ? 1 : 0)
+                .accessibilityHidden(!canDrag)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 7)
         .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
         .overlay(alignment: .topTrailing) {
-            if canAdd {
+            if canDrag {
                 Image(systemName: "hand.draw.fill")
                     .font(.system(size: 9))
                     .padding(5)
             }
         }
-        .opacity(ownedCount == 0 ? 0.42 : (canAdd || activeCount > 0 ? 1 : 0.62))
+        .opacity(ownedCount == 0 ? 0.42 : (canDrag || activeCount > 0 ? 1 : 0.62))
         .accessibilityHidden(isCoreTutorialActive && species != .clownfish)
         .accessibilityIdentifier("aquariumEditor.fish.\(species.rawValue)")
 
@@ -402,24 +636,19 @@ struct AquariumSideEditor: View {
             Text("水槽へドラッグ")
                 .font(.caption.weight(.semibold))
 
-            ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: 8) {
+            AquariumEditorControlledScrollView(
+                state: $decorationScrollState,
+                category: .decoration,
+                visibleItemCount: decorationPlacements.count
+            ) {
+                VStack(spacing: 8) {
                     ForEach(decorationPlacements) { placement in
                         decorationCard(placement)
-                    }
-
-                    ForEach(unownedDecorationKinds, id: \.rawValue) { kind in
-                        lockedDecorationCard(kind)
                     }
                 }
                 .padding(.bottom, 8)
             }
         }
-    }
-
-    private var unownedDecorationKinds: [AquariumDecorationKind] {
-        let ownedKinds = Set(decorationPlacements.map(\.kind))
-        return AquariumDecorationKind.allCases.filter { !ownedKinds.contains($0) }
     }
 
     private func decorationCard(_ placement: AquariumDecorationPlacement) -> some View {
@@ -440,11 +669,11 @@ struct AquariumSideEditor: View {
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
 
-            if !placement.isPlaced {
-                Label("水槽へ", systemImage: "arrow.left")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
+            Label("水槽へ", systemImage: "arrow.left")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .opacity(placement.isPlaced ? 0 : 1)
+                .accessibilityHidden(placement.isPlaced)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 6)
@@ -453,36 +682,28 @@ struct AquariumSideEditor: View {
         .opacity(placement.isPlaced ? 0.62 : 1)
     }
 
-    private func lockedDecorationCard(_ kind: AquariumDecorationKind) -> some View {
-        VStack(spacing: 5) {
-            Image(systemName: kind.storageIconName)
-                .font(.title2)
-            Text(kind.displayName)
-                .font(.caption2.weight(.semibold))
-            Label("未所持", systemImage: "lock.fill")
-                .font(.system(size: 9))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(.black.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-        .grayscale(1)
-        .opacity(0.42)
-    }
-
     private var backgroundEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("タップして背景を選択")
                 .font(.caption.weight(.semibold))
 
-            ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: 8) {
-                    ForEach(AquariumBackgroundTheme.allCases) { theme in
+            AquariumEditorControlledScrollView(
+                state: $backgroundScrollState,
+                category: .background,
+                visibleItemCount: availableBackgroundThemes.count
+            ) {
+                VStack(spacing: 8) {
+                    ForEach(availableBackgroundThemes) { theme in
                         backgroundCard(theme)
                     }
                 }
                 .padding(.bottom, 8)
             }
         }
+    }
+
+    private var availableBackgroundThemes: [AquariumBackgroundTheme] {
+        AquariumBackgroundTheme.allCases
     }
 
     private func backgroundCard(_ theme: AquariumBackgroundTheme) -> some View {
@@ -549,6 +770,107 @@ struct AquariumSideEditor: View {
         .accessibilityHidden(isCoreTutorialActive)
         .accessibilityLabel(category.title)
         .accessibilityIdentifier("aquariumEditor.category.\(category.rawValue)")
+    }
+}
+
+private struct AquariumEditorScrollBar: View {
+    let progress: CGFloat
+    let visibleRatio: CGFloat
+    let isScrollable: Bool
+    let isInteractionEnabled: Bool
+    let accessibilityLabel: String
+    let onProgressChanged: (CGFloat) -> Void
+
+    @State private var dragStartProgress: CGFloat?
+
+    private let thumbWidth: CGFloat = 10
+
+    var body: some View {
+        GeometryReader { geometry in
+            let thumbHeight = resolvedThumbHeight(for: geometry.size.height)
+            let travel = max(geometry.size.height - thumbHeight, 0)
+            let thumbCenterY = thumbHeight / 2 + travel * clampedProgress
+
+            ZStack {
+                Capsule()
+                    .fill(.white.opacity(0.2))
+                    .frame(width: 3)
+                    .padding(.vertical, thumbHeight / 2)
+
+                Color.clear
+                    .frame(width: 36, height: thumbHeight)
+                    .contentShape(Rectangle())
+                    .overlay {
+                        Capsule()
+                            .fill(.cyan.opacity(0.78))
+                            .frame(width: thumbWidth, height: thumbHeight)
+                            .shadow(
+                                color: .black.opacity(isScrollable ? 0.18 : 0),
+                                radius: 3,
+                                y: 1
+                            )
+                    }
+                    .position(x: geometry.size.width / 2, y: thumbCenterY)
+                    .gesture(
+                        DragGesture(minimumDistance: 2)
+                            .onChanged { value in
+                                guard travel > 0,
+                                      isScrollable,
+                                      isInteractionEnabled else {
+                                    return
+                                }
+                                let startProgress = dragStartProgress ?? clampedProgress
+                                if dragStartProgress == nil {
+                                    dragStartProgress = startProgress
+                                }
+                                onProgressChanged(
+                                    min(max(
+                                        startProgress + value.translation.height / travel,
+                                        0
+                                    ), 1)
+                                )
+                            }
+                            .onEnded { _ in
+                                dragStartProgress = nil
+                            },
+                        isEnabled: isScrollable && isInteractionEnabled
+                    )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .opacity(
+            isInteractionEnabled
+                ? (isScrollable ? 1 : 0.45)
+                : 0.35
+        )
+        .allowsHitTesting(isScrollable && isInteractionEnabled)
+        .accessibilityElement()
+        .accessibilityHidden(!isScrollable || !isInteractionEnabled)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue("\(Int(clampedProgress * 100))パーセント")
+        .accessibilityAdjustableAction { direction in
+            guard isScrollable, isInteractionEnabled else { return }
+            switch direction {
+            case .increment:
+                onProgressChanged(min(clampedProgress + 0.1, 1))
+            case .decrement:
+                onProgressChanged(max(clampedProgress - 0.1, 0))
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private var clampedProgress: CGFloat {
+        guard progress.isFinite else { return 0 }
+        return min(max(progress, 0), 1)
+    }
+
+    private func resolvedThumbHeight(for trackHeight: CGFloat) -> CGFloat {
+        AquariumEditorScrollBarLayout.thumbHeight(
+            for: visibleRatio,
+            trackHeight: trackHeight
+        )
     }
 }
 
@@ -619,7 +941,7 @@ private struct AquariumFishDragHandle: View {
         FishImageView(species: species)
             .padding(AquariumFishDragInteraction.hitAreaExpansion)
             .contentShape(Rectangle())
-            .simultaneousGesture(fishDragGesture, isEnabled: canDrag)
+            .highPriorityGesture(fishDragGesture, isEnabled: canDrag)
             .padding(-AquariumFishDragInteraction.hitAreaExpansion)
             .accessibilityHint(canDrag ? "左へ滑らせて水槽へ追加" : "水槽へ追加できません")
     }

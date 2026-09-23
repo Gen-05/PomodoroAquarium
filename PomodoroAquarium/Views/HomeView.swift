@@ -92,6 +92,7 @@ struct HomeView: View {
     @State private var editorSessionSnapshot: AquariumEditorSessionSnapshot?
     @State private var draftBackgroundTheme: AquariumBackgroundTheme?
     @State private var showsAquariumEditConfirmation = false
+    @State private var showsAquariumCapacityAlert = false
     @State private var showsEditorSaveConfirmation = false
     @State private var showsAquariumEditorTutorial = false
     // 旧編集overlayは新UIの検証完了まで実装を保持し、表示経路だけ切り替える。
@@ -423,6 +424,11 @@ struct HomeView: View {
             }
             Button("キャンセル", role: .cancel) {}
         }
+        .alert("水槽がいっぱいです", isPresented: $showsAquariumCapacityAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("水槽に置ける魚は\(AquariumDisplayLimits.maxFishCount)匹までです。")
+        }
         .alert("魚の獲得上限", isPresented: $showsDailyFishLimitInformation) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -605,19 +611,18 @@ struct HomeView: View {
             switch item.kind {
             case .fish:
                 guard let player else { continue }
-                let didAddFish: Bool
-                if item.fishSpecies == .clownfish,
-                   coreTutorial?.step == .waitingForFishPlacement,
-                   let tutorialFishID = coreTutorial?.tutorialFishID(in: player) {
-                    didAddFish = player.addFishToAquarium(playerFishID: tutorialFishID)
-                } else {
-                    didAddFish = AquariumEditorDropCoordinator.addFish(from: item, to: player)
+                let preferredFishID = item.fishSpecies == .clownfish &&
+                    coreTutorial?.step == .waitingForFishPlacement
+                    ? coreTutorial?.tutorialFishID(in: player)
+                    : nil
+                let result = AquariumEditorDropCoordinator.addFish(
+                    from: item,
+                    preferredFishID: preferredFishID,
+                    to: player
+                )
+                if handleFishDropResult(result) {
+                    return true
                 }
-                guard didAddFish else {
-                    continue
-                }
-                markAquariumEditorChanged()
-                return true
 
             case .decoration:
                 guard let placement = decorationPlacements.first(where: {
@@ -641,6 +646,20 @@ struct HomeView: View {
             }
         }
         return false
+    }
+
+    @discardableResult
+    private func handleFishDropResult(_ result: AquariumFishDropResult) -> Bool {
+        switch result {
+        case .placed:
+            markAquariumEditorChanged()
+            return true
+        case .aquariumFull:
+            showsAquariumCapacityAlert = true
+            return false
+        case .outsideAquarium, .unavailable:
+            return false
+        }
     }
 
     private func selectAquariumFish(_ playerFishID: UUID) {
@@ -686,22 +705,18 @@ struct HomeView: View {
             guard coreTutorial?.step == .waitingForFishPlacement,
                   species == .clownfish else { return }
         }
-        let didAddFish: Bool
-        if species == .clownfish,
-           coreTutorial?.step == .waitingForFishPlacement,
-           let tutorialFishID = coreTutorial?.tutorialFishID(in: player),
-           AquariumSideEditorLayout.acceptsDrop(at: location, in: aquariumSize) {
-            didAddFish = player.addFishToAquarium(playerFishID: tutorialFishID)
-        } else {
-            didAddFish = AquariumEditorDropCoordinator.completeFishDrag(
-                species: species,
-                at: location,
-                aquariumSize: aquariumSize,
-                player: player
-            )
-        }
-        guard didAddFish else { return }
-        markAquariumEditorChanged()
+        let preferredFishID = species == .clownfish &&
+            coreTutorial?.step == .waitingForFishPlacement
+            ? coreTutorial?.tutorialFishID(in: player)
+            : nil
+        let result = AquariumEditorDropCoordinator.completeFishDrag(
+            species: species,
+            at: location,
+            aquariumSize: aquariumSize,
+            player: player,
+            preferredFishID: preferredFishID
+        )
+        handleFishDropResult(result)
     }
 
     private func cancelFishDrag() {
