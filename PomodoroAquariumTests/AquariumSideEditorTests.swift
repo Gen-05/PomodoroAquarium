@@ -31,6 +31,82 @@ struct AquariumSideEditorTests {
         )
     }
 
+    @Test func existingDecorationRowsBecomeGroupedInventoryWithoutSchemaMigration() throws {
+        let rocks = (0..<4).map { index in
+            AquariumDecorationPlacement(
+                decorationID: "rock-\(index)",
+                kind: .rock,
+                relativeX: 0.2 + Double(index) * 0.1,
+                relativeY: 0.82,
+                scale: 1,
+                isPlaced: false
+            )
+        }
+
+        var inventory = AquariumDecorationEditorPresentation.inventory(from: rocks)
+        var rock = try #require(inventory.first)
+        #expect(inventory.count == 1)
+        #expect(rock.placedCount == 0)
+        #expect(rock.ownedCount == 4)
+        #expect(rock.canPlaceAnother)
+
+        rocks[0].isPlaced = true
+        inventory = AquariumDecorationEditorPresentation.inventory(from: rocks)
+        rock = try #require(inventory.first)
+        #expect(rock.placedCount == 1)
+        #expect(rock.ownedCount == 4)
+        #expect(rock.dragPlacementID != rocks[0].decorationID)
+
+        rocks.forEach { $0.isPlaced = true }
+        inventory = AquariumDecorationEditorPresentation.inventory(from: rocks)
+        rock = try #require(inventory.first)
+        #expect(rock.placedCount == 4)
+        #expect(rock.ownedCount == 4)
+        #expect(!rock.canPlaceAnother)
+
+        rocks[2].isPlaced = false
+        inventory = AquariumDecorationEditorPresentation.inventory(from: rocks)
+        rock = try #require(inventory.first)
+        #expect(rock.placedCount == 3)
+        #expect(rock.ownedCount == 4)
+        #expect(rock.canPlaceAnother)
+        #expect(rock.dragPlacementID == rocks[2].decorationID)
+    }
+
+    @Test func duplicateDecorationOwnershipAndPositionsPersistAcrossReload() throws {
+        let container = try makeDecorationContainer()
+        let context = ModelContext(container)
+        let rocks = (0..<4).map { index in
+            AquariumDecorationPlacement(
+                decorationID: "persisted-rock-\(index)",
+                kind: .rock,
+                relativeX: 0.2 + Double(index) * 0.15,
+                relativeY: 0.8 + Double(index) * 0.02,
+                scale: 1,
+                isPlaced: index < 3
+            )
+        }
+        rocks.forEach(context.insert)
+        try context.save()
+
+        let reloadedContext = ModelContext(container)
+        let reloaded = try reloadedContext.fetch(
+            FetchDescriptor<AquariumDecorationPlacement>()
+        )
+        let inventory = AquariumDecorationEditorPresentation.inventory(from: reloaded)
+        let rock = try #require(inventory.first)
+
+        #expect(reloaded.count == 4)
+        #expect(Set(reloaded.map(\.decorationID)).count == 4)
+        #expect(rock.placedCount == 3)
+        #expect(rock.ownedCount == 4)
+        let placedX = reloaded.filter { $0.isPlaced }.map(\.relativeX).sorted()
+        #expect(placedX.count == 3)
+        #expect(abs(placedX[0] - 0.2) < 0.000_001)
+        #expect(abs(placedX[1] - 0.35) < 0.000_001)
+        #expect(abs(placedX[2] - 0.5) < 0.000_001)
+    }
+
     @Test func viewingControlsAutoHideIsLimitedToAquariumViewing() {
         #expect(AquariumViewingControlsPolicy.autoHideDelay == 4)
         #expect(AquariumViewingControlsPolicy.isEnabled(selectedTab: .aquarium, tabMode: .viewing))

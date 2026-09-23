@@ -122,9 +122,10 @@ struct CoreTutorialTests {
     @Test func tutorialTimerCompletesImmediatelyWithoutTickingOrChangingDefaults() throws {
         let (defaults, suite) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set("45", forKey: TimerConfigurationStorageKey.studyTime)
-        defaults.set("10", forKey: TimerConfigurationStorageKey.breakTime)
+        defaults.set("45", forKey: TimerConfigurationStorageKey.pomodoroStudyDuration)
+        defaults.set("10", forKey: TimerConfigurationStorageKey.pomodoroBreakDuration)
         defaults.set(4, forKey: TimerConfigurationStorageKey.pomodoroSetCount)
+        defaults.set("40", forKey: TimerConfigurationStorageKey.timerDuration)
         let sessionStore = TimerSessionStore(
             defaults: defaults,
             processIdentifier: "tutorial-direct-completion"
@@ -150,9 +151,10 @@ struct CoreTutorialTests {
         #expect(viewModel.state == .completed)
         #expect(viewModel.phase == .finished)
         #expect(sessionStore.load() == nil)
-        #expect(defaults.string(forKey: TimerConfigurationStorageKey.studyTime) == "45")
-        #expect(defaults.string(forKey: TimerConfigurationStorageKey.breakTime) == "10")
+        #expect(defaults.string(forKey: TimerConfigurationStorageKey.pomodoroStudyDuration) == "45")
+        #expect(defaults.string(forKey: TimerConfigurationStorageKey.pomodoroBreakDuration) == "10")
         #expect(defaults.integer(forKey: TimerConfigurationStorageKey.pomodoroSetCount) == 4)
+        #expect(defaults.string(forKey: TimerConfigurationStorageKey.timerDuration) == "40")
     }
 
     @Test func tutorialAllowsOnlyAquariumTabAtItsPrompt() {

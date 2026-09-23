@@ -137,8 +137,9 @@ private struct CoreTutorialPreviewHost: View {
         let suiteName = "CoreTutorialPreview.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName) ?? UserDefaults()
         defaults.removePersistentDomain(forName: suiteName)
-        defaults.set("25", forKey: TimerConfigurationStorageKey.studyTime)
-        defaults.set("5", forKey: TimerConfigurationStorageKey.breakTime)
+        defaults.set("25", forKey: TimerConfigurationStorageKey.pomodoroStudyDuration)
+        defaults.set("5", forKey: TimerConfigurationStorageKey.pomodoroBreakDuration)
+        defaults.set("25", forKey: TimerConfigurationStorageKey.timerDuration)
         defaults.set(
             PomodoroBreakConfiguration.defaultSetCount,
             forKey: TimerConfigurationStorageKey.pomodoroSetCount

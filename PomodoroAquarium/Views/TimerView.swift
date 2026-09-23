@@ -9,9 +9,46 @@ import SwiftUI
 import SwiftData
 
 enum TimerConfigurationStorageKey {
-    static let studyTime = "studyTime"
-    static let breakTime = "breakTime"
+    static let pomodoroStudyDuration = "pomodoroStudyDuration"
+    static let pomodoroBreakDuration = "pomodoroBreakDuration"
     static let pomodoroSetCount = "pomodoroSetCount"
+    static let timerDuration = "timerDuration"
+
+    fileprivate static let legacyStudyTime = "studyTime"
+    fileprivate static let legacyBreakTime = "breakTime"
+}
+
+enum TimerConfigurationStorage {
+    static let defaultPomodoroStudyMinutes = 25
+    static let defaultTimerDurationMinutes = 25
+
+    static func migrateLegacyValuesIfNeeded(in defaults: UserDefaults = .standard) {
+        let legacyStudyDuration = defaults.string(
+            forKey: TimerConfigurationStorageKey.legacyStudyTime
+        )
+        let legacyBreakDuration = defaults.string(
+            forKey: TimerConfigurationStorageKey.legacyBreakTime
+        )
+
+        if defaults.object(forKey: TimerConfigurationStorageKey.pomodoroStudyDuration) == nil {
+            defaults.set(
+                legacyStudyDuration ?? String(defaultPomodoroStudyMinutes),
+                forKey: TimerConfigurationStorageKey.pomodoroStudyDuration
+            )
+        }
+        if defaults.object(forKey: TimerConfigurationStorageKey.timerDuration) == nil {
+            defaults.set(
+                legacyStudyDuration ?? String(defaultTimerDurationMinutes),
+                forKey: TimerConfigurationStorageKey.timerDuration
+            )
+        }
+        if defaults.object(forKey: TimerConfigurationStorageKey.pomodoroBreakDuration) == nil {
+            defaults.set(
+                legacyBreakDuration ?? String(PomodoroBreakConfiguration.defaultBreakMinutes),
+                forKey: TimerConfigurationStorageKey.pomodoroBreakDuration
+            )
+        }
+    }
 }
 
 enum PomodoroBreakConfiguration {
@@ -81,9 +118,13 @@ struct TimerView: View {
 
     @AppStorage(AquariumThemeStore.storageKey)
     private var backgroundThemeRawValue = AquariumBackgroundTheme.aquarium.rawValue
-    @AppStorage(TimerConfigurationStorageKey.studyTime) private var storedStudyTime = "25"
-    @AppStorage(TimerConfigurationStorageKey.breakTime) private var storedBreakTime = "5"
+    @AppStorage(TimerConfigurationStorageKey.pomodoroStudyDuration)
+    private var storedPomodoroStudyDuration = "25"
+    @AppStorage(TimerConfigurationStorageKey.pomodoroBreakDuration)
+    private var storedPomodoroBreakDuration = "5"
     @AppStorage(TimerConfigurationStorageKey.pomodoroSetCount) private var pomodoroSetCount = 3
+    @AppStorage(TimerConfigurationStorageKey.timerDuration)
+    private var storedTimerDuration = "25"
     @AppStorage(NotificationIntroductionSettings.hasShownKey)
     private var hasShownNotificationIntroduction = false
     @AppStorage(NotificationSettings.enabledKey)
@@ -100,6 +141,7 @@ struct TimerView: View {
         coreTutorial: CoreTutorialCoordinator? = nil,
         defaults: UserDefaults = .standard
     ) {
+        TimerConfigurationStorage.migrateLegacyValuesIfNeeded(in: defaults)
         self.studyTime = studyTime
         self.breakTime = breakTime
         self.player = player
@@ -149,7 +191,7 @@ struct TimerView: View {
                 if viewModel.canConfigureSession {
                     Picker("計測方法", selection: Binding(
                         get: { viewModel.mode },
-                        set: { viewModel.selectMode($0) }
+                        set: selectTimerMode
                     )) {
                         ForEach(TimerMode.allCases) { mode in
                             Text(mode.displayName).tag(mode)
@@ -340,8 +382,8 @@ struct TimerView: View {
         ) {
             TimerTimeSettingsSheet(
                 mode: viewModel.mode,
-                studyMinutes: Int(storedStudyTime) ?? studyTime,
-                breakMinutes: Int(storedBreakTime) ?? breakTime,
+                studyMinutes: configuredStudyMinutes(for: viewModel.mode),
+                breakMinutes: Int(storedPomodoroBreakDuration) ?? breakTime,
                 setCount: pomodoroSetCount,
                 onSave: saveTimeSettings
             )
@@ -529,12 +571,14 @@ struct TimerView: View {
     }
 
     private func saveTimeSettings(studyMinutes: Int, breakMinutes: Int, setCount: Int) {
-        storedStudyTime = String(studyMinutes)
         if viewModel.mode == .pomodoro {
+            storedPomodoroStudyDuration = String(studyMinutes)
             if PomodoroBreakConfiguration.isBreakSelectionEnabled(setCount: setCount) {
-                storedBreakTime = String(breakMinutes)
+                storedPomodoroBreakDuration = String(breakMinutes)
             }
             pomodoroSetCount = setCount
+        } else if viewModel.mode == .countdown {
+            storedTimerDuration = String(studyMinutes)
         }
         let effectiveBreakMinutes = PomodoroBreakConfiguration.effectiveBreakMinutes(
             preferredMinutes: breakMinutes,
@@ -544,9 +588,36 @@ struct TimerView: View {
             studyTime: studyMinutes,
             breakTime: viewModel.mode == .pomodoro
                 ? effectiveBreakMinutes
-                : (Int(storedBreakTime) ?? breakTime),
+                : (Int(storedPomodoroBreakDuration) ?? breakTime),
             totalSets: viewModel.mode == .pomodoro ? setCount : nil
         )
+    }
+
+    private func selectTimerMode(_ mode: TimerMode) {
+        viewModel.selectMode(mode)
+        guard mode != .stopwatch else { return }
+
+        let setCount = PomodoroBreakConfiguration.configuredSetCount(in: defaults)
+        let preferredBreakMinutes = Int(storedPomodoroBreakDuration) ?? breakTime
+        viewModel.updateConfiguration(
+            studyTime: configuredStudyMinutes(for: mode),
+            breakTime: PomodoroBreakConfiguration.effectiveBreakMinutes(
+                preferredMinutes: preferredBreakMinutes,
+                setCount: setCount
+            ),
+            totalSets: mode == .pomodoro ? setCount : nil
+        )
+    }
+
+    private func configuredStudyMinutes(for mode: TimerMode) -> Int {
+        switch mode {
+        case .pomodoro:
+            Int(storedPomodoroStudyDuration) ?? studyTime
+        case .countdown:
+            Int(storedTimerDuration) ?? TimerConfigurationStorage.defaultTimerDurationMinutes
+        case .stopwatch:
+            Int(storedPomodoroStudyDuration) ?? studyTime
+        }
     }
 
     private var sessionDescription: String {
@@ -661,10 +732,10 @@ struct TimerView: View {
     private func restoreStoredTimerConfiguration() {
         guard !viewModel.isRunning else { return }
         let setCount = PomodoroBreakConfiguration.configuredSetCount(in: defaults)
-        let storedBreakMinutes = Int(storedBreakTime) ?? breakTime
+        let storedBreakMinutes = Int(storedPomodoroBreakDuration) ?? breakTime
         viewModel.resetTimer()
         viewModel.updateConfiguration(
-            studyTime: Int(storedStudyTime) ?? studyTime,
+            studyTime: Int(storedPomodoroStudyDuration) ?? studyTime,
             breakTime: PomodoroBreakConfiguration.effectiveBreakMinutes(
                 preferredMinutes: storedBreakMinutes,
                 setCount: setCount

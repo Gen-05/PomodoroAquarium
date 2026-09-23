@@ -268,6 +268,36 @@ enum AquariumFishEditorPresentation {
     }
 }
 
+struct AquariumDecorationInventoryItem: Identifiable, Equatable {
+    let kind: AquariumDecorationKind
+    let placedCount: Int
+    let ownedCount: Int
+    let dragPlacementID: String
+
+    var id: String { kind.rawValue }
+    var canPlaceAnother: Bool { placedCount < ownedCount }
+}
+
+enum AquariumDecorationEditorPresentation {
+    static func inventory(
+        from placements: [AquariumDecorationPlacement]
+    ) -> [AquariumDecorationInventoryItem] {
+        AquariumDecorationKind.allCases.compactMap { kind in
+            let ownedPlacements = placements.filter { $0.kind == kind }
+            guard let firstOwnedPlacement = ownedPlacements.first else { return nil }
+            let placedCount = ownedPlacements.count(where: \.isPlaced)
+            let nextStoredPlacement = ownedPlacements.first { !$0.isPlaced }
+
+            return AquariumDecorationInventoryItem(
+                kind: kind,
+                placedCount: placedCount,
+                ownedCount: ownedPlacements.count,
+                dragPlacementID: nextStoredPlacement?.decorationID ?? firstOwnedPlacement.decorationID
+            )
+        }
+    }
+}
+
 struct AquariumFishDragSession: Equatable {
     let species: FishSpecies
     var location: CGPoint
@@ -639,11 +669,11 @@ struct AquariumSideEditor: View {
             AquariumEditorControlledScrollView(
                 state: $decorationScrollState,
                 category: .decoration,
-                visibleItemCount: decorationPlacements.count
+                visibleItemCount: decorationInventory.count
             ) {
                 VStack(spacing: 8) {
-                    ForEach(decorationPlacements) { placement in
-                        decorationCard(placement)
+                    ForEach(decorationInventory) { item in
+                        decorationCard(item)
                     }
                 }
                 .padding(.bottom, 8)
@@ -651,35 +681,43 @@ struct AquariumSideEditor: View {
         }
     }
 
-    private func decorationCard(_ placement: AquariumDecorationPlacement) -> some View {
-        VStack(spacing: 4) {
-            AquariumDecorationDragHandle(
-                placement: placement,
-                canDrag: !placement.isPlaced,
-                updateDrag: updateDecorationDrag,
-                finishDrag: finishDecorationDrag,
-                cancelDrag: cancelDecorationDrag
-            )
-            .frame(width: 66, height: 54)
+    private var decorationInventory: [AquariumDecorationInventoryItem] {
+        AquariumDecorationEditorPresentation.inventory(from: decorationPlacements)
+    }
 
-            Text(placement.kind.displayName)
-                .font(.caption2.weight(.semibold))
+    @ViewBuilder
+    private func decorationCard(_ item: AquariumDecorationInventoryItem) -> some View {
+        if let placement = decorationPlacements.first(where: {
+            $0.decorationID == item.dragPlacementID
+        }) {
+            VStack(spacing: 4) {
+                AquariumDecorationDragHandle(
+                    placement: placement,
+                    canDrag: item.canPlaceAnother,
+                    updateDrag: updateDecorationDrag,
+                    finishDrag: finishDecorationDrag,
+                    cancelDrag: cancelDecorationDrag
+                )
+                .frame(width: 66, height: 54)
 
-            Text(placement.isPlaced ? "配置中" : "収納中")
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
+                Text(item.kind.displayName)
+                    .font(.caption2.weight(.semibold))
 
-            Label("水槽へ", systemImage: "arrow.left")
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .opacity(placement.isPlaced ? 0 : 1)
-                .accessibilityHidden(placement.isPlaced)
+                Text("\(item.placedCount) / \(item.ownedCount)")
+                    .font(.caption2.monospacedDigit())
+
+                Label("水槽へ", systemImage: "arrow.left")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .opacity(item.canPlaceAnother ? 1 : 0)
+                    .accessibilityHidden(!item.canPlaceAnother)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+            .accessibilityIdentifier("aquariumEditor.decoration.\(item.kind.rawValue)")
+            .opacity(item.canPlaceAnother ? 1 : 0.62)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-        .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityIdentifier("aquariumEditor.decoration.\(placement.decorationID)")
-        .opacity(placement.isPlaced ? 0.62 : 1)
     }
 
     private var backgroundEditor: some View {

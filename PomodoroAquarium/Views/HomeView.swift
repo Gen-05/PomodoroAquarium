@@ -63,8 +63,10 @@ struct HomeView: View {
     var coreTutorialCompletionButtonTitle = "はじめる"
     var onDismissCoreTutorialCompletion: () -> Void = {}
     
-    @AppStorage("studyTime") private var studyTime = "25"
-    @AppStorage("breakTime") private var breakTime = "5"
+    @AppStorage(TimerConfigurationStorageKey.pomodoroStudyDuration)
+    private var studyTime = "25"
+    @AppStorage(TimerConfigurationStorageKey.pomodoroBreakDuration)
+    private var breakTime = "5"
     @AppStorage("lastStudyDate") private var lastStudyDate = ""
     @AppStorage(AquariumThemeStore.storageKey)
     private var backgroundThemeRawValue = AquariumBackgroundTheme.aquarium.rawValue

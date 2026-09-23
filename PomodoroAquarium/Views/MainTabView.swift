@@ -179,16 +179,17 @@ struct MainTabView: View {
         notificationService: TimerNotificationScheduling? = nil,
         onCoreTutorialPreviewFinished: @escaping () -> Void = {}
     ) {
+        TimerConfigurationStorage.migrateLegacyValuesIfNeeded(in: defaults)
         let resolvedSessionStore = timerSessionStore ?? (
             coreTutorialMode == .production
                 ? TimerSessionStore.shared
                 : TimerSessionStore(defaults: defaults)
         )
         let studyMinutes = Int(defaults.string(
-            forKey: TimerConfigurationStorageKey.studyTime
+            forKey: TimerConfigurationStorageKey.pomodoroStudyDuration
         ) ?? "") ?? 25
         let preferredBreakMinutes = Int(defaults.string(
-            forKey: TimerConfigurationStorageKey.breakTime
+            forKey: TimerConfigurationStorageKey.pomodoroBreakDuration
         ) ?? "") ?? PomodoroBreakConfiguration.defaultBreakMinutes
         let setCount = PomodoroBreakConfiguration.configuredSetCount(in: defaults)
         _timerViewModel = State(initialValue: TimerViewModel(

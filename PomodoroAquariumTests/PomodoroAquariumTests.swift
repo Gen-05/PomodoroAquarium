@@ -460,19 +460,53 @@ struct PomodoroAquariumTests {
         #expect(notifications.scheduled == .breakTime(clock.now.addingTimeInterval(4 * 60)))
     }
 
-    @Test func timerConfigurationValuesPersistAcrossDefaultsReaders() throws {
+    @Test func pomodoroAndTimerConfigurationValuesPersistIndependently() throws {
         let suiteName = "PomodoroAquariumTimerConfigurationTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        defaults.set("40", forKey: TimerConfigurationStorageKey.studyTime)
-        defaults.set("9", forKey: TimerConfigurationStorageKey.breakTime)
+        defaults.set("50", forKey: TimerConfigurationStorageKey.pomodoroStudyDuration)
+        defaults.set("9", forKey: TimerConfigurationStorageKey.pomodoroBreakDuration)
         defaults.set(4, forKey: TimerConfigurationStorageKey.pomodoroSetCount)
+        defaults.set("40", forKey: TimerConfigurationStorageKey.timerDuration)
 
         let relaunchedDefaults = try #require(UserDefaults(suiteName: suiteName))
-        #expect(relaunchedDefaults.string(forKey: TimerConfigurationStorageKey.studyTime) == "40")
-        #expect(relaunchedDefaults.string(forKey: TimerConfigurationStorageKey.breakTime) == "9")
+        #expect(relaunchedDefaults.string(
+            forKey: TimerConfigurationStorageKey.pomodoroStudyDuration
+        ) == "50")
+        #expect(relaunchedDefaults.string(
+            forKey: TimerConfigurationStorageKey.pomodoroBreakDuration
+        ) == "9")
         #expect(relaunchedDefaults.integer(forKey: TimerConfigurationStorageKey.pomodoroSetCount) == 4)
+        #expect(relaunchedDefaults.string(forKey: TimerConfigurationStorageKey.timerDuration) == "40")
+    }
+
+    @Test func legacyStudyDurationMigratesOnceThenConfigurationsRemainIndependent() throws {
+        let suiteName = "PomodoroAquariumTimerConfigurationMigrationTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set("35", forKey: "studyTime")
+        defaults.set("7", forKey: "breakTime")
+        TimerConfigurationStorage.migrateLegacyValuesIfNeeded(in: defaults)
+
+        #expect(defaults.string(
+            forKey: TimerConfigurationStorageKey.pomodoroStudyDuration
+        ) == "35")
+        #expect(defaults.string(forKey: TimerConfigurationStorageKey.timerDuration) == "35")
+        #expect(defaults.string(
+            forKey: TimerConfigurationStorageKey.pomodoroBreakDuration
+        ) == "7")
+
+        defaults.set("50", forKey: TimerConfigurationStorageKey.pomodoroStudyDuration)
+        defaults.set("40", forKey: TimerConfigurationStorageKey.timerDuration)
+        TimerConfigurationStorage.migrateLegacyValuesIfNeeded(in: defaults)
+
+        let relaunchedDefaults = try #require(UserDefaults(suiteName: suiteName))
+        #expect(relaunchedDefaults.string(
+            forKey: TimerConfigurationStorageKey.pomodoroStudyDuration
+        ) == "50")
+        #expect(relaunchedDefaults.string(forKey: TimerConfigurationStorageKey.timerDuration) == "40")
     }
 
     @Test func runningTimerUsesElapsedTimeForTenSeconds() {
