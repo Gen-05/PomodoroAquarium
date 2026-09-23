@@ -783,32 +783,61 @@ private struct AquariumEditorScrollBar: View {
 
     @State private var dragStartProgress: CGFloat?
 
-    private let thumbWidth: CGFloat = 10
-
     var body: some View {
         GeometryReader { geometry in
-            let thumbHeight = resolvedThumbHeight(for: geometry.size.height)
-            let travel = max(geometry.size.height - thumbHeight, 0)
-            let thumbCenterY = thumbHeight / 2 + travel * clampedProgress
+            let trackHeight = geometry.size.height
+            let proportionalThumbHeight = resolvedThumbHeight(for: trackHeight)
+            let movementThumbExtent = min(
+                proportionalThumbHeight,
+                AquariumEditorScrollBarLayout.minimumThumbHeight
+            )
+            let travel = max(trackHeight - movementThumbExtent, 0)
+            let thumbCenterY = movementThumbExtent / 2 + travel * clampedProgress
 
             ZStack {
                 Capsule()
-                    .fill(.white.opacity(0.2))
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(0.16),
+                                .cyan.opacity(0.34),
+                                .white.opacity(0.16)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
                     .frame(width: 3)
-                    .padding(.vertical, thumbHeight / 2)
-
-                Color.clear
-                    .frame(width: 36, height: thumbHeight)
-                    .contentShape(Rectangle())
+                    .padding(.vertical, movementThumbExtent / 2)
                     .overlay {
                         Capsule()
-                            .fill(.cyan.opacity(0.78))
-                            .frame(width: thumbWidth, height: thumbHeight)
-                            .shadow(
-                                color: .black.opacity(isScrollable ? 0.18 : 0),
-                                radius: 3,
-                                y: 1
+                            .stroke(.white.opacity(0.12), lineWidth: 0.5)
+                            .frame(width: 4)
+                            .padding(.vertical, movementThumbExtent / 2)
+                    }
+
+                Color.clear
+                    .frame(width: 36, height: movementThumbExtent)
+                    .contentShape(Rectangle())
+                    .overlay {
+                        Image(systemName: "fish.fill")
+                            .font(.system(size: 21, weight: .semibold))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.white, .cyan.opacity(0.88)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
+                            .rotationEffect(fishRotation)
+                            .scaleEffect(isDragging ? 1.12 : 1)
+                            .opacity(isDragging ? 1 : 0.86)
+                            .shadow(
+                                color: .cyan.opacity(isDragging ? 0.58 : 0.24),
+                                radius: isDragging ? 6 : 2,
+                                y: 0
+                            )
+                            .animation(.easeOut(duration: 0.14), value: isDragging)
                     }
                     .position(x: geometry.size.width / 2, y: thumbCenterY)
                     .gesture(
@@ -864,6 +893,14 @@ private struct AquariumEditorScrollBar: View {
     private var clampedProgress: CGFloat {
         guard progress.isFinite else { return 0 }
         return min(max(progress, 0), 1)
+    }
+
+    private var isDragging: Bool {
+        dragStartProgress != nil
+    }
+
+    private var fishRotation: Angle {
+        .degrees(Double((clampedProgress - 0.5) * 40))
     }
 
     private func resolvedThumbHeight(for trackHeight: CGFloat) -> CGFloat {
