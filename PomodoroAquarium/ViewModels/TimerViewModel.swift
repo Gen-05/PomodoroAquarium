@@ -81,6 +81,7 @@ final class TimerViewModel {
     
     var timeRemaining: Int
     private(set) var mode: TimerMode = .pomodoro
+    private(set) var selectedCategoryID = FocusCategoryDefaults.studyID
     private(set) var stopwatchElapsedSeconds = 0
     private(set) var state: TimerState = .idle
     var isRunning: Bool { state == .running }
@@ -156,6 +157,11 @@ final class TimerViewModel {
         currentSet = 1
         phase = .study
         timeRemaining = studyTime * 60
+    }
+
+    func selectCategory(_ categoryID: String) {
+        guard canConfigureSession, !categoryID.isEmpty else { return }
+        selectedCategoryID = categoryID
     }
     
     convenience init(
@@ -261,6 +267,7 @@ final class TimerViewModel {
         guard state == .idle,
               phase == .study,
               !hasHandledCurrentSessionCompletion else { return false }
+        selectedCategoryID = FocusCategoryDefaults.studyID
         finishCurrentSession(
             completedStudyMinutes: FishRewardService.minimumStudyMinutes,
             studyEndReason: .completed,
@@ -504,6 +511,7 @@ final class TimerViewModel {
         totalSets = max(session.totalSets ?? totalSets, 1)
         currentSet = min(max(session.currentSet ?? 1, 1), totalSets)
         mode = TimerMode(rawValue: session.timerModeRawValue ?? "") ?? .pomodoro
+        selectedCategoryID = FocusCategoryDefaults.resolvedCategoryID(session.selectedCategoryID)
         backgroundNotificationSessionIdentifier = session.backgroundNotificationSessionIdentifier
         state = session.isRunning ? .running : .paused
         timeRemaining = session.timeRemaining
@@ -604,6 +612,7 @@ final class TimerViewModel {
             timeRemaining: timeRemaining,
             elapsedStudySeconds: elapsedStudySeconds,
             timerModeRawValue: mode.rawValue,
+            selectedCategoryID: selectedCategoryID,
             backgroundNotificationSessionIdentifier: backgroundNotificationSessionIdentifier,
             lastHeartbeatDate: date,
             backgroundEnteredAt: backgroundEnteredAt,

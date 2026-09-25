@@ -115,6 +115,84 @@ enum StudyFocusRulesContent {
     static let backgroundLimit = "水族館を離れて3分経つと魚たちがお知らせします。\n5分以上離れると、今回の集中は終了します。"
 }
 
+private extension FocusCategoryColorKey {
+    var swiftUIColor: Color {
+        switch self {
+        case .studyBlue:
+            Color(red: 0.24, green: 0.73, blue: 0.94)
+        case .readingCoral:
+            Color(red: 1.0, green: 0.57, blue: 0.48)
+        }
+    }
+}
+
+private struct PomodoroFishDashMask: View {
+    var body: some View {
+        Canvas { context, size in
+            let dotDiameter: CGFloat = 2.6
+            let step: CGFloat = 4.5
+            let rowCount = Int(ceil(size.height / step)) + 1
+            let columnCount = Int(ceil(size.width / step)) + 1
+
+            for row in 0..<rowCount {
+                let xOffset = row.isMultiple(of: 2) ? 0 : step / 2
+                for column in 0..<columnCount {
+                    let origin = CGPoint(
+                        x: CGFloat(column) * step + xOffset,
+                        y: CGFloat(row) * step
+                    )
+                    let dot = CGRect(
+                        x: origin.x,
+                        y: origin.y,
+                        width: dotDiameter,
+                        height: dotDiameter
+                    )
+                    context.fill(Path(ellipseIn: dot), with: .color(.white))
+                }
+            }
+        }
+    }
+}
+
+private struct PomodoroProgressFish: View {
+    let isReached: Bool
+
+    var body: some View {
+        Group {
+            if isReached {
+                fishSilhouette
+                    .foregroundStyle(.white.opacity(0.92))
+            } else {
+                dashedFishOutline
+            }
+        }
+        .frame(width: 18, height: 14)
+    }
+
+    private var fishSilhouette: some View {
+        Image(systemName: "fish.fill")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 18, height: 14)
+    }
+
+    private var dashedFishOutline: some View {
+        ZStack {
+            fishSilhouette
+                .foregroundStyle(.white.opacity(0.68))
+
+            fishSilhouette
+                .foregroundStyle(.black)
+                .scaleEffect(x: 0.72, y: 0.58)
+                .blendMode(.destinationOut)
+        }
+        .compositingGroup()
+        .mask {
+            PomodoroFishDashMask()
+        }
+    }
+}
+
 struct TimerView: View {
     
     let studyTime: Int
@@ -139,6 +217,7 @@ struct TimerView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query private var focusCategories: [FocusCategory]
     
     init(
         studyTime: Int,
@@ -194,32 +273,49 @@ struct TimerView: View {
                 isSimulationPaused: showsTimeSettings
             )
 
-            VStack(spacing: 22) {
+            VStack(spacing: 18) {
                 Spacer()
 
                 if viewModel.canConfigureSession {
-                    Picker("計測方法", selection: Binding(
-                        get: { viewModel.mode },
-                        set: selectTimerMode
-                    )) {
-                        ForEach(TimerMode.allCases) { mode in
-                            Text(mode.displayName).tag(mode)
+                    VStack(spacing: 8) {
+                        if viewModel.isStudyTime && !isCoreTutorialStudy {
+                            HStack {
+                                focusCategorySelection
+                                Spacer(minLength: 0)
+                            }
                         }
+
+                        Picker("計測方法", selection: Binding(
+                            get: { viewModel.mode },
+                            set: selectTimerMode
+                        )) {
+                            ForEach(TimerMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(5)
+                        .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                        .coreTutorialTarget(.studyMode)
+                        .disabled(isCoreTutorialStudy)
                     }
-                    .pickerStyle(.segmented)
-                    .padding(5)
-                    .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
-                    .coreTutorialTarget(.studyMode)
-                    .disabled(isCoreTutorialStudy)
                 }
 
-                Text(viewModel.isStudyTime ? "FOCUS" : "BREAK")
-                    .font(.caption.weight(.bold))
-                    .tracking(3)
-                    .foregroundStyle(.white.opacity(0.8))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.16), in: Capsule())
+                if viewModel.canConfigureSession && viewModel.isStudyTime && !isCoreTutorialStudy {
+                    Button {
+                        showsFocusRules = true
+                    } label: {
+                        Label(StudyFocusRulesContent.title, systemImage: "questionmark.circle")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(.black.opacity(0.14), in: Capsule())
+                            .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("timer.focusRules")
+                }
 
                 HStack(spacing: 12) {
                     Text(viewModel.mode == .countdown
@@ -249,24 +345,21 @@ struct TimerView: View {
                     }
                 }
 
-                Text(sessionDescription)
-                    .font(.headline)
-                    .foregroundStyle(.white.opacity(0.9))
+                if viewModel.mode == .pomodoro {
+                    HStack(spacing: 6) {
+                        ForEach(1...max(viewModel.totalSets, 1), id: \.self) { setNumber in
+                            PomodoroProgressFish(isReached: setNumber <= viewModel.currentSet)
+                        }
 
-                if viewModel.canConfigureSession && viewModel.isStudyTime && !isCoreTutorialStudy {
-                    Button {
-                        showsFocusRules = true
-                    } label: {
-                        Label(StudyFocusRulesContent.title, systemImage: "questionmark.circle")
+                        Text("/ \(viewModel.totalSets)")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(.black.opacity(0.14), in: Capsule())
-                            .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 1))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.leading, 2)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("timer.focusRules")
+                    .frame(height: 22)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("ポモドーロの進捗")
+                    .accessibilityValue("\(viewModel.currentSet) / \(viewModel.totalSets)セット")
                 }
 
                 if viewModel.state == .paused {
@@ -338,6 +431,7 @@ struct TimerView: View {
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .onAppear {
+            _ = try? FocusCategoryService.createDefaultsIfNeeded(in: modelContext)
             configureStudyCompletion()
             prepareCoreTutorialStudyIfNeeded()
             viewModel.restorePersistedSessionIfNeeded()
@@ -564,6 +658,7 @@ struct TimerView: View {
             try? StudyHistoryService.addStudyMinutes(
                 completedStudyMinutes,
                 existingTodayMinutesBeforeCompletion: todayMinutesBeforeCompletion,
+                categoryID: viewModel.selectedCategoryID,
                 in: modelContext
             )
 
@@ -680,16 +775,6 @@ struct TimerView: View {
         }
     }
 
-    private var sessionDescription: String {
-        if !viewModel.isStudyTime {
-            return "☕️ 休憩時間"
-        }
-        if viewModel.mode == .pomodoro {
-            return "📚 勉強時間 ・ \(viewModel.currentSet)/\(viewModel.totalSets)セット"
-        }
-        return viewModel.mode == .stopwatch ? "⏱️ ストップウォッチ" : "📚 勉強時間"
-    }
-
     private func presentPendingCompletionReward() {
         if let pendingCompletionReward {
             completionReward = pendingCompletionReward
@@ -733,6 +818,52 @@ struct TimerView: View {
 
     private var isCoreTutorialStudy: Bool {
         coreTutorial?.usesTutorialStudySetup == true
+    }
+
+    private var orderedFocusCategories: [FocusCategory] {
+        FocusCategoryService.ordered(focusCategories)
+    }
+
+    private var selectedFocusCategory: FocusCategory? {
+        orderedFocusCategories.first { $0.id == viewModel.selectedCategoryID }
+    }
+
+    private var focusCategorySelection: some View {
+        Menu {
+            ForEach(orderedFocusCategories) { category in
+                Button {
+                    viewModel.selectCategory(category.id)
+                } label: {
+                    if viewModel.selectedCategoryID == category.id {
+                        Label(category.name, systemImage: "checkmark")
+                    } else {
+                        Text(category.name)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill((selectedFocusCategory?.colorKey ?? .studyBlue).swiftUIColor)
+                    .frame(width: 9, height: 9)
+
+                Text(selectedFocusCategory?.name ?? "勉強")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+            .frame(minHeight: 36)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("集中カテゴリ")
+        .accessibilityValue(selectedFocusCategory?.name ?? "勉強")
+        .accessibilityIdentifier("timer.focusCategory")
     }
 
     @ViewBuilder
@@ -793,6 +924,7 @@ struct TimerView: View {
         guard coreTutorial?.usesTutorialStudySetup == true else { return }
         viewModel.resetTimer()
         viewModel.selectMode(.pomodoro)
+        viewModel.selectCategory(FocusCategoryDefaults.studyID)
         viewModel.updateConfiguration(
             studyTime: CoreTutorialRewardService.studyMinutes,
             breakTime: PomodoroBreakConfiguration.defaultBreakMinutes,

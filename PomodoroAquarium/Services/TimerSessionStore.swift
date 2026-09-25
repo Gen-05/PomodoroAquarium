@@ -10,6 +10,8 @@ struct PersistedTimerSession: Codable, Equatable {
     let elapsedStudySeconds: Int?
     /// 旧保存データはカウントダウンとして復元する。
     let timerModeRawValue: String?
+    /// セッション開始時に選ばれた集中カテゴリ。旧保存データは「勉強」へfallbackする。
+    let selectedCategoryID: String?
     /// 離脱通知を同じ集中セッション単位で予約・解除するための識別子。
     /// 旧保存データとの互換性のためOptional。
     let backgroundNotificationSessionIdentifier: String?
@@ -64,6 +66,7 @@ final class TimerSessionStore {
         timeRemaining: Int,
         elapsedStudySeconds: Int,
         timerModeRawValue: String,
+        selectedCategoryID: String,
         backgroundNotificationSessionIdentifier: String?,
         lastHeartbeatDate: Date,
         backgroundEnteredAt: Date?,
@@ -80,6 +83,7 @@ final class TimerSessionStore {
             timeRemaining: timeRemaining,
             elapsedStudySeconds: elapsedStudySeconds,
             timerModeRawValue: timerModeRawValue,
+            selectedCategoryID: selectedCategoryID,
             backgroundNotificationSessionIdentifier: backgroundNotificationSessionIdentifier,
             lastHeartbeatDate: lastHeartbeatDate,
             backgroundEnteredAt: backgroundEnteredAt,

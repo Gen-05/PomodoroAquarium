@@ -4581,7 +4581,7 @@ private func makePlayerContainer() throws -> ModelContainer {
 private func makeStudyHistoryContainer() throws -> ModelContainer {
     let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
     return try ModelContainer(
-        for: StudyDailyRecord.self,
+        for: StudyDailyRecord.self, FocusSessionRecord.self,
         configurations: configuration
     )
 }

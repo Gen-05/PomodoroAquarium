@@ -7,6 +7,7 @@ enum StudyHistoryService {
         _ minutes: Int,
         on date: Date = Date(),
         existingTodayMinutesBeforeCompletion: Int = 0,
+        categoryID: String? = FocusCategoryDefaults.studyID,
         calendar: Calendar = .current,
         in context: ModelContext
     ) throws {
@@ -18,6 +19,17 @@ enum StudyHistoryService {
             predicate: #Predicate { $0.day >= day && $0.day < nextDay }
         )
         let existingRecord = try context.fetch(descriptor).first
+        if let existingRecord,
+           existingRecord.categoryHistoryMigratedAt == nil {
+            if existingRecord.studyMinutes > 0 {
+                context.insert(FocusSessionRecord(
+                    completedAt: existingRecord.day,
+                    durationMinutes: existingRecord.studyMinutes,
+                    categoryID: FocusCategoryDefaults.studyID
+                ))
+            }
+            existingRecord.categoryHistoryMigratedAt = date
+        }
         let baseline = max(existingRecord?.studyMinutes ?? 0, existingTodayMinutesBeforeCompletion)
         let (updatedMinutes, overflowed) = baseline.addingReportingOverflow(minutes)
         let safeMinutes = overflowed ? Int.max : updatedMinutes
@@ -27,6 +39,11 @@ enum StudyHistoryService {
         } else {
             context.insert(StudyDailyRecord(day: day, studyMinutes: safeMinutes))
         }
+        context.insert(FocusSessionRecord(
+            completedAt: date,
+            durationMinutes: minutes,
+            categoryID: FocusCategoryDefaults.resolvedCategoryID(categoryID)
+        ))
         try context.save()
     }
 

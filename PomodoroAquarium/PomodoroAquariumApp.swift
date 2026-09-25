@@ -50,6 +50,8 @@ struct PomodoroAquariumApp: App {
                     PlayerFish.self,
                     AquariumDecorationPlacement.self,
                     StudyDailyRecord.self,
+                    FocusCategory.self,
+                    FocusSessionRecord.self,
                     RewardHistoryEntry.self
                 ], inMemory: usesInMemoryUITestStore)
         }

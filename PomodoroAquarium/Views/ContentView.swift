@@ -6,9 +6,11 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
     @AppStorage(OnboardingStore.storageKey) private var hasCompletedOnboarding = false
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         Group {
@@ -24,8 +26,26 @@ struct ContentView: View {
                 .transition(.opacity)
             }
         }
+        .task {
+            _ = try? FocusCategoryService.createDefaultsIfNeeded(in: modelContext)
+            try? FocusSessionHistoryMigration.migrateLegacyDailyRecordsIfNeeded(
+                in: modelContext
+            )
+        }
     }
 }
 #Preview {
     ContentView()
+        .modelContainer(
+            for: [
+                Player.self,
+                PlayerFish.self,
+                AquariumDecorationPlacement.self,
+                StudyDailyRecord.self,
+                FocusCategory.self,
+                FocusSessionRecord.self,
+                RewardHistoryEntry.self
+            ],
+            inMemory: true
+        )
 }

@@ -725,6 +725,8 @@ struct MainTabView: View {
                 PlayerFish.self,
                 AquariumDecorationPlacement.self,
                 StudyDailyRecord.self,
+                FocusCategory.self,
+                FocusSessionRecord.self,
                 RewardHistoryEntry.self
             ],
             inMemory: true
