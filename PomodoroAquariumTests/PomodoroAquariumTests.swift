@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftData
+import SwiftUI
 import Testing
 @testable import PomodoroAquarium
 
@@ -382,7 +383,7 @@ struct PomodoroAquariumTests {
         #expect(notifications.history.count == 2)
     }
 
-    @Test func manualAndRecoveryExpiredStudyEndCancelNotifications() {
+    @Test func manualAndBackgroundFailureStudyEndCancelNotifications() {
         let manualClock = TestClock()
         let manualNotifications = TestNotificationService()
         let manual = TimerViewModel(
@@ -413,7 +414,7 @@ struct PomodoroAquariumTests {
         original.resumeTimer()
         recoveryClock.advance(by: 30 * 60)
         original.recordLastActiveTime()
-        recoveryClock.advance(by: TimerSessionStore.gracePeriod + 1)
+        recoveryClock.advance(by: BackgroundStudyLimit.failureInterval)
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "notification-new")
         let restored = TimerViewModel(
@@ -425,7 +426,7 @@ struct PomodoroAquariumTests {
         )
         restored.restorePersistedSessionIfNeeded()
         #expect(notifications.scheduled == nil)
-        #expect(restored.lastStudySessionEndReason == .recoveryExpired)
+        #expect(restored.lastStudySessionEndReason == .backgroundLimitExceeded)
     }
 
     @Test func pomodoroBreakNotificationFollowsStartPauseResumeAndCompletion() {
@@ -589,7 +590,7 @@ struct PomodoroAquariumTests {
         ) == 0)
     }
 
-    @Test func stopwatchModeAndElapsedTimeRestoreWithinGracePeriod() {
+    @Test func stopwatchModeAndElapsedTimeRestoreBeforeBackgroundLimit() {
         let clock = TestClock()
         let defaults = makeTimerDefaults()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
@@ -597,6 +598,8 @@ struct PomodoroAquariumTests {
         original.selectMode(.stopwatch)
         original.resumeTimer()
         clock.advance(by: 5 * 60)
+        original.recordLastActiveTime()
+        clock.advance(by: 2 * 60)
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
         let restored = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: newStore)
@@ -604,7 +607,7 @@ struct PomodoroAquariumTests {
 
         #expect(restored.mode == .stopwatch)
         #expect(restored.isRunning)
-        #expect(restored.stopwatchElapsedSeconds == 5 * 60)
+        #expect(restored.stopwatchElapsedSeconds == 7 * 60)
     }
 
     @Test func pomodoroStudyCompletionWaitsBeforeStartingBreak() {
@@ -830,6 +833,81 @@ struct PomodoroAquariumTests {
         viewModel.finishPomodoroSessionAfterBreak()
         #expect(viewModel.phase == .finished)
         #expect(!viewModel.locksMainTabNavigation)
+    }
+
+    @Test func idleTimerRequirementTracksRunningStudyPauseResumeBreakAndFinish() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 1,
+            breakTime: 1,
+            totalSets: 2,
+            now: { clock.now },
+            sessionStore: makeTimerStore()
+        )
+
+        #expect(!viewModel.requiresIdleTimerDisabled)
+        viewModel.resumeTimer()
+        #expect(viewModel.requiresIdleTimerDisabled)
+
+        viewModel.pauseTimer()
+        #expect(!viewModel.requiresIdleTimerDisabled)
+        viewModel.resumeTimer()
+        #expect(viewModel.requiresIdleTimerDisabled)
+
+        clock.advance(by: 60)
+        viewModel.synchronizeTime()
+        #expect(viewModel.phase == .breakTime)
+        #expect(!viewModel.requiresIdleTimerDisabled)
+
+        viewModel.beginPomodoroBreak()
+        #expect(!viewModel.requiresIdleTimerDisabled)
+        clock.advance(by: 60)
+        viewModel.synchronizeTime()
+        viewModel.finishPomodoroSessionAfterBreak()
+        #expect(viewModel.phase == .finished)
+        #expect(!viewModel.requiresIdleTimerDisabled)
+    }
+
+    @Test func idleTimerPolicyRequiresActiveProductionSession() {
+        #expect(StudyIdleTimerPolicy.shouldDisableIdleTimer(
+            sessionRequiresScreenAwake: true,
+            applicationIsActive: true,
+            isPreview: false
+        ))
+        #expect(!StudyIdleTimerPolicy.shouldDisableIdleTimer(
+            sessionRequiresScreenAwake: true,
+            applicationIsActive: false,
+            isPreview: false
+        ))
+        #expect(!StudyIdleTimerPolicy.shouldDisableIdleTimer(
+            sessionRequiresScreenAwake: true,
+            applicationIsActive: true,
+            isPreview: true
+        ))
+        #expect(!StudyIdleTimerPolicy.shouldDisableIdleTimer(
+            sessionRequiresScreenAwake: false,
+            applicationIsActive: true,
+            isPreview: false
+        ))
+    }
+
+    @Test func pomodoroCountdownAndStopwatchAllKeepScreenAwakeWhileStudying() {
+        for mode in TimerMode.allCases {
+            let viewModel = TimerViewModel(
+                studyTime: 25,
+                breakTime: 5,
+                sessionStore: makeTimerStore()
+            )
+            viewModel.selectMode(mode)
+            viewModel.resumeTimer()
+
+            #expect(viewModel.isStudyTime)
+            #expect(viewModel.isRunning)
+            #expect(viewModel.requiresIdleTimerDisabled)
+
+            viewModel.resetTimer()
+            #expect(!viewModel.requiresIdleTimerDisabled)
+        }
     }
 
     @Test func mainTabStructureMatchesHomeAquariumShopStatisticsAndMore() {
@@ -1438,7 +1516,7 @@ struct PomodoroAquariumTests {
         #expect(viewModel.endDate == nil)
     }
 
-    @Test func sameProcessBackgroundLongerThanGracePeriodStillContinues() {
+    @Test func sameProcessRunningSessionContinuesWithElapsedTime() {
         let clock = TestClock()
         let store = makeTimerStore(processIdentifier: "same-process")
         let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: store)
@@ -1457,6 +1535,7 @@ struct PomodoroAquariumTests {
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
         let oldViewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
         oldViewModel.startStopTimer()
+        oldViewModel.recordLastActiveTime()
         clock.advance(by: 60)
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
@@ -1468,7 +1547,381 @@ struct PomodoroAquariumTests {
         #expect(restored.timeRemaining == 24 * 60)
     }
 
-    @Test func newProcessRestoresSessionAfterFiveMinutes() {
+    @Test func runningStudyPersistsBackgroundEntryAndMeasuresActiveReturn() throws {
+        let clock = TestClock()
+        let store = makeTimerStore()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: store
+        )
+        viewModel.resumeTimer()
+
+        viewModel.recordLastActiveTime()
+        let enteredAt = try #require(store.load()?.backgroundEnteredAt)
+        #expect(enteredAt == clock.now)
+
+        // background通知が重複しても、最初に離れた時刻を上書きしない。
+        clock.advance(by: 10)
+        viewModel.recordLastActiveTime()
+        #expect(store.load()?.backgroundEnteredAt == enteredAt)
+
+        clock.advance(by: 20)
+        #expect(viewModel.recordActiveReturn() == 30)
+        #expect(viewModel.lastBackgroundDuration == 30)
+        #expect(viewModel.backgroundEnteredAt == nil)
+        #expect(store.load()?.backgroundEnteredAt == nil)
+    }
+
+    @Test func timerScenePhaseTrackingOnlyStartsInBackground() {
+        #expect(TimerScenePhaseTrackingPolicy.action(for: .active) == .measureActiveReturn)
+        #expect(TimerScenePhaseTrackingPolicy.action(for: .inactive) == .none)
+        #expect(TimerScenePhaseTrackingPolicy.action(for: .background) == .recordBackgroundEntry)
+    }
+
+    @Test func activeReturnConsumesBackgroundEntryOnlyOnce() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore()
+        )
+        viewModel.resumeTimer()
+        viewModel.recordLastActiveTime()
+        clock.advance(by: 42)
+
+        #expect(viewModel.recordActiveReturn() == 42)
+        #expect(viewModel.recordActiveReturn() == nil)
+        #expect(viewModel.lastBackgroundDuration == 42)
+
+        viewModel.recordLastActiveTime()
+        clock.advance(by: 60)
+        #expect(viewModel.recordActiveReturn() == 60)
+        #expect(viewModel.lastBackgroundDuration == 60)
+    }
+
+    @Test func pausedStudyAndBreakDoNotRecordBackgroundEntry() {
+        let clock = TestClock()
+        let pausedStore = makeTimerStore()
+        let pausedViewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: pausedStore
+        )
+        pausedViewModel.resumeTimer()
+        clock.advance(by: 30)
+        pausedViewModel.pauseTimer()
+        pausedViewModel.recordLastActiveTime()
+
+        #expect(pausedViewModel.backgroundEnteredAt == nil)
+        #expect(pausedStore.load()?.backgroundEnteredAt == nil)
+
+        let breakStore = makeTimerStore()
+        let breakViewModel = TimerViewModel(
+            studyTime: 1,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: breakStore
+        )
+        breakViewModel.resumeTimer()
+        clock.advance(by: 60)
+        breakViewModel.synchronizeTime()
+        breakViewModel.recordLastActiveTime()
+
+        #expect(!breakViewModel.isStudyTime)
+        #expect(breakViewModel.backgroundEnteredAt == nil)
+        #expect(breakStore.load() == nil)
+    }
+
+    @Test func newProcessRestoresAndMeasuresPersistedBackgroundEntry() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "background-old")
+        let original = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: oldStore
+        )
+        original.resumeTimer()
+        original.recordLastActiveTime()
+        clock.advance(by: 3 * 60)
+
+        let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "background-new")
+        let restored = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: newStore
+        )
+        restored.restorePersistedSessionIfNeeded()
+
+        #expect(restored.lastBackgroundDuration == TimeInterval(3 * 60))
+        #expect(restored.backgroundEnteredAt == nil)
+        #expect(newStore.load()?.backgroundEnteredAt == nil)
+        #expect(restored.isRunning)
+    }
+
+    @Test func runningStudySchedulesThreeAndFiveMinuteBackgroundNotifications() throws {
+        let clock = TestClock()
+        let store = makeTimerStore()
+        let notifications = TestNotificationService()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: store,
+            notificationService: notifications
+        )
+        viewModel.resumeTimer()
+
+        viewModel.recordLastActiveTime()
+
+        let enteredAt = try #require(store.load()?.backgroundEnteredAt)
+        let sessionIdentifier = try #require(
+            store.load()?.backgroundNotificationSessionIdentifier
+        )
+        let schedule = try #require(notifications.backgroundSchedules.first)
+        #expect(schedule.warningAt == enteredAt.addingTimeInterval(3 * 60))
+        #expect(schedule.failureAt == enteredAt.addingTimeInterval(5 * 60))
+        #expect(schedule.sessionIdentifier == sessionIdentifier)
+        #expect(notifications.scheduled == nil)
+
+        // 同じ離脱中にscene通知が重複しても、同じsession IDの予約は1組だけ残す。
+        clock.advance(by: 10)
+        viewModel.recordLastActiveTime()
+        #expect(notifications.backgroundSchedules.count == 1)
+        #expect(notifications.backgroundSchedules.first?.warningAt == schedule.warningAt)
+        #expect(notifications.backgroundSchedules.first?.failureAt == schedule.failureAt)
+    }
+
+    @Test func activeReturnAtTwoHundredNinetyNineSecondsContinuesSession() throws {
+        let clock = TestClock()
+        let store = makeTimerStore()
+        let notifications = TestNotificationService()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: store,
+            notificationService: notifications
+        )
+        viewModel.resumeTimer()
+        viewModel.recordLastActiveTime()
+        let sessionIdentifier = try #require(
+            store.load()?.backgroundNotificationSessionIdentifier
+        )
+
+        clock.advance(by: 299)
+        #expect(viewModel.recordActiveReturn() == 299)
+
+        #expect(!viewModel.didExceedBackgroundLimit)
+        #expect(notifications.backgroundSchedules.isEmpty)
+        #expect(notifications.backgroundCancellationIdentifiers.contains {
+            $0 == sessionIdentifier
+        })
+        #expect(viewModel.isRunning)
+        #expect(viewModel.lastStudySessionEndReason == nil)
+        #expect(notifications.scheduled == .study(clock.now.addingTimeInterval(25 * 60 - 299)))
+    }
+
+    @Test func activeReturnAtFiveMinutesFailsSessionWithoutCompletionCallback() {
+        let clock = TestClock()
+        let notifications = TestNotificationService()
+        let store = makeTimerStore()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: store,
+            notificationService: notifications
+        )
+        var completionCount = 0
+        viewModel.onStudyFinished = { completionCount += 1 }
+        viewModel.resumeTimer()
+        viewModel.recordLastActiveTime()
+
+        clock.advance(by: 5 * 60)
+        #expect(viewModel.recordActiveReturn() == TimeInterval(5 * 60))
+
+        #expect(!viewModel.didExceedBackgroundLimit)
+        #expect(!viewModel.isRunning)
+        #expect(viewModel.isStudyTime)
+        #expect(viewModel.phase == .finished)
+        #expect(viewModel.lastCompletedStudyMinutes == 0)
+        #expect(viewModel.lastStudySessionEndReason == .backgroundLimitExceeded)
+        #expect(viewModel.shouldPresentBackgroundFailureAlert)
+        #expect(!viewModel.requiresIdleTimerDisabled)
+        #expect(completionCount == 0)
+        #expect(store.load() == nil)
+    }
+
+    @Test func backgroundFailureDoesNotAwardFishPointsDailyCountOrStudyMinutes() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: TestNotificationService()
+        )
+        let player = Player(totalStudyMinutes: 40, todayStudyMinutes: 15, coins: 90)
+        let dailyDefaults = makeTimerDefaults()
+        DailyFishAcquisitionStore.resetIfNeeded(on: clock.now, defaults: dailyDefaults)
+        var completionCount = 0
+        viewModel.onStudyFinished = {
+            completionCount += 1
+            player.totalStudyMinutes += 25
+            player.todayStudyMinutes += 25
+            player.coins += 10
+            player.ownedFish.append(PlayerFish(species: .clownfish))
+            DailyFishAcquisitionStore.recordAcquisition(
+                on: clock.now,
+                defaults: dailyDefaults
+            )
+        }
+        viewModel.resumeTimer()
+        viewModel.recordLastActiveTime()
+
+        clock.advance(by: 6 * 60)
+        viewModel.recordActiveReturn()
+
+        #expect(completionCount == 0)
+        #expect(player.totalStudyMinutes == 40)
+        #expect(player.todayStudyMinutes == 15)
+        #expect(player.coins == 90)
+        #expect(player.ownedFish.isEmpty)
+        #expect(dailyDefaults.integer(forKey: DailyFishAcquisitionStorageKey.count) == 0)
+    }
+
+    @Test func pausedStudyAndRunningBreakDoNotScheduleBackgroundNotifications() {
+        let clock = TestClock()
+        let pausedNotifications = TestNotificationService()
+        let pausedViewModel = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: pausedNotifications
+        )
+        pausedViewModel.resumeTimer()
+        pausedViewModel.pauseTimer()
+        pausedViewModel.recordLastActiveTime()
+        #expect(pausedNotifications.backgroundSchedules.isEmpty)
+
+        let breakNotifications = TestNotificationService()
+        let breakViewModel = TimerViewModel(
+            studyTime: 1,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: makeTimerStore(),
+            notificationService: breakNotifications
+        )
+        breakViewModel.resumeTimer()
+        clock.advance(by: 60)
+        breakViewModel.synchronizeTime()
+        breakViewModel.beginPomodoroBreak()
+        breakViewModel.recordLastActiveTime()
+        #expect(!breakViewModel.isStudyTime)
+        #expect(breakNotifications.backgroundSchedules.isEmpty)
+    }
+
+    @Test func newProcessRestoresBackgroundFailureAfterSixMinutes() throws {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let oldStore = TimerSessionStore(
+            defaults: defaults,
+            processIdentifier: "background-limit-old"
+        )
+        let original = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: oldStore,
+            notificationService: TestNotificationService()
+        )
+        original.resumeTimer()
+        original.recordLastActiveTime()
+        let sessionIdentifier = try #require(
+            oldStore.load()?.backgroundNotificationSessionIdentifier
+        )
+        clock.advance(by: 6 * 60)
+
+        let restoredNotifications = TestNotificationService()
+        let newStore = TimerSessionStore(
+            defaults: defaults,
+            processIdentifier: "background-limit-new"
+        )
+        let restored = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: newStore,
+            notificationService: restoredNotifications
+        )
+        restored.restorePersistedSessionIfNeeded()
+
+        #expect(!restored.didExceedBackgroundLimit)
+        #expect(restored.lastBackgroundDuration == TimeInterval(6 * 60))
+        #expect(!restored.isRunning)
+        #expect(restored.phase == .finished)
+        #expect(restored.lastStudySessionEndReason == .backgroundLimitExceeded)
+        #expect(restored.shouldPresentBackgroundFailureAlert)
+        #expect(newStore.load()?.backgroundEnteredAt == nil)
+        #expect(newStore.load() == nil)
+        #expect(restoredNotifications.backgroundCancellationIdentifiers.contains {
+            $0 == sessionIdentifier
+        })
+    }
+
+    @Test func backgroundFailurePrecedesPomodoroCompletionAfterRelaunch() {
+        let clock = TestClock()
+        let defaults = makeTimerDefaults()
+        let originalStore = TimerSessionStore(
+            defaults: defaults,
+            processIdentifier: "background-completion-old"
+        )
+        let original = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: originalStore,
+            notificationService: TestNotificationService()
+        )
+        original.resumeTimer()
+        original.recordLastActiveTime()
+        clock.advance(by: 25 * 60 + 30)
+
+        let restoredStore = TimerSessionStore(
+            defaults: defaults,
+            processIdentifier: "background-completion-new"
+        )
+        let restored = TimerViewModel(
+            studyTime: 25,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: restoredStore,
+            notificationService: TestNotificationService()
+        )
+        var completionCount = 0
+        restored.onStudyFinished = { completionCount += 1 }
+
+        restored.restorePersistedSessionIfNeeded()
+        restored.synchronizeTime()
+        restored.tick()
+
+        #expect(completionCount == 0)
+        #expect(restored.lastCompletedStudyMinutes == 0)
+        #expect(restored.lastStudySessionEndReason == .backgroundLimitExceeded)
+        #expect(restored.phase == .finished)
+        #expect(!restored.isRunning)
+        #expect(restoredStore.load() == nil)
+    }
+
+    @Test func legacyRunningSessionWithoutBackgroundEntryIsInterruptedWithoutReward() {
         let clock = TestClock()
         let defaults = makeTimerDefaults()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
@@ -1478,23 +1931,45 @@ struct PomodoroAquariumTests {
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
         let restored = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        var completionCount = 0
+        restored.onStudyFinished = { completionCount += 1 }
         restored.restorePersistedSessionIfNeeded()
 
-        #expect(restored.isRunning)
-        #expect(restored.isStudyTime)
-        #expect(restored.timeRemaining == 20 * 60)
+        #expect(completionCount == 0)
+        #expect(!restored.isRunning)
+        #expect(restored.phase == .finished)
+        #expect(restored.lastCompletedStudyMinutes == 0)
+        #expect(restored.lastStudySessionEndReason == .interrupted)
+        #expect(newStore.load() == nil)
     }
 
-    @Test func expiredSessionWithinGracePeriodCompletesOnlyOnce() {
+    @Test func normalEndBeforeBackgroundFailureCompletesOnlyOnce() {
         let clock = TestClock()
         let defaults = makeTimerDefaults()
+        let notifications = TestNotificationService()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
-        let oldViewModel = TimerViewModel(studyTime: 1, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
+        let oldViewModel = TimerViewModel(
+            studyTime: 4,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: oldStore,
+            notificationService: notifications
+        )
         oldViewModel.startStopTimer()
-        clock.advance(by: 60)
+        oldViewModel.recordLastActiveTime()
+        #expect(notifications.backgroundSchedules.first?.warningAt == clock.now.addingTimeInterval(3 * 60))
+        #expect(notifications.backgroundSchedules.first?.failureAt == nil)
+        #expect(notifications.scheduled == .study(clock.now.addingTimeInterval(4 * 60)))
+        clock.advance(by: 4 * 60)
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
-        let restored = TimerViewModel(studyTime: 1, breakTime: 5, now: { clock.now }, sessionStore: newStore)
+        let restored = TimerViewModel(
+            studyTime: 4,
+            breakTime: 5,
+            now: { clock.now },
+            sessionStore: newStore,
+            notificationService: notifications
+        )
         var completionCount = 0
         restored.onStudyFinished = { completionCount += 1 }
         restored.restorePersistedSessionIfNeeded()
@@ -1502,12 +1977,13 @@ struct PomodoroAquariumTests {
         restored.tick()
 
         #expect(completionCount == 1)
+        #expect(restored.lastStudySessionEndReason == .completed)
         #expect(!restored.isStudyTime)
         #expect(!restored.isRunning)
         #expect(newStore.load() == nil)
     }
 
-    @Test func sessionOlderThanTenMinutesFinishesUsingSavedElapsedTime() {
+    @Test func backgroundFailurePrecedesLaterNormalEnd() {
         let clock = TestClock()
         let defaults = makeTimerDefaults()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
@@ -1515,7 +1991,7 @@ struct PomodoroAquariumTests {
         oldViewModel.resumeTimer()
         clock.advance(by: 30 * 60)
         oldViewModel.recordLastActiveTime()
-        clock.advance(by: 10 * 60 + 1)
+        clock.advance(by: 5 * 60)
 
         var completionCount = 0
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
@@ -1525,19 +2001,15 @@ struct PomodoroAquariumTests {
         }
         restored.restorePersistedSessionIfNeeded()
 
-        #expect(completionCount == 1)
-        #expect(restored.lastCompletedStudyMinutes == 40)
-        #expect(restored.lastStudySessionEndReason == .recoveryExpired)
+        #expect(completionCount == 0)
+        #expect(restored.lastCompletedStudyMinutes == 0)
+        #expect(restored.lastStudySessionEndReason == .backgroundLimitExceeded)
         #expect(restored.isStudyTime)
         #expect(!restored.shouldBeginPomodoroBreak)
-        #expect(CurrencyService.studyCompletionReward(
-            for: restored.lastCompletedStudyMinutes,
-            todayStudyMinutesBeforeCompletion: 0
-        ) == 10)
         #expect(newStore.load() == nil)
     }
 
-    @Test func pausedSessionRestoresPausedWithinGracePeriod() {
+    @Test func pausedSessionRestoresWithoutBackgroundFailure() {
         let clock = TestClock()
         let defaults = makeTimerDefaults()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
@@ -1545,7 +2017,7 @@ struct PomodoroAquariumTests {
         oldViewModel.startStopTimer()
         clock.advance(by: 30)
         oldViewModel.startStopTimer()
-        clock.advance(by: 60)
+        clock.advance(by: 20 * 60)
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
         let restored = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: newStore)
@@ -1601,23 +2073,23 @@ struct PomodoroAquariumTests {
         #expect(!store.consumeInterruptionBanner())
     }
 
-    @Test func expiredSessionIsReturnedForViewModelCompletion() {
+    @Test func legacyRunningSessionWithoutBackgroundEntryIsMarkedInterrupted() {
         let clock = TestClock()
         let defaults = makeTimerDefaults()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
         let oldViewModel = TimerViewModel(studyTime: 25, breakTime: 5, now: { clock.now }, sessionStore: oldStore)
         oldViewModel.startStopTimer()
-        clock.advance(by: 10 * 60 + 1)
+        clock.advance(by: 60)
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
-        guard case .expired = newStore.launchStatus(at: clock.now) else {
-            Issue.record("10分を超えたセッションがexpiredになっていません")
+        guard case .interrupted = newStore.launchStatus(at: clock.now) else {
+            Issue.record("background時刻のない旧sessionがinterruptedになっていません")
             return
         }
         #expect(newStore.load() != nil)
     }
 
-    @Test func expiredStudyUnderTwentyFiveMinutesHasNoReward() {
+    @Test func persistedBackgroundEntryUsesBackgroundFailure() {
         let clock = TestClock()
         let defaults = makeTimerDefaults()
         let oldStore = TimerSessionStore(defaults: defaults, processIdentifier: "old")
@@ -1625,20 +2097,16 @@ struct PomodoroAquariumTests {
         original.resumeTimer()
         clock.advance(by: 10 * 60)
         original.recordLastActiveTime()
-        clock.advance(by: 10 * 60 + 1)
+        clock.advance(by: 5 * 60)
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "new")
         let restored = TimerViewModel(studyTime: 60, breakTime: 5, now: { clock.now }, sessionStore: newStore)
         restored.restorePersistedSessionIfNeeded()
 
-        #expect(restored.lastCompletedStudyMinutes == 20)
-        #expect(restored.lastStudySessionEndReason == .recoveryExpired)
+        #expect(restored.lastCompletedStudyMinutes == 0)
+        #expect(restored.lastStudySessionEndReason == .backgroundLimitExceeded)
         #expect(restored.isStudyTime)
         #expect(!restored.shouldBeginPomodoroBreak)
-        #expect(CurrencyService.studyCompletionReward(
-            for: restored.lastCompletedStudyMinutes,
-            todayStudyMinutesBeforeCompletion: 0
-        ) == 0)
     }
 
     @Test @MainActor func defaultAquariumDecorationsAreCreatedOnFirstLaunch() throws {
@@ -3455,7 +3923,7 @@ struct PomodoroAquariumTests {
         #expect(CurrencyService.balance(of: player) == 10)
     }
 
-    @Test @MainActor func expiredStudyUnderTwentyFiveMinutesDoesNotAwardCoins() throws {
+    @Test @MainActor func backgroundFailedStudyDoesNotAwardCoins() throws {
         let container = try makePlayerContainer()
         let context = container.mainContext
         let player = Player()
@@ -3472,7 +3940,7 @@ struct PomodoroAquariumTests {
         oldViewModel.startStopTimer()
         clock.advance(by: 10 * 60)
         oldViewModel.recordLastActiveTime()
-        clock.advance(by: 10 * 60 + 1)
+        clock.advance(by: 5 * 60)
 
         let newStore = TimerSessionStore(defaults: defaults, processIdentifier: "coin-new")
         let restored = TimerViewModel(
@@ -3992,10 +4460,18 @@ private final class TestNotificationService: TimerNotificationScheduling {
         case breakTime(Date)
     }
 
+    struct BackgroundSchedule: Equatable {
+        let warningAt: Date?
+        let failureAt: Date?
+        let sessionIdentifier: String
+    }
+
     private(set) var scheduled: Scheduled?
     private(set) var history: [Scheduled] = []
     private(set) var authorizationRequestCount = 0
     private(set) var cancellationCount = 0
+    private(set) var backgroundSchedules: [BackgroundSchedule] = []
+    private(set) var backgroundCancellationIdentifiers: [String?] = []
     var authorizationState: NotificationAuthorizationState = .authorized
     var notificationsEnabled = true
 
@@ -4027,9 +4503,32 @@ private final class TestNotificationService: TimerNotificationScheduling {
         history.append(notification)
     }
 
+    func scheduleBackgroundLimitNotifications(
+        warningAt: Date?,
+        failureAt: Date?,
+        sessionIdentifier: String
+    ) {
+        guard notificationsEnabled, authorizationState == .authorized else { return }
+        backgroundSchedules.removeAll { $0.sessionIdentifier == sessionIdentifier }
+        backgroundSchedules.append(BackgroundSchedule(
+            warningAt: warningAt,
+            failureAt: failureAt,
+            sessionIdentifier: sessionIdentifier
+        ))
+    }
+
     func cancelCurrentSessionNotification() {
         cancellationCount += 1
         scheduled = nil
+    }
+
+    func cancelBackgroundLimitNotifications(for sessionIdentifier: String?) {
+        backgroundCancellationIdentifiers.append(sessionIdentifier)
+        if let sessionIdentifier {
+            backgroundSchedules.removeAll { $0.sessionIdentifier == sessionIdentifier }
+        } else {
+            backgroundSchedules.removeAll()
+        }
     }
 }
 

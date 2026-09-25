@@ -495,13 +495,13 @@ struct FishRewardView: View {
     }
 
     private var species: FishSpecies { result.species }
-    private var rarityColor: Color { species.rarity.rewardColor }
+    private var rarityColor: Color { result.rarity.rewardColor }
     private var glowStyle: FishRewardGlowStyle {
-        FishRewardGlowStyle.style(for: species.rarity)
+        FishRewardGlowStyle.style(for: result.rarity)
     }
     private var backgroundColors: [Color] {
         presentation.showsRarityAppearance
-            ? species.rarity.rewardBackgroundColors
+            ? result.rarity.rewardBackgroundColors
             : FishRewardMysteryAppearance.backgroundColors
     }
     private var ambientGlowColor: Color {
@@ -599,7 +599,7 @@ struct FishRewardView: View {
     @ViewBuilder
     private var resultRarityLabel: some View {
         if presentation.showsResultInformation {
-            Text(species.rarity.rawValue.uppercased())
+            Text(result.rarity.rawValue.uppercased())
                 .font(.headline.weight(.bold))
                 .tracking(1.4)
                 .foregroundStyle(rarityColor)
@@ -679,9 +679,9 @@ struct FishRewardView: View {
 
                         if presentation.phase == .reveal {
                             FishRewardRevealFlash(
-                                style: FishRewardRevealFlashStyle.style(for: species.rarity),
+                                style: FishRewardRevealFlashStyle.style(for: result.rarity),
                                 color: rarityColor,
-                                holdDuration: FishRewardPresentationTiming.revealHoldDuration(for: species.rarity)
+                                holdDuration: FishRewardPresentationTiming.revealHoldDuration(for: result.rarity)
                             )
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .transition(.identity)
@@ -832,7 +832,7 @@ struct FishRewardView: View {
                 .accessibilityIdentifier("fishReward.tapPrompt")
         } else if presentation.showsResultInformation {
             VStack(spacing: 8) {
-                Text("\(species.name)をゲット！")
+                Text("\(result.fishName)をゲット！")
                     .font(.title.bold())
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
@@ -901,7 +901,7 @@ struct FishRewardView: View {
             }
             do {
                 try await Task.sleep(for: .seconds(
-                    FishRewardPresentationTiming.revealHoldDuration(for: species.rarity)
+                    FishRewardPresentationTiming.revealHoldDuration(for: result.rarity)
                 ))
             } catch {
                 return

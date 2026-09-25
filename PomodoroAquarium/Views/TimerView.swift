@@ -108,6 +108,13 @@ enum CountdownDurationConfiguration {
     }
 }
 
+enum StudyFocusRulesContent {
+    static let title = "水族館内のルール"
+    static let introduction = "集中を始める前に、ひとつだけ大切なことがあります。"
+    static let keepScreenOpen = "集中を始めたら、魚たちと一緒に水族館で過ごしましょう。"
+    static let backgroundLimit = "水族館を離れて3分経つと魚たちがお知らせします。\n5分以上離れると、今回の集中は終了します。"
+}
+
 struct TimerView: View {
     
     let studyTime: Int
@@ -169,10 +176,12 @@ struct TimerView: View {
     @State private var pendingFishAcquisition: FishAcquisitionResult?
     @State private var completionReward: StudyCompletionReward?
     @State private var pendingCompletionReward: StudyCompletionReward?
+    @State private var rewardHistoryID: UUID?
     @State private var studyFinishedMinutes: Int?
     @State private var studyFinishedEndReason: StudySessionEndReason = .completed
     @State private var showsEndConfirmation = false
     @State private var showsTimeSettings = false
+    @State private var showsFocusRules = false
     @State private var showsNotificationIntroduction = false
     @State private var tutorialCompletionTask: Task<Void, Never>?
     @State private var isCompletingCoreTutorialStudy = false
@@ -243,6 +252,22 @@ struct TimerView: View {
                 Text(sessionDescription)
                     .font(.headline)
                     .foregroundStyle(.white.opacity(0.9))
+
+                if viewModel.canConfigureSession && viewModel.isStudyTime && !isCoreTutorialStudy {
+                    Button {
+                        showsFocusRules = true
+                    } label: {
+                        Label(StudyFocusRulesContent.title, systemImage: "questionmark.circle")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(.black.opacity(0.14), in: Capsule())
+                            .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("timer.focusRules")
+                }
 
                 if viewModel.state == .paused {
                     Button("再開する") {
@@ -377,6 +402,20 @@ struct TimerView: View {
         } message: {
             Text("休憩が終了しました。次の勉強セットを開始できます。")
         }
+        .alert("魚が逃げてしまいました", isPresented: Binding(
+            get: { viewModel.shouldPresentBackgroundFailureAlert },
+            set: { isPresented in
+                if !isPresented {
+                    viewModel.acknowledgeBackgroundFailure()
+                }
+            }
+        )) {
+            Button("OK") {
+                viewModel.acknowledgeBackgroundFailure()
+            }
+        } message: {
+            Text("5分以上アプリを離れたため、今回の集中は終了しました。")
+        }
         .sheet(
             isPresented: $showsTimeSettings
         ) {
@@ -387,6 +426,9 @@ struct TimerView: View {
                 setCount: pomodoroSetCount,
                 onSave: saveTimeSettings
             )
+        }
+        .sheet(isPresented: $showsFocusRules) {
+            StudyFocusRulesSheet()
         }
         .sheet(
             isPresented: Binding(
@@ -430,7 +472,7 @@ struct TimerView: View {
                     }
                 }
             ),
-            onDismiss: finishStudyFlow
+            onDismiss: finishFishRewardPresentation
         ) {
             if let fishAcquisition {
                 FishRewardView(result: fishAcquisition)
@@ -482,6 +524,7 @@ struct TimerView: View {
             studyFinishedEndReason = viewModel.lastStudySessionEndReason ?? .completed
             studyFinishedMinutes = completedStudyMinutes
             guard let player else {
+                rewardHistoryID = nil
                 pendingFishAcquisition = nil
                 pendingCompletionReward = StudyCompletionReward(
                     studyReward: 0,
@@ -493,6 +536,7 @@ struct TimerView: View {
             }
 
             if coreTutorial?.step == .reward {
+                rewardHistoryID = nil
                 let fishResult = try? coreTutorial?.grantRewardIfNeeded(
                     to: player,
                     in: modelContext
@@ -526,6 +570,7 @@ struct TimerView: View {
             guard StudyCompletionReward.isEligibleForExistingRewards(
                 forStudyMinutes: completedStudyMinutes
             ) else {
+                rewardHistoryID = nil
                 pendingFishAcquisition = nil
                 pendingCompletionReward = StudyCompletionReward(
                     studyReward: 0,
@@ -539,7 +584,6 @@ struct TimerView: View {
             let fishResult = FishAcquisitionResult.capture(for: player) {
                 FishRewardService.awardFish(for: completedStudyMinutes, to: player)
             }
-            pendingFishAcquisition = fishResult
             if fishResult != nil {
                 DailyFishAcquisitionStore.recordAcquisition()
             }
@@ -560,9 +604,25 @@ struct TimerView: View {
                 in: modelContext
             )
 
+            let streakReward = streakUpdate?.awardedCoins ?? 0
+            if let fishResult {
+                let (totalPointDelta, overflowed) = awardedStudyReward
+                    .addingReportingOverflow(streakReward)
+                let history = try? RewardHistoryService.record(
+                    result: fishResult,
+                    pointDelta: overflowed ? Int.max : totalPointDelta,
+                    in: modelContext
+                )
+                rewardHistoryID = history?.id
+            } else {
+                rewardHistoryID = nil
+            }
+            // 履歴を保存してから、各報酬画面を表示可能なpending stateへ渡す。
+            pendingFishAcquisition = fishResult
+
             pendingCompletionReward = StudyCompletionReward(
                 studyReward: awardedStudyReward,
-                streakReward: streakUpdate?.awardedCoins ?? 0,
+                streakReward: streakReward,
                 streakDays: streakUpdate?.streakDays ?? player.studyStreakDays,
                 didEarnFish: fishResult != nil
             )
@@ -648,6 +708,14 @@ struct TimerView: View {
         }
     }
 
+    private func finishFishRewardPresentation() {
+        if let rewardHistoryID {
+            try? RewardHistoryService.acknowledge(id: rewardHistoryID, in: modelContext)
+            self.rewardHistoryID = nil
+        }
+        finishStudyFlow()
+    }
+
     private func finishStudyFlow() {
         if coreTutorial?.step == .reward {
             coreTutorial?.didDismissReward()
@@ -703,13 +771,16 @@ struct TimerView: View {
         } else if coreTutorial?.step == .waitingForStudyStartTap {
             let pages = CoreTutorialConversationScript.studyStart
             let index = coreTutorial?.conversationIndex ?? 0
+            let isStartInteractionPage = index == pages.count - 1
             CoreTutorialSpotlightStep(
-                targetFrame: targets[.studyStart].map { geometry[$0] },
+                targetFrame: isStartInteractionPage
+                    ? targets[.studyStart].map { geometry[$0] }
+                    : nil,
                 page: coreTutorialConversationPage(in: pages, at: index),
                 pageIndex: index,
-                showsPointingHand: index == pages.count - 1,
-                allowsConversationAdvance: index < pages.count - 1,
-                allowsTargetInteraction: index == pages.count - 1,
+                showsPointingHand: isStartInteractionPage,
+                allowsConversationAdvance: !isStartInteractionPage,
+                allowsTargetInteraction: isStartInteractionPage,
                 onConversationAdvance: {
                     _ = coreTutorial?.advanceConversation(totalCount: pages.count)
                 },
@@ -763,6 +834,44 @@ private struct CoreTutorialStudyStartingShield: View {
         .accessibilityLabel("集中完了を準備中")
         .accessibilityAddTraits(.isModal)
         .accessibilityIdentifier("coreTutorial.studyStartingShield")
+    }
+}
+
+private struct StudyFocusRulesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                Label {
+                    Text(StudyFocusRulesContent.keepScreenOpen)
+                } icon: {
+                    Image(systemName: "iphone")
+                        .foregroundStyle(.cyan)
+                }
+
+                Label {
+                    Text(StudyFocusRulesContent.backgroundLimit)
+                } icon: {
+                    Image(systemName: "clock.badge.exclamationmark")
+                        .foregroundStyle(.cyan)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .font(.body)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 24)
+            .padding(.top, 24)
+            .navigationTitle(StudyFocusRulesContent.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("閉じる") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.height(280)])
     }
 }
 

@@ -388,5 +388,11 @@ private final class TestCoreTutorialNotificationService: TimerNotificationSchedu
     func requestAuthorization(_ completion: @escaping @Sendable (Bool) -> Void) { completion(false) }
     func scheduleStudyEnd(at date: Date) {}
     func scheduleBreakEnd(at date: Date) {}
+    func scheduleBackgroundLimitNotifications(
+        warningAt: Date?,
+        failureAt: Date?,
+        sessionIdentifier: String
+    ) {}
     func cancelCurrentSessionNotification() {}
+    func cancelBackgroundLimitNotifications(for sessionIdentifier: String?) {}
 }

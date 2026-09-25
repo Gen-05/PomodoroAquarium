@@ -1,6 +1,7 @@
 import Combine
 import SwiftData
 import SwiftUI
+import UIKit
 
 enum MainAppTab: Hashable, CaseIterable, Identifiable {
     case home
@@ -139,6 +140,37 @@ enum AquariumViewingControlsPolicy {
     }
 }
 
+enum TimerScenePhaseTrackingAction: Equatable {
+    case measureActiveReturn
+    case recordBackgroundEntry
+    case none
+}
+
+enum TimerScenePhaseTrackingPolicy {
+    static func action(for scenePhase: ScenePhase) -> TimerScenePhaseTrackingAction {
+        switch scenePhase {
+        case .active:
+            .measureActiveReturn
+        case .background:
+            .recordBackgroundEntry
+        case .inactive:
+            .none
+        @unknown default:
+            .none
+        }
+    }
+}
+
+enum StudyIdleTimerPolicy {
+    static func shouldDisableIdleTimer(
+        sessionRequiresScreenAwake: Bool,
+        applicationIsActive: Bool,
+        isPreview: Bool
+    ) -> Bool {
+        sessionRequiresScreenAwake && applicationIsActive && !isPreview
+    }
+}
+
 struct MainTabSelectionState {
     private(set) var selection: MainAppTab = .home
 
@@ -157,6 +189,7 @@ struct MainTabSelectionState {
 struct MainTabView: View {
     @Query private var players: [Player]
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.modelContext) private var modelContext
     @State private var timerViewModel: TimerViewModel
     @State private var tabSelectionState = MainTabSelectionState()
     @State private var aquariumEditorNavigation = AquariumEditorNavigationCoordinator()
@@ -166,6 +199,11 @@ struct MainTabView: View {
     @State private var coreTutorial: CoreTutorialCoordinator
     @State private var showsCoreTutorialCompletion = false
     @State private var hasReconciledCoreTutorial = false
+    @State private var hasCheckedRewardRecovery = false
+    @State private var pendingRewardRecovery: RewardHistorySnapshot?
+    @State private var replayReward: RewardHistorySnapshot?
+    @State private var replayRewardHistoryID: UUID?
+    @State private var showsRewardRecoveryPrompt = false
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let appDefaults: UserDefaults
@@ -341,13 +379,21 @@ struct MainTabView: View {
                 timerViewModel.tick()
             }
             .onChange(of: scenePhase) { _, newPhase in
-                if newPhase == .active {
+                switch TimerScenePhaseTrackingPolicy.action(for: newPhase) {
+                case .measureActiveReturn:
+                    timerViewModel.recordActiveReturn()
                     timerViewModel.synchronizeTime()
                     updateAquariumViewingControlsAutoHide()
-                } else {
+                case .recordBackgroundEntry:
                     timerViewModel.recordLastActiveTime()
                     stopAquariumViewingControlsAutoHide()
+                case .none:
+                    break
                 }
+                synchronizeIdleTimer()
+            }
+            .onChange(of: timerViewModel.requiresIdleTimerDisabled) { _, _ in
+                synchronizeIdleTimer()
             }
             .onChange(of: timerViewModel.locksMainTabNavigation) { _, isLocked in
                 if isLocked {
@@ -364,13 +410,32 @@ struct MainTabView: View {
             .onDisappear {
                 aquariumViewingControlsAutoHideTask?.cancel()
                 aquariumViewingControlsAutoHideTask = nil
+                setIdleTimerDisabled(false)
             }
             .onAppear {
                 reconcileCoreTutorialIfNeeded()
+                checkForUnacknowledgedRewardIfNeeded()
+                synchronizeIdleTimer()
             }
             .onChange(of: players.count) { _, _ in
                 reconcileCoreTutorialIfNeeded()
             }
+        }
+        .alert("前回の報酬があります", isPresented: $showsRewardRecoveryPrompt) {
+            Button("あとで", role: .cancel) {
+                pendingRewardRecovery = nil
+            }
+            Button("見る") {
+                guard let pendingRewardRecovery else { return }
+                replayRewardHistoryID = pendingRewardRecovery.id
+                replayReward = pendingRewardRecovery
+                self.pendingRewardRecovery = nil
+            }
+        } message: {
+            Text("獲得した魚とポイントをもう一度確認しますか？")
+        }
+        .fullScreenCover(item: $replayReward, onDismiss: acknowledgeReplayedReward) { reward in
+            FishRewardView(result: reward.replayResult())
         }
     }
 
@@ -498,6 +563,20 @@ struct MainTabView: View {
         areAquariumViewingControlsVisible = true
     }
 
+    private func synchronizeIdleTimer() {
+        let shouldDisable = StudyIdleTimerPolicy.shouldDisableIdleTimer(
+            sessionRequiresScreenAwake: timerViewModel.requiresIdleTimerDisabled,
+            applicationIsActive: scenePhase == .active,
+            isPreview: coreTutorialMode == .preview
+        )
+        setIdleTimerDisabled(shouldDisable)
+    }
+
+    private func setIdleTimerDisabled(_ isDisabled: Bool) {
+        guard UIApplication.shared.isIdleTimerDisabled != isDisabled else { return }
+        UIApplication.shared.isIdleTimerDisabled = isDisabled
+    }
+
     private func updateAquariumViewingControlsAutoHide() {
         if isAquariumViewingControlsAutoHideActive {
             showAndScheduleAquariumViewingControls()
@@ -575,6 +654,24 @@ struct MainTabView: View {
         hasReconciledCoreTutorial = true
     }
 
+    private func checkForUnacknowledgedRewardIfNeeded() {
+        guard !hasCheckedRewardRecovery,
+              coreTutorialMode == .production,
+              !coreTutorial.isActive else { return }
+        hasCheckedRewardRecovery = true
+        guard let entry = try? RewardHistoryService.latestUnacknowledged(in: modelContext) else {
+            return
+        }
+        pendingRewardRecovery = RewardHistorySnapshot(entry: entry)
+        showsRewardRecoveryPrompt = true
+    }
+
+    private func acknowledgeReplayedReward() {
+        guard let replayRewardHistoryID else { return }
+        try? RewardHistoryService.acknowledge(id: replayRewardHistoryID, in: modelContext)
+        self.replayRewardHistoryID = nil
+    }
+
     private func coreTutorialAllowsSelecting(_ tab: MainAppTab) -> Bool {
         guard coreTutorial.isActive else { return true }
         return CoreTutorialTabInteractionPolicy.canSelect(
@@ -623,7 +720,13 @@ struct MainTabView: View {
 #Preview {
     MainTabView()
         .modelContainer(
-            for: [Player.self, PlayerFish.self, AquariumDecorationPlacement.self, StudyDailyRecord.self],
+            for: [
+                Player.self,
+                PlayerFish.self,
+                AquariumDecorationPlacement.self,
+                StudyDailyRecord.self,
+                RewardHistoryEntry.self
+            ],
             inMemory: true
         )
 }

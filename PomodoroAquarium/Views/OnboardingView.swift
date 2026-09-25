@@ -17,7 +17,7 @@ enum OnboardingPage: Int, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .welcome: "集中した時間が、水族館の成長として残ります。"
-        case .reward: "集中のごほうびに、新しい魚と出会えます。"
+        case .reward: "集中のごほうびに、新しい魚と出会えます。\n集中を始めたら、魚たちと一緒に水族館で過ごしましょう。"
         case .tomorrow: "前日に集中した時間が多いほど、翌日は珍しい魚に出会いやすくなります。"
         }
     }

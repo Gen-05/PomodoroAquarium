@@ -1670,7 +1670,7 @@ struct HomeView: View {
 
     private func inspectPersistedTimerSession() {
         switch TimerSessionStore.shared.launchStatus(at: Date()) {
-        case .recoverable, .expired:
+        case .recoverable, .interrupted:
             showsTimerScreen = true
         case .none, .sameProcess:
             break

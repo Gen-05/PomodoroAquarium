@@ -141,6 +141,9 @@ enum CoreTutorialConversationScript {
     ]
 
     static let studyStart: [CoreTutorialConversationPage] = [
+        .message(StudyFocusRulesContent.introduction),
+        .message(StudyFocusRulesContent.keepScreenOpen),
+        .message(StudyFocusRulesContent.backgroundLimit),
         .message("今回はチュートリアルなので、25分待たずに進めます。"),
         .message("集中完了後の流れをすぐ体験してみましょう。"),
         .message("準備ができたら、「勉強開始」を押してみてください。")

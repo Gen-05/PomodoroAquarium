@@ -30,11 +30,51 @@ struct RewardPreviewCatalog {
             currentOwnedCount: isNewFish ? 1 : 2
         )
     }
+
+    static let historyItems: [RewardHistorySnapshot] = [
+        RewardHistorySnapshot(
+            fishSpecies: .clownfish,
+            pointDelta: 10,
+            acquiredAt: Date().addingTimeInterval(-300),
+            isAcknowledged: false,
+            wasNewFish: true,
+            previousOwnedCount: 0,
+            currentOwnedCount: 1
+        ),
+        RewardHistorySnapshot(
+            fishSpecies: .seahorse,
+            pointDelta: 10,
+            acquiredAt: Date().addingTimeInterval(-3_600),
+            isAcknowledged: true,
+            wasNewFish: true,
+            previousOwnedCount: 0,
+            currentOwnedCount: 1
+        ),
+        RewardHistorySnapshot(
+            fishSpecies: .manta,
+            pointDelta: 10,
+            acquiredAt: Date().addingTimeInterval(-86_400),
+            isAcknowledged: true,
+            wasNewFish: true,
+            previousOwnedCount: 0,
+            currentOwnedCount: 1
+        ),
+        RewardHistorySnapshot(
+            fishSpecies: .whaleShark,
+            pointDelta: 10,
+            acquiredAt: Date().addingTimeInterval(-172_800),
+            isAcknowledged: false,
+            wasNewFish: true,
+            previousOwnedCount: 0,
+            currentOwnedCount: 1
+        )
+    ]
 }
 
 private struct RewardPreviewPresentation: Identifiable {
     let id = UUID()
     let result: FishAcquisitionResult
+    let historyID: UUID?
 }
 
 struct RewardPreviewView: View {
@@ -44,6 +84,8 @@ struct RewardPreviewView: View {
     @State private var onboardingPreviewSessionID = UUID()
     @State private var showsCoreTutorialPreview = false
     @State private var coreTutorialPreviewSessionID = UUID()
+    @State private var previewHistory = RewardPreviewCatalog.historyItems
+    @State private var replayedPreviewHistoryID: UUID?
 
     var body: some View {
         List {
@@ -55,7 +97,11 @@ struct RewardPreviewView: View {
                 ForEach(RewardPreviewCatalog.items) { item in
                     Button {
                         presentation = RewardPreviewPresentation(
-                            result: RewardPreviewCatalog.previewResult(for: item, isNewFish: previewsNewFish)
+                            result: RewardPreviewCatalog.previewResult(
+                                for: item,
+                                isNewFish: previewsNewFish
+                            ),
+                            historyID: nil
                         )
                     } label: {
                         HStack(spacing: 12) {
@@ -88,6 +134,48 @@ struct RewardPreviewView: View {
                 Text("演出だけを再生します。所持魚、今日の獲得数、コイン、勉強記録は変更されません。")
             }
             Section {
+                ForEach(previewHistory) { history in
+                    Button {
+                        presentReplay(history)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Circle()
+                                .fill(history.rarity.rewardColor)
+                                .frame(width: 10, height: 10)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("\(history.fishName) ・ \(history.rarity.rawValue)")
+                                    .foregroundStyle(.primary)
+                                Text(history.acquiredAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text("+\(history.pointDelta)pt")
+                                    .font(.caption.monospacedDigit())
+                                Label(
+                                    history.isAcknowledged ? "確認済み" : "未確認",
+                                    systemImage: history.isAcknowledged
+                                        ? "checkmark.circle.fill"
+                                        : "exclamationmark.circle.fill"
+                                )
+                                .font(.caption2)
+                                .foregroundStyle(
+                                    history.isAcknowledged ? Color.secondary : Color.orange
+                                )
+                            }
+                        }
+                    }
+                    .accessibilityLabel(
+                        "\(history.fishName)、\(history.isAcknowledged ? "確認済み" : "未確認")"
+                    )
+                }
+            } header: {
+                Text("最近の獲得履歴（in-memory）")
+            } footer: {
+                Text("この一覧はPreview内だけのダミー履歴です。本番のSwiftDataへ保存されません。")
+            }
+            Section {
                 Button {
                     onboardingPreviewSessionID = UUID()
                     showsOnboardingPreview = true
@@ -108,7 +196,7 @@ struct RewardPreviewView: View {
             }
         }
         .navigationTitle("Reward Preview")
-        .fullScreenCover(item: $presentation) { presentation in
+        .fullScreenCover(item: $presentation, onDismiss: acknowledgePreviewReplay) { presentation in
             FishRewardView(result: presentation.result)
         }
         .fullScreenCover(isPresented: $showsOnboardingPreview) {
@@ -123,6 +211,25 @@ struct RewardPreviewView: View {
             }
             .id(coreTutorialPreviewSessionID)
         }
+    }
+
+    private func presentReplay(_ history: RewardHistorySnapshot) {
+        replayedPreviewHistoryID = history.id
+        presentation = RewardPreviewPresentation(
+            result: history.replayResult(),
+            historyID: history.id
+        )
+    }
+
+    private func acknowledgePreviewReplay() {
+        guard let replayedPreviewHistoryID,
+              let index = previewHistory.firstIndex(where: { $0.id == replayedPreviewHistoryID })
+        else {
+            self.replayedPreviewHistoryID = nil
+            return
+        }
+        previewHistory[index].isAcknowledged = true
+        self.replayedPreviewHistoryID = nil
     }
 }
 
@@ -169,7 +276,8 @@ private struct CoreTutorialPreviewHost: View {
                 Player.self,
                 PlayerFish.self,
                 AquariumDecorationPlacement.self,
-                StudyDailyRecord.self
+                StudyDailyRecord.self,
+                RewardHistoryEntry.self
             ],
             inMemory: true
         )

@@ -38,7 +38,8 @@ enum TimerMode: String, CaseIterable, Identifiable {
 enum StudySessionEndReason: Equatable {
     case completed
     case userEnded
-    case recoveryExpired
+    case interrupted
+    case backgroundLimitExceeded
 
     var isNormalCompletion: Bool { self == .completed }
 }
@@ -48,6 +49,11 @@ enum PomodoroSessionPhase: Equatable {
     case breakTime
     case awaitingNextSet
     case finished
+}
+
+enum BackgroundStudyLimit {
+    static let warningInterval: TimeInterval = 3 * 60
+    static let failureInterval: TimeInterval = 5 * 60
 }
 
 @Observable
@@ -62,6 +68,11 @@ final class TimerViewModel {
     private var hasHandledCurrentSessionCompletion = false
     private var hasAttemptedRestore = false
     private var lastHeartbeatDate: Date?
+    private(set) var backgroundEnteredAt: Date?
+    private(set) var lastBackgroundDuration: TimeInterval?
+    private(set) var didExceedBackgroundLimit = false
+    private(set) var shouldPresentBackgroundFailureAlert = false
+    private var backgroundNotificationSessionIdentifier: String?
     private var stopwatchRunStartDate: Date?
     private var stopwatchElapsedAtRunStart = 0
     
@@ -94,6 +105,12 @@ final class TimerViewModel {
 
     var locksMainTabNavigation: Bool {
         phase == .study && (state == .running || state == .paused)
+    }
+
+    /// 端末の自動ロックを止める必要があるのは、実際にrunning中のstudyだけ。
+    /// app lifecycleとPreview除外は、UIApplicationへ反映するMainTab側で加味する。
+    var requiresIdleTimerDisabled: Bool {
+        phase == .study && state == .running
     }
 
     var elapsedStudySeconds: Int {
@@ -193,6 +210,10 @@ final class TimerViewModel {
         if mode != .stopwatch {
             notificationService.cancelCurrentSessionNotification()
         }
+        notificationService.cancelBackgroundLimitNotifications(
+            for: backgroundNotificationSessionIdentifier
+        )
+        backgroundEnteredAt = nil
         state = .paused
         endDate = nil
         if mode == .stopwatch && isStudyTime {
@@ -210,9 +231,17 @@ final class TimerViewModel {
             phase = .study
             state = .idle
             timeRemaining = studyTime * 60
+            lastStudySessionEndReason = nil
+            lastBackgroundDuration = nil
+            didExceedBackgroundLimit = false
+            shouldPresentBackgroundFailureAlert = false
         }
         hasHandledCurrentSessionCompletion = false
         let currentDate = now()
+        if isStudyTime, backgroundNotificationSessionIdentifier == nil {
+            backgroundNotificationSessionIdentifier = UUID().uuidString
+            didExceedBackgroundLimit = false
+        }
         if mode == .stopwatch && isStudyTime {
             stopwatchElapsedAtRunStart = stopwatchElapsedSeconds
             stopwatchRunStartDate = currentDate
@@ -262,6 +291,10 @@ final class TimerViewModel {
         hasHandledCurrentSessionCompletion = false
         lastStudySessionEndReason = nil
         notificationService.cancelCurrentSessionNotification()
+        notificationService.cancelBackgroundLimitNotifications(
+            for: backgroundNotificationSessionIdentifier
+        )
+        backgroundNotificationSessionIdentifier = nil
         sessionStore.clearSession()
         return true
     }
@@ -283,6 +316,10 @@ final class TimerViewModel {
         endDate = nil
         hasHandledCurrentSessionCompletion = true
         notificationService.cancelCurrentSessionNotification()
+        notificationService.cancelBackgroundLimitNotifications(
+            for: backgroundNotificationSessionIdentifier
+        )
+        backgroundNotificationSessionIdentifier = nil
         sessionStore.clearSession()
     }
 
@@ -319,11 +356,19 @@ final class TimerViewModel {
         endDate = nil
         hasHandledCurrentSessionCompletion = false
         lastHeartbeatDate = nil
+        backgroundEnteredAt = nil
+        lastBackgroundDuration = nil
+        didExceedBackgroundLimit = false
+        shouldPresentBackgroundFailureAlert = false
         stopwatchElapsedSeconds = 0
         stopwatchElapsedAtRunStart = 0
         stopwatchRunStartDate = nil
         lastStudySessionEndReason = nil
         notificationService.cancelCurrentSessionNotification()
+        notificationService.cancelBackgroundLimitNotifications(
+            for: backgroundNotificationSessionIdentifier
+        )
+        backgroundNotificationSessionIdentifier = nil
         sessionStore.clearSession()
     }
     
@@ -332,12 +377,79 @@ final class TimerViewModel {
         updateHeartbeatIfNeeded()
     }
 
-    /// 非アクティブになる直前の時刻と、その時点までの経過時間を保存する。
+    /// backgroundへ入った時刻と、その時点までの経過時間を保存する。
+    /// running中のstudyでは、最初のbackground遷移時刻も保持する。
     func recordLastActiveTime() {
         guard sessionStore.load()?.sessionIsActive == true else { return }
         synchronizeTime()
         guard state == .running || state == .paused else { return }
-        persistSession(at: now())
+        let currentDate = now()
+        if state == .running, isStudyTime {
+            if backgroundEnteredAt == nil {
+                backgroundEnteredAt = currentDate
+            }
+            if backgroundNotificationSessionIdentifier == nil {
+                backgroundNotificationSessionIdentifier = UUID().uuidString
+            }
+            didExceedBackgroundLimit = false
+            if let backgroundEnteredAt, let backgroundNotificationSessionIdentifier {
+                let warningDate = backgroundEnteredAt.addingTimeInterval(
+                    BackgroundStudyLimit.warningInterval
+                )
+                let failureDate = backgroundEnteredAt.addingTimeInterval(
+                    BackgroundStudyLimit.failureInterval
+                )
+                let normalEndDate = mode == .stopwatch ? nil : endDate
+                let warningAt: Date?
+                let failureAt: Date?
+                if let normalEndDate {
+                    warningAt = warningDate < normalEndDate ? warningDate : nil
+                    failureAt = failureDate <= normalEndDate ? failureDate : nil
+                } else {
+                    warningAt = warningDate
+                    failureAt = failureDate
+                }
+
+                // 5分離脱失敗が先に成立するsessionでは、後から通常終了通知を出さない。
+                if failureAt != nil {
+                    notificationService.cancelCurrentSessionNotification()
+                }
+                notificationService.scheduleBackgroundLimitNotifications(
+                    warningAt: warningAt,
+                    failureAt: failureAt,
+                    sessionIdentifier: backgroundNotificationSessionIdentifier
+                )
+            }
+        }
+        persistSession(at: currentDate)
+    }
+
+    /// active復帰時に直前の離脱時間を確定し、永続セッションの開始時刻を消費する。
+    @discardableResult
+    func recordActiveReturn() -> TimeInterval? {
+        let currentDate = now()
+        let shouldFailSession = shouldFailForBackgroundLimit(at: currentDate)
+        guard let duration = consumeBackgroundDuration(at: currentDate) else { return nil }
+
+        notificationService.cancelBackgroundLimitNotifications(
+            for: backgroundNotificationSessionIdentifier
+        )
+
+        if shouldFailSession {
+            finishStudySessionForBackgroundLimit()
+        } else if sessionStore.load()?.sessionIsActive == true,
+           (state == .running || state == .paused) {
+            if state == .running,
+               endDate.map({ $0 > currentDate }) ?? true {
+                scheduleCurrentSessionNotificationIfNeeded()
+            }
+            persistSession(at: currentDate)
+        }
+        return duration
+    }
+
+    func acknowledgeBackgroundFailure() {
+        shouldPresentBackgroundFailureAlert = false
     }
 
     func restorePersistedSessionIfNeeded() {
@@ -348,8 +460,8 @@ final class TimerViewModel {
         switch sessionStore.launchStatus(at: currentDate) {
         case .sameProcess(let session), .recoverable(let session):
             restore(session, at: currentDate)
-        case .expired(let session):
-            finishExpiredSession(session)
+        case .interrupted(let session):
+            finishInterruptedSession(session)
         case .none:
             break
         }
@@ -359,16 +471,26 @@ final class TimerViewModel {
     func synchronizeTime() {
         guard isRunning else { return }
 
+        let currentDate = now()
+        if shouldFailForBackgroundLimit(at: currentDate) {
+            _ = consumeBackgroundDuration(at: currentDate)
+            finishStudySessionForBackgroundLimit()
+            return
+        }
+
         if mode == .stopwatch && isStudyTime {
             guard let stopwatchRunStartDate else { return }
-            let currentRunSeconds = max(0, Int(now().timeIntervalSince(stopwatchRunStartDate).rounded(.down)))
+            let currentRunSeconds = max(
+                0,
+                Int(currentDate.timeIntervalSince(stopwatchRunStartDate).rounded(.down))
+            )
             stopwatchElapsedSeconds = stopwatchElapsedAtRunStart + currentRunSeconds
             return
         }
 
         guard let endDate else { return }
 
-        let interval = endDate.timeIntervalSince(now())
+        let interval = endDate.timeIntervalSince(currentDate)
         guard interval > 0 else {
             finishCurrentSession(studyEndReason: .completed)
             return
@@ -382,6 +504,7 @@ final class TimerViewModel {
         totalSets = max(session.totalSets ?? totalSets, 1)
         currentSet = min(max(session.currentSet ?? 1, 1), totalSets)
         mode = TimerMode(rawValue: session.timerModeRawValue ?? "") ?? .pomodoro
+        backgroundNotificationSessionIdentifier = session.backgroundNotificationSessionIdentifier
         state = session.isRunning ? .running : .paused
         timeRemaining = session.timeRemaining
         let savedElapsed = max(0, session.elapsedStudySeconds ?? 0)
@@ -390,7 +513,19 @@ final class TimerViewModel {
         stopwatchRunStartDate = nil
         endDate = session.isRunning && mode != .stopwatch ? session.endDate : nil
         lastHeartbeatDate = session.lastHeartbeatDate
+        backgroundEnteredAt = session.backgroundEnteredAt
         hasHandledCurrentSessionCompletion = false
+        let shouldFailSession = shouldFailForBackgroundLimit(at: currentDate)
+        if consumeBackgroundDuration(at: currentDate) != nil {
+            notificationService.cancelBackgroundLimitNotifications(
+                for: backgroundNotificationSessionIdentifier
+            )
+        }
+
+        if shouldFailSession {
+            finishStudySessionForBackgroundLimit()
+            return
+        }
 
         if isRunning && mode == .stopwatch {
             let elapsedSinceHeartbeat = max(0, Int(currentDate.timeIntervalSince(session.lastHeartbeatDate).rounded(.down)))
@@ -411,47 +546,37 @@ final class TimerViewModel {
         }
     }
 
-    private func finishExpiredSession(_ session: PersistedTimerSession) {
+    /// 旧保存データなど、background突入時刻を持たない不整合sessionを報酬なしで破棄する。
+    private func finishInterruptedSession(_ session: PersistedTimerSession) {
         notificationService.cancelCurrentSessionNotification()
+        notificationService.cancelBackgroundLimitNotifications(
+            for: session.backgroundNotificationSessionIdentifier
+        )
         guard session.isStudyTime else {
             sessionStore.clearSession()
             return
         }
 
-        phase = .study
+        phase = .finished
         totalSets = max(session.totalSets ?? totalSets, 1)
         currentSet = min(max(session.currentSet ?? 1, 1), totalSets)
         mode = TimerMode(rawValue: session.timerModeRawValue ?? "") ?? .pomodoro
-        state = .paused
+        state = .completed
+        timeRemaining = session.studyTime * 60
         endDate = nil
-        lastHeartbeatDate = session.lastHeartbeatDate
-        hasHandledCurrentSessionCompletion = false
-
-        let fallbackElapsed = max(0, session.studyTime * 60 - session.timeRemaining)
-        let savedElapsed = max(0, session.elapsedStudySeconds ?? fallbackElapsed)
-        let timeSinceLastActive = max(0, now().timeIntervalSince(session.lastHeartbeatDate))
-        let allowedBackgroundTime = min(
-            Int(timeSinceLastActive.rounded(.down)),
-            Int(TimerSessionStore.gracePeriod)
-        )
-        let elapsedAtTermination = session.isRunning
-            ? savedElapsed + allowedBackgroundTime
-            : savedElapsed
-        let creditedElapsed: Int
-        if mode == .stopwatch {
-            creditedElapsed = elapsedAtTermination
-            stopwatchElapsedSeconds = creditedElapsed
-            stopwatchElapsedAtRunStart = creditedElapsed
-            stopwatchRunStartDate = nil
-        } else {
-            creditedElapsed = min(elapsedAtTermination, studyTime * 60)
-            timeRemaining = max(0, studyTime * 60 - creditedElapsed)
-        }
-
-        finishCurrentSession(
-            completedStudyMinutes: elapsedStudyMinutes,
-            studyEndReason: .recoveryExpired
-        )
+        lastHeartbeatDate = nil
+        backgroundEnteredAt = nil
+        lastBackgroundDuration = nil
+        didExceedBackgroundLimit = false
+        shouldPresentBackgroundFailureAlert = false
+        lastCompletedStudyMinutes = 0
+        lastStudySessionEndReason = .interrupted
+        hasHandledCurrentSessionCompletion = true
+        backgroundNotificationSessionIdentifier = nil
+        stopwatchElapsedSeconds = 0
+        stopwatchElapsedAtRunStart = 0
+        stopwatchRunStartDate = nil
+        sessionStore.clearSession()
     }
 
     private func updateHeartbeatIfNeeded() {
@@ -479,7 +604,9 @@ final class TimerViewModel {
             timeRemaining: timeRemaining,
             elapsedStudySeconds: elapsedStudySeconds,
             timerModeRawValue: mode.rawValue,
+            backgroundNotificationSessionIdentifier: backgroundNotificationSessionIdentifier,
             lastHeartbeatDate: date,
+            backgroundEnteredAt: backgroundEnteredAt,
             studyTime: studyTime,
             breakTime: breakTime,
             currentSet: currentSet,
@@ -497,7 +624,13 @@ final class TimerViewModel {
         state = .completed
         endDate = nil
         lastHeartbeatDate = nil
+        backgroundEnteredAt = nil
+        didExceedBackgroundLimit = false
         notificationService.cancelCurrentSessionNotification()
+        notificationService.cancelBackgroundLimitNotifications(
+            for: backgroundNotificationSessionIdentifier
+        )
+        backgroundNotificationSessionIdentifier = nil
         sessionStore.clearSession()
 
         let completedStudySession = phase == .study
@@ -524,6 +657,72 @@ final class TimerViewModel {
         stopwatchElapsedSeconds = 0
         stopwatchElapsedAtRunStart = 0
         stopwatchRunStartDate = nil
+    }
+
+    /// 通常の完了callbackを通さず、離脱超過したstudyを失敗として一度だけ破棄する。
+    /// 記録・魚・ポイント・日次獲得数はすべてonStudyFinished側にあるため、ここでは更新しない。
+    private func finishStudySessionForBackgroundLimit() {
+        guard state == .running,
+              phase == .study,
+              !hasHandledCurrentSessionCompletion else { return }
+
+        hasHandledCurrentSessionCompletion = true
+        state = .completed
+        phase = .finished
+        timeRemaining = studyTime * 60
+        endDate = nil
+        lastHeartbeatDate = nil
+        backgroundEnteredAt = nil
+        lastCompletedStudyMinutes = 0
+        lastStudySessionEndReason = .backgroundLimitExceeded
+        shouldPresentBackgroundFailureAlert = true
+
+        notificationService.cancelCurrentSessionNotification()
+        notificationService.cancelBackgroundLimitNotifications(
+            for: backgroundNotificationSessionIdentifier
+        )
+        backgroundNotificationSessionIdentifier = nil
+        sessionStore.clearSession()
+
+        didExceedBackgroundLimit = false
+        stopwatchElapsedSeconds = 0
+        stopwatchElapsedAtRunStart = 0
+        stopwatchRunStartDate = nil
+    }
+
+    /// 5分離脱と通常終了予定のうち、先に成立する方を優先する。
+    /// endDateより先に5分期限へ達するrunning studyだけを離脱失敗にする。
+    private func shouldFailForBackgroundLimit(at currentDate: Date) -> Bool {
+        guard state == .running,
+              phase == .study,
+              !hasHandledCurrentSessionCompletion,
+              let backgroundEnteredAt else { return false }
+
+        let failureDate = backgroundEnteredAt.addingTimeInterval(
+            BackgroundStudyLimit.failureInterval
+        )
+        guard currentDate >= failureDate else { return false }
+
+        if mode != .stopwatch,
+           let endDate,
+           endDate < failureDate {
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    private func consumeBackgroundDuration(at currentDate: Date) -> TimeInterval? {
+        guard let backgroundEnteredAt else { return nil }
+        let duration = max(0, currentDate.timeIntervalSince(backgroundEnteredAt))
+        self.backgroundEnteredAt = nil
+        lastBackgroundDuration = duration
+        didExceedBackgroundLimit = duration >= BackgroundStudyLimit.failureInterval
+#if DEBUG
+        print(String(format: "Background duration: %.1f seconds", duration))
+        print("Background limit exceeded: \(didExceedBackgroundLimit)")
+#endif
+        return duration
     }
 
     private func scheduleCurrentSessionNotificationIfNeeded() {

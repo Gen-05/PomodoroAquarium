@@ -2,10 +2,29 @@ struct FishAcquisitionResult {
     let fish: PlayerFish
     let previousOwnedCount: Int
     let currentOwnedCount: Int
+    let fishName: String
+    let rarity: FishRarity
+    private let recordedWasNewFish: Bool?
 
     var species: FishSpecies { fish.species }
-    var isNewFish: Bool { previousOwnedCount == 0 }
+    var isNewFish: Bool { recordedWasNewFish ?? (previousOwnedCount == 0) }
     var showsNewBadge: Bool { isNewFish }
+
+    init(
+        fish: PlayerFish,
+        previousOwnedCount: Int,
+        currentOwnedCount: Int,
+        fishName: String? = nil,
+        rarity: FishRarity? = nil,
+        wasNewFish: Bool? = nil
+    ) {
+        self.fish = fish
+        self.previousOwnedCount = previousOwnedCount
+        self.currentOwnedCount = currentOwnedCount
+        self.fishName = fishName ?? fish.species.name
+        self.rarity = rarity ?? fish.species.rarity
+        self.recordedWasNewFish = wasNewFish
+    }
 
     /// 抽選・追加が行われる前に種類別所持数を記録し、追加後の結果と組み合わせる。
     static func capture(

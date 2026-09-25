@@ -10,7 +10,13 @@ struct PersistedTimerSession: Codable, Equatable {
     let elapsedStudySeconds: Int?
     /// 旧保存データはカウントダウンとして復元する。
     let timerModeRawValue: String?
+    /// 離脱通知を同じ集中セッション単位で予約・解除するための識別子。
+    /// 旧保存データとの互換性のためOptional。
+    let backgroundNotificationSessionIdentifier: String?
     let lastHeartbeatDate: Date
+    /// running中のstudyで、アプリがbackgroundへ入った最初の時刻。
+    /// 旧保存データとの互換性のためOptional。
+    let backgroundEnteredAt: Date?
     let studyTime: Int
     let breakTime: Int
     /// 旧保存データとの互換性を保ちながら、複数セット中のstudy位置を復元する。
@@ -23,11 +29,10 @@ enum TimerSessionLaunchStatus: Equatable {
     case none
     case sameProcess(PersistedTimerSession)
     case recoverable(PersistedTimerSession)
-    case expired(PersistedTimerSession)
+    case interrupted(PersistedTimerSession)
 }
 
 final class TimerSessionStore {
-    static let gracePeriod: TimeInterval = 10 * 60
     static let heartbeatInterval: TimeInterval = 20
     static let shared = TimerSessionStore()
 
@@ -59,7 +64,9 @@ final class TimerSessionStore {
         timeRemaining: Int,
         elapsedStudySeconds: Int,
         timerModeRawValue: String,
+        backgroundNotificationSessionIdentifier: String?,
         lastHeartbeatDate: Date,
+        backgroundEnteredAt: Date?,
         studyTime: Int,
         breakTime: Int,
         currentSet: Int,
@@ -73,7 +80,9 @@ final class TimerSessionStore {
             timeRemaining: timeRemaining,
             elapsedStudySeconds: elapsedStudySeconds,
             timerModeRawValue: timerModeRawValue,
+            backgroundNotificationSessionIdentifier: backgroundNotificationSessionIdentifier,
             lastHeartbeatDate: lastHeartbeatDate,
+            backgroundEnteredAt: backgroundEnteredAt,
             studyTime: studyTime,
             breakTime: breakTime,
             currentSet: currentSet,
@@ -82,7 +91,7 @@ final class TimerSessionStore {
         )
     }
 
-    func launchStatus(at date: Date) -> TimerSessionLaunchStatus {
+    func launchStatus(at _: Date) -> TimerSessionLaunchStatus {
         guard let session = load(), session.sessionIsActive else { return .none }
         guard session.isStudyTime else {
             clearSession()
@@ -93,12 +102,14 @@ final class TimerSessionStore {
             return .sameProcess(session)
         }
 
-        if date.timeIntervalSince(session.lastHeartbeatDate) <= Self.gracePeriod {
+        // pause中、またはbackground突入時刻を保存済みのsessionだけを復元する。
+        // 旧保存データや不整合sessionを正常完了へ救済すると報酬が誤付与されるため、
+        // runningなのにbackgroundEnteredAtがない別processのsessionは安全側で中断する。
+        if !session.isRunning || session.backgroundEnteredAt != nil {
             return .recoverable(session)
         }
 
-        // TimerViewModelが保存済み経過時間で途中終了処理を行ってから削除する。
-        return .expired(session)
+        return .interrupted(session)
     }
 
     func clearSession() {
