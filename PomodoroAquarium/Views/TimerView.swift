@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
 
 enum TimerConfigurationStorageKey {
     static let pomodoroStudyDuration = "pomodoroStudyDuration"
@@ -122,7 +123,67 @@ private extension FocusCategoryColorKey {
             Color(red: 0.24, green: 0.73, blue: 0.94)
         case .readingCoral:
             Color(red: 1.0, green: 0.57, blue: 0.48)
+        case .qualificationPurple:
+            Color(red: 0.62, green: 0.48, blue: 0.94)
+        case .testAmber:
+            Color(red: 1.0, green: 0.72, blue: 0.25)
+        case .assignmentMint:
+            Color(red: 0.35, green: 0.82, blue: 0.65)
+        case .languagePink:
+            Color(red: 0.94, green: 0.45, blue: 0.72)
+        case .oceanTeal:
+            Color(red: 0.20, green: 0.72, blue: 0.75)
+        case .skyIndigo:
+            Color(red: 0.35, green: 0.51, blue: 0.95)
+        case .sunsetOrange:
+            Color(red: 1.0, green: 0.48, blue: 0.28)
+        case .aquaCyan:
+            Color(red: 0.25, green: 0.84, blue: 0.94)
         }
+    }
+}
+
+private extension Color {
+    init?(focusCategoryHex rawValue: String) {
+        guard let normalized = FocusCategoryHexColor.normalized(rawValue),
+              let rgb = UInt64(normalized.dropFirst(), radix: 16) else {
+            return nil
+        }
+        self.init(
+            .sRGB,
+            red: Double((rgb >> 16) & 0xFF) / 255,
+            green: Double((rgb >> 8) & 0xFF) / 255,
+            blue: Double(rgb & 0xFF) / 255,
+            opacity: 1
+        )
+    }
+
+    var opaqueFocusCategoryHex: String? {
+        let uiColor = UIColor(self)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return nil
+        }
+
+        return String(
+            format: "#%02X%02X%02X",
+            Int((red * 255).rounded()),
+            Int((green * 255).rounded()),
+            Int((blue * 255).rounded())
+        )
+    }
+}
+
+extension FocusCategory {
+    var swiftUIColor: Color {
+        if let customHex = resolvedCustomHex,
+           let customColor = Color(focusCategoryHex: customHex) {
+            return customColor
+        }
+        return colorKey.swiftUIColor
     }
 }
 
@@ -217,6 +278,9 @@ struct TimerView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    // `navigationDestination(isPresented:)`のdestination値にpredicate付きQueryを直接持たせると、
+    // iOS 26でdestination preferenceが安定せず再登録を繰り返すため、ここではQuery自体を
+    // 安定させ、少数のカテゴリに対するarchive除外はactiveFocusCategoriesで行う。
     @Query private var focusCategories: [FocusCategory]
     
     init(
@@ -261,149 +325,26 @@ struct TimerView: View {
     @State private var showsEndConfirmation = false
     @State private var showsTimeSettings = false
     @State private var showsFocusRules = false
+    @State private var showsFocusCategorySelection = false
     @State private var showsNotificationIntroduction = false
     @State private var tutorialCompletionTask: Task<Void, Never>?
     @State private var isCompletingCoreTutorialStudy = false
-    
+
     var body: some View {
         ZStack {
             AquariumView(
                 player: player,
                 backgroundTheme: AquariumThemeStore.theme(from: backgroundThemeRawValue),
-                isSimulationPaused: showsTimeSettings
+                isSimulationPaused: false
             )
 
             VStack(spacing: 18) {
                 Spacer()
-
-                if viewModel.canConfigureSession {
-                    VStack(spacing: 8) {
-                        if viewModel.isStudyTime && !isCoreTutorialStudy {
-                            HStack {
-                                focusCategorySelection
-                                Spacer(minLength: 0)
-                            }
-                        }
-
-                        Picker("計測方法", selection: Binding(
-                            get: { viewModel.mode },
-                            set: selectTimerMode
-                        )) {
-                            ForEach(TimerMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(5)
-                        .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
-                        .coreTutorialTarget(.studyMode)
-                        .disabled(isCoreTutorialStudy)
-                    }
-                }
-
-                if viewModel.canConfigureSession && viewModel.isStudyTime && !isCoreTutorialStudy {
-                    Button {
-                        showsFocusRules = true
-                    } label: {
-                        Label(StudyFocusRulesContent.title, systemImage: "questionmark.circle")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(.black.opacity(0.14), in: Capsule())
-                            .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("timer.focusRules")
-                }
-
-                HStack(spacing: 12) {
-                    Text(viewModel.mode == .countdown
-                         ? formatCountdownTime(viewModel.displayedSeconds)
-                         : formatTime(viewModel.displayedSeconds))
-                        .font(.system(size: 72, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(viewModel.mode == .countdown ? 0.6 : 1)
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
-
-                    if viewModel.canConfigureSession && viewModel.mode.showsTimeSettings {
-                        Button {
-                            showsTimeSettings = true
-                        } label: {
-                            Image(systemName: "gearshape.fill")
-                                .font(.title3)
-                                .foregroundStyle(.white)
-                                .frame(width: 42, height: 42)
-                                .background(.black.opacity(0.18), in: Circle())
-                        }
-                        .accessibilityLabel("時間設定")
-                        .accessibilityIdentifier("timer.timeSettings")
-                        .coreTutorialTarget(.studySettings)
-                        .disabled(isCoreTutorialStudy)
-                    }
-                }
-
-                if viewModel.mode == .pomodoro {
-                    HStack(spacing: 6) {
-                        ForEach(1...max(viewModel.totalSets, 1), id: \.self) { setNumber in
-                            PomodoroProgressFish(isReached: setNumber <= viewModel.currentSet)
-                        }
-
-                        Text("/ \(viewModel.totalSets)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .padding(.leading, 2)
-                    }
-                    .frame(height: 22)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("ポモドーロの進捗")
-                    .accessibilityValue("\(viewModel.currentSet) / \(viewModel.totalSets)セット")
-                }
-
-                if viewModel.state == .paused {
-                    Button("再開する") {
-                        viewModel.resumeTimer()
-                    }
-                    .buttonStyle(AquariumPrimaryButtonStyle())
-
-                    Button("終了する") {
-                        showsEndConfirmation = true
-                    }
-                    .buttonStyle(AquariumSecondaryButtonStyle())
-                } else {
-                    if viewModel.isRunning {
-                        Button("一時停止") {
-                            handlePrimaryTimerAction()
-                        }
-                        .buttonStyle(AquariumPrimaryButtonStyle())
-                    } else if viewModel.isStudyTime {
-                        Button("勉強開始") {
-                            handlePrimaryTimerAction()
-                        }
-                        .buttonStyle(AquariumStudyStartButtonStyle())
-                        .coreTutorialTarget(.studyStart)
-                        .disabled(
-                            isCompletingCoreTutorialStudy ||
-                                (isCoreTutorialStudy &&
-                                    (coreTutorial?.step != .waitingForStudyStartTap ||
-                                        coreTutorial?.conversationIndex != CoreTutorialConversationScript.studyStart.count - 1))
-                        )
-                        .accessibilityHidden(
-                            isCoreTutorialStudy &&
-                                (coreTutorial?.step != .waitingForStudyStartTap ||
-                                    coreTutorial?.conversationIndex != CoreTutorialConversationScript.studyStart.count - 1)
-                        )
-                        .accessibilityIdentifier("timer.startStudy")
-                    } else {
-                        Button("休憩開始") {
-                            handlePrimaryTimerAction()
-                        }
-                        .buttonStyle(AquariumPrimaryButtonStyle())
-                    }
-                }
-
+                sessionConfigurationControls
+                focusRulesControl
+                timerDisplay
+                pomodoroProgress
+                sessionActionControls
                 Spacer()
             }
             .padding(.horizontal, 32)
@@ -432,10 +373,14 @@ struct TimerView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .onAppear {
             _ = try? FocusCategoryService.createDefaultsIfNeeded(in: modelContext)
+            ensureSelectedFocusCategoryIsActive()
             configureStudyCompletion()
             prepareCoreTutorialStudyIfNeeded()
             viewModel.restorePersistedSessionIfNeeded()
             viewModel.synchronizeTime()
+        }
+        .onChange(of: activeFocusCategoryIDs) { _, _ in
+            ensureSelectedFocusCategoryIsActive()
         }
         .onDisappear {
             tutorialCompletionTask?.cancel()
@@ -523,6 +468,13 @@ struct TimerView: View {
         }
         .sheet(isPresented: $showsFocusRules) {
             StudyFocusRulesSheet()
+        }
+        .sheet(isPresented: $showsFocusCategorySelection) {
+            FocusCategorySelectionSheet(
+                selectedCategoryID: viewModel.selectedCategoryID
+            ) { categoryID in
+                viewModel.selectCategory(categoryID)
+            }
         }
         .sheet(
             isPresented: Binding(
@@ -820,50 +772,207 @@ struct TimerView: View {
         coreTutorial?.usesTutorialStudySetup == true
     }
 
-    private var orderedFocusCategories: [FocusCategory] {
-        FocusCategoryService.ordered(focusCategories)
+    @ViewBuilder
+    private var sessionConfigurationControls: some View {
+        if viewModel.canConfigureSession {
+            VStack(spacing: 8) {
+                if viewModel.isStudyTime &&
+                    !isCoreTutorialStudy {
+                    HStack {
+                        focusCategorySelection
+                        Spacer(minLength: 0)
+                    }
+                }
+
+                Picker("計測方法", selection: Binding(
+                    get: { viewModel.mode },
+                    set: selectTimerMode
+                )) {
+                    ForEach(TimerMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(5)
+                .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityIdentifier("timer.modeSelector")
+                .coreTutorialTarget(.studyMode)
+                .disabled(isCoreTutorialStudy)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var focusRulesControl: some View {
+        if viewModel.canConfigureSession && viewModel.isStudyTime && !isCoreTutorialStudy {
+            Button {
+                showsFocusRules = true
+            } label: {
+                Label(StudyFocusRulesContent.title, systemImage: "questionmark.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.black.opacity(0.14), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("timer.focusRules")
+        }
+    }
+
+    private var timerDisplay: some View {
+        HStack(spacing: 12) {
+            Text(timerDisplayText)
+                .font(.system(size: 72, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(viewModel.mode == .countdown ? 0.6 : 1)
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
+
+            if viewModel.canConfigureSession && viewModel.mode.showsTimeSettings {
+                Button {
+                    showsTimeSettings = true
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.title3)
+                        .foregroundStyle(.white)
+                        .frame(width: 42, height: 42)
+                        .background(.black.opacity(0.18), in: Circle())
+                }
+                .accessibilityLabel("時間設定")
+                .accessibilityIdentifier("timer.timeSettings")
+                .coreTutorialTarget(.studySettings)
+                .disabled(isCoreTutorialStudy)
+            }
+        }
+    }
+
+    private var timerDisplayText: String {
+        viewModel.mode == .countdown
+            ? formatCountdownTime(viewModel.displayedSeconds)
+            : formatTime(viewModel.displayedSeconds)
+    }
+
+    @ViewBuilder
+    private var sessionActionControls: some View {
+        if viewModel.state == .paused {
+            Button("再開する") {
+                viewModel.resumeTimer()
+            }
+            .buttonStyle(AquariumPrimaryButtonStyle())
+
+            Button("終了する") {
+                showsEndConfirmation = true
+            }
+            .buttonStyle(AquariumSecondaryButtonStyle())
+        } else if viewModel.isRunning {
+            Button("一時停止") {
+                handlePrimaryTimerAction()
+            }
+            .buttonStyle(AquariumPrimaryButtonStyle())
+        } else if viewModel.isStudyTime {
+            Button("勉強開始") {
+                handlePrimaryTimerAction()
+            }
+            .buttonStyle(AquariumStudyStartButtonStyle())
+            .coreTutorialTarget(.studyStart)
+            .disabled(isStudyStartDisabledForTutorial)
+            .accessibilityHidden(isStudyStartHiddenForTutorial)
+            .accessibilityIdentifier("timer.startStudy")
+        } else {
+            Button("休憩開始") {
+                handlePrimaryTimerAction()
+            }
+            .buttonStyle(AquariumPrimaryButtonStyle())
+        }
+    }
+
+    private var isStudyStartDisabledForTutorial: Bool {
+        isCompletingCoreTutorialStudy || isStudyStartHiddenForTutorial
+    }
+
+    private var isStudyStartHiddenForTutorial: Bool {
+        isCoreTutorialStudy &&
+            (coreTutorial?.step != .waitingForStudyStartTap ||
+                coreTutorial?.conversationIndex != CoreTutorialConversationScript.studyStart.count - 1)
+    }
+
+    @ViewBuilder
+    private var pomodoroProgress: some View {
+        if viewModel.mode == .pomodoro {
+            HStack(spacing: 6) {
+                ForEach(1...max(viewModel.totalSets, 1), id: \.self) { setNumber in
+                    PomodoroProgressFish(isReached: setNumber <= viewModel.currentSet)
+                }
+
+                Text("/ \(viewModel.totalSets)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .padding(.leading, 2)
+            }
+            .frame(height: 22)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("ポモドーロの進捗")
+            .accessibilityValue("\(viewModel.currentSet) / \(viewModel.totalSets)セット")
+        }
+    }
+
+    private var activeFocusCategoryIDs: [String] {
+        activeFocusCategories.map(\.id)
     }
 
     private var selectedFocusCategory: FocusCategory? {
-        orderedFocusCategories.first { $0.id == viewModel.selectedCategoryID }
+        activeFocusCategories.first { $0.id == viewModel.selectedCategoryID }
+    }
+
+    private var activeFocusCategories: [FocusCategory] {
+        focusCategories.filter { !$0.isArchived }
     }
 
     private var focusCategorySelection: some View {
-        Menu {
-            ForEach(orderedFocusCategories) { category in
-                Button {
-                    viewModel.selectCategory(category.id)
-                } label: {
-                    if viewModel.selectedCategoryID == category.id {
-                        Label(category.name, systemImage: "checkmark")
-                    } else {
-                        Text(category.name)
-                    }
-                }
-            }
+        Button {
+            showsFocusCategorySelection = true
         } label: {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill((selectedFocusCategory?.colorKey ?? .studyBlue).swiftUIColor)
-                    .frame(width: 9, height: 9)
-
-                Text(selectedFocusCategory?.name ?? "勉強")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.72))
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 6)
-            .frame(minHeight: 36)
-            .contentShape(Capsule())
+            focusCategorySelectionLabel
         }
         .buttonStyle(.plain)
         .accessibilityLabel("集中カテゴリ")
         .accessibilityValue(selectedFocusCategory?.name ?? "勉強")
         .accessibilityIdentifier("timer.focusCategory")
+    }
+
+    private var focusCategorySelectionLabel: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(
+                    selectedFocusCategory?.swiftUIColor
+                        ?? FocusCategoryColorKey.studyBlue.swiftUIColor
+                )
+                .frame(width: 9, height: 9)
+
+            Text(selectedFocusCategory?.name ?? "勉強")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+
+            Image(systemName: "chevron.down")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white.opacity(0.72))
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .frame(minHeight: 36)
+        .contentShape(Capsule())
+    }
+
+    private func ensureSelectedFocusCategoryIsActive() {
+        let resolvedID = FocusCategoryService.resolvedSelectionID(
+            viewModel.selectedCategoryID,
+            from: focusCategories
+        )
+        guard resolvedID != viewModel.selectedCategoryID else { return }
+        viewModel.selectCategory(resolvedID)
     }
 
     @ViewBuilder
@@ -966,6 +1075,303 @@ private struct CoreTutorialStudyStartingShield: View {
         .accessibilityLabel("集中完了を準備中")
         .accessibilityAddTraits(.isModal)
         .accessibilityIdentifier("coreTutorial.studyStartingShield")
+    }
+}
+
+private struct FocusCategorySelectionSheet: View {
+    let selectedCategoryID: String
+    let onSelected: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var focusCategories: [FocusCategory]
+    @State private var showsCreation = false
+    @State private var dismissAfterCreation = false
+    @State private var archiveErrorMessage: String?
+
+    private var orderedDefaultCategories: [FocusCategory] {
+        FocusCategoryService.ordered(
+            focusCategories.filter { $0.isDefault && !$0.isArchived }
+        )
+    }
+
+    private var customCategories: [FocusCategory] {
+        focusCategories
+            .filter { !$0.isDefault && !$0.isArchived }
+            .sorted {
+                $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        showsCreation = true
+                    } label: {
+                        Label("カテゴリを追加", systemImage: "plus")
+                    }
+                }
+
+                Section("標準カテゴリ") {
+                    ForEach(orderedDefaultCategories) { category in
+                        categorySelectionButton(for: category)
+                    }
+                }
+
+                if !customCategories.isEmpty {
+                    Section("マイカテゴリ") {
+                        ForEach(customCategories) { category in
+                            categorySelectionButton(for: category)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        archive(category)
+                                    } label: {
+                                        Label("削除", systemImage: "trash")
+                                    }
+                                }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("集中カテゴリ")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完了") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .sheet(
+            isPresented: $showsCreation,
+            onDismiss: {
+                guard dismissAfterCreation else { return }
+                dismissAfterCreation = false
+                dismiss()
+            }
+        ) {
+            FocusCategoryCreationSheet { categoryID in
+                onSelected(categoryID)
+                dismissAfterCreation = true
+            }
+        }
+        .alert(
+            "カテゴリを削除できませんでした",
+            isPresented: Binding(
+                get: { archiveErrorMessage != nil },
+                set: { if !$0 { archiveErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(archiveErrorMessage ?? "")
+        }
+    }
+
+    private func categorySelectionButton(for category: FocusCategory) -> some View {
+        Button {
+            onSelected(category.id)
+            dismiss()
+        } label: {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(category.swiftUIColor)
+                    .frame(width: 12, height: 12)
+
+                Text(category.name)
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                if selectedCategoryID == category.id {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func archive(_ category: FocusCategory) {
+        do {
+            try FocusCategoryService.archive(category, in: modelContext)
+            if selectedCategoryID == category.id {
+                onSelected(FocusCategoryDefaults.studyID)
+            }
+        } catch {
+            archiveErrorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct FocusCategoryCreationSheet: View {
+    let onCreated: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @State private var categoryName = ""
+    @State private var selectedColor = FocusCategoryColorKey.oceanTeal.swiftUIColor
+    @State private var showsColorSelection = false
+    @State private var errorMessage: String?
+
+    private var trimmedName: String {
+        categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("カテゴリ名") {
+                    TextField("例：数学", text: $categoryName)
+                        .textInputAutocapitalization(.never)
+                        .submitLabel(.done)
+                        .onChange(of: categoryName) { _, newValue in
+                            if newValue.count > FocusCategoryService.maximumNameLength {
+                                categoryName = String(
+                                    newValue.prefix(FocusCategoryService.maximumNameLength)
+                                )
+                            }
+                            errorMessage = nil
+                        }
+
+                    HStack {
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .foregroundStyle(.red)
+                        }
+                        Spacer(minLength: 8)
+                        Text("\(categoryName.count)/\(FocusCategoryService.maximumNameLength)")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+                }
+
+                Section("色") {
+                    Button {
+                        showsColorSelection = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(selectedColor)
+                                .frame(width: 28, height: 28)
+                                .overlay {
+                                    Circle()
+                                        .stroke(.primary.opacity(0.18), lineWidth: 1)
+                                }
+                                .accessibilityHidden(true)
+
+                            Text("カラーを選択")
+                                .foregroundStyle(.primary)
+
+                            Spacer(minLength: 0)
+
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .navigationTitle("カテゴリを追加")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") { saveCategory() }
+                        .disabled(trimmedName.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .sheet(isPresented: $showsColorSelection) {
+            FocusCategoryColorSelectionSheet(initialColor: selectedColor) { color in
+                selectedColor = color
+                errorMessage = nil
+            }
+        }
+    }
+
+    private func saveCategory() {
+        do {
+            guard let customHex = selectedColor.opaqueFocusCategoryHex else {
+                throw FocusCategoryService.CreationError.invalidColor
+            }
+            let category = try FocusCategoryService.createCustom(
+                name: categoryName,
+                customHex: customHex,
+                in: modelContext
+            )
+            onCreated(category.id)
+            dismiss()
+        } catch let error as FocusCategoryService.CreationError {
+            errorMessage = error.localizedDescription
+        } catch {
+            errorMessage = "カテゴリを保存できませんでした"
+        }
+    }
+}
+
+private struct FocusCategoryColorSelectionSheet: View {
+    let onComplete: (Color) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var pendingColor: Color
+
+    init(initialColor: Color, onComplete: @escaping (Color) -> Void) {
+        self.onComplete = onComplete
+        self._pendingColor = State(initialValue: initialColor)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    ColorPicker(
+                        "カラー",
+                        selection: $pendingColor,
+                        supportsOpacity: false
+                    )
+                }
+
+                Section("現在の色") {
+                    HStack {
+                        Spacer()
+                        Circle()
+                            .fill(pendingColor)
+                            .frame(width: 64, height: 64)
+                            .overlay {
+                                Circle()
+                                    .stroke(.primary.opacity(0.18), lineWidth: 1)
+                            }
+                            .accessibilityLabel("現在選択中の色")
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+            .navigationTitle("カラーを選択")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完了") {
+                        onComplete(pendingColor)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

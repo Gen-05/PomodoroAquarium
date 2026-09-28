@@ -13,6 +13,7 @@ private enum CoreTutorialConversationPageCount {
     static let homeStudySummary = 2
     static let studyMode = 2
     static let studySettings = 2
+    static let studyStart = 6
     static let rewardFollowUp = 3
     static let aquariumReturnHome = 3
     static let finishing = 3
@@ -41,6 +42,58 @@ final class PomodoroAquariumUITests: XCTestCase {
         ]
         app.launch()
         XCTAssertTrue(app.buttons["勉強をはじめる"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testHomeStudyButtonNavigatesToTimerViewWithinThreeSeconds() {
+        let app = XCUIApplication()
+        launchReturningUser(app)
+
+        app.buttons["home.startStudy"].tap()
+
+        XCTAssertTrue(
+            app.buttons["timer.startStudy"].waitForExistence(timeout: 3),
+            "TimerView should be presented within three seconds of the real Home button tap"
+        )
+        XCTAssertTrue(app.buttons["ポモドーロ"].exists)
+    }
+
+    @MainActor
+    func testCategoryAndColorSheetsCloseBeforeStudyStartsNormally() {
+        let app = XCUIApplication()
+        launchReturningUser(app)
+        app.buttons["home.startStudy"].tap()
+        XCTAssertTrue(app.buttons["timer.startStudy"].waitForExistence(timeout: 3))
+
+        app.buttons["timer.focusCategory"].tap()
+        XCTAssertTrue(app.navigationBars["集中カテゴリ"].waitForExistence(timeout: 3))
+        app.buttons["カテゴリを追加"].tap()
+        XCTAssertTrue(app.navigationBars["カテゴリを追加"].waitForExistence(timeout: 3))
+        app.buttons["カラーを選択"].tap()
+        XCTAssertTrue(app.navigationBars["カラーを選択"].waitForExistence(timeout: 3))
+        app.navigationBars["カラーを選択"].buttons["キャンセル"].tap()
+        XCTAssertTrue(app.navigationBars["カテゴリを追加"].waitForExistence(timeout: 3))
+        app.navigationBars["カテゴリを追加"].buttons["キャンセル"].tap()
+        XCTAssertTrue(app.navigationBars["集中カテゴリ"].waitForExistence(timeout: 3))
+        app.buttons["読書"].tap()
+
+        XCTAssertTrue(app.buttons["timer.startStudy"].waitForExistence(timeout: 3))
+        app.buttons["timer.startStudy"].tap()
+        let laterButton = app.buttons["あとで"]
+        if laterButton.waitForExistence(timeout: 1) {
+            laterButton.tap()
+        }
+        let pauseButton = app.buttons["一時停止"]
+        XCTAssertTrue(pauseButton.waitForExistence(timeout: 3))
+
+        // このテストで開始した永続sessionを次のUI Testへ持ち越さない。
+        pauseButton.tap()
+        XCTAssertTrue(app.buttons["終了する"].waitForExistence(timeout: 3))
+        app.buttons["終了する"].tap()
+        let endAlert = app.alerts["勉強を終了しますか？"]
+        XCTAssertTrue(endAlert.waitForExistence(timeout: 3))
+        endAlert.buttons["終了する"].tap()
+        XCTAssertTrue(app.buttons["報酬を見る"].waitForExistence(timeout: 3))
     }
 
     @MainActor
@@ -133,7 +186,6 @@ final class PomodoroAquariumUITests: XCTestCase {
         sleep(1)
         let fixedTimerElements: [(String, XCUIElement)] = [
             ("mode switcher", app.segmentedControls.firstMatch),
-            ("FOCUS", app.staticTexts["FOCUS"]),
             ("25:00", app.staticTexts["25:00"]),
             ("settings", app.buttons["timer.timeSettings"]),
             ("start", app.buttons["timer.startStudy"])
@@ -168,7 +220,10 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studyStartPrompt"].waitForExistence(timeout: 2))
         sleep(1)
         XCTAssertEqual(app.buttons["timer.startStudy"].frame.minY, studyButtonY, accuracy: 1)
-        advanceConversation(in: app, pageCount: 2)
+        advanceConversation(
+            in: app,
+            pageCount: CoreTutorialConversationPageCount.studyStart - 1
+        )
         waitForConversationReady(in: app)
         XCTAssertTrue(app.buttons["timer.startStudy"].exists)
         app.buttons["timer.startStudy"].tap()
@@ -268,6 +323,9 @@ final class PomodoroAquariumUITests: XCTestCase {
         app.buttons["mainTab.more"].tap()
         app.buttons["more.rewardPreview"].tap()
         let previewButton = app.buttons["rewardPreview.coreTutorial"]
+        for _ in 0..<3 where !previewButton.exists {
+            app.collectionViews.firstMatch.swipeUp()
+        }
         XCTAssertTrue(previewButton.waitForExistence(timeout: 5))
         previewButton.tap()
 
@@ -289,7 +347,10 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertEqual(app.buttons["timer.startStudy"].frame.minY, previewStudyButtonY, accuracy: 1)
         advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.studySettings)
         XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studyStartPrompt"].waitForExistence(timeout: 2))
-        advanceConversation(in: app, pageCount: 2)
+        advanceConversation(
+            in: app,
+            pageCount: CoreTutorialConversationPageCount.studyStart - 1
+        )
         waitForConversationReady(in: app)
         app.buttons["timer.startStudy"].tap()
 

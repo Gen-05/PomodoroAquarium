@@ -77,6 +77,96 @@ private struct RewardPreviewPresentation: Identifiable {
     let historyID: UUID?
 }
 
+@MainActor
+private final class CoreTutorialPreviewDataStore {
+    private(set) var modelContainer: ModelContainer?
+
+    init() {
+        modelContainer = nil
+        do {
+            let schema = Schema([
+                Player.self,
+                PlayerFish.self,
+                AquariumDecorationPlacement.self,
+                StudyDailyRecord.self,
+                FocusCategory.self,
+                FocusSessionRecord.self,
+                RewardHistoryEntry.self
+            ])
+            let container = try ModelContainer(
+                for: schema,
+                configurations: [ModelConfiguration(isStoredInMemoryOnly: true)]
+            )
+            modelContainer = container
+            try reset()
+            _ = try FocusCategoryService.createDefaultsIfNeeded(in: container.mainContext)
+        } catch {
+            modelContainer = nil
+#if DEBUG
+            print("[CORE TUTORIAL PREVIEW] model container setup failed: \(error)")
+#endif
+        }
+    }
+
+    /// 同じcontainerを維持し、破棄済みcontainerのQuery observerを残さない。
+    func reset() throws {
+        guard let context = modelContainer?.mainContext else { return }
+
+        let players = try context.fetch(FetchDescriptor<Player>())
+        let player = players.first ?? Player()
+        if players.isEmpty {
+            context.insert(player)
+        }
+        for extraPlayer in players.dropFirst() {
+            context.delete(extraPlayer)
+        }
+
+        player.favoriteFish = nil
+        player.ownedFish = []
+        player.activeAquariumFishIDs = []
+        player.hasInitializedActiveAquariumFish = true
+        player.hasGrantedCoreTutorialReward = false
+        player.coreTutorialRewardFishID = nil
+        player.hasGrantedCoreTutorialPoints = false
+        player.hasSavedCoreTutorialAquarium = false
+        player.totalStudyMinutes = 0
+        player.todayStudyMinutes = 0
+        player.yesterdayStudyMinutes = 0
+        player.coins = 0
+        player.studyStreakDays = 0
+        player.lastStudyCompletionDate = nil
+        player.hasClaimedSevenDayStreakReward = false
+        player.hasClaimedThirtyDayStreakReward = false
+        player.hasClaimedYearStreakReward = false
+
+        for fish in try context.fetch(FetchDescriptor<PlayerFish>()) {
+            context.delete(fish)
+        }
+        for record in try context.fetch(FetchDescriptor<StudyDailyRecord>()) {
+            context.delete(record)
+        }
+        for record in try context.fetch(FetchDescriptor<FocusSessionRecord>()) {
+            context.delete(record)
+        }
+        for entry in try context.fetch(FetchDescriptor<RewardHistoryEntry>()) {
+            context.delete(entry)
+        }
+        for placement in try context.fetch(FetchDescriptor<AquariumDecorationPlacement>()) {
+            context.delete(placement)
+        }
+        for decoration in AquariumDecorationService.defaultDecorations {
+            context.insert(AquariumDecorationPlacement(
+                decorationID: decoration.id,
+                kind: decoration.kind,
+                relativeX: Double(decoration.relativeX),
+                relativeY: Double(decoration.relativeY),
+                scale: Double(decoration.scale)
+            ))
+        }
+        try context.save()
+    }
+}
+
 struct RewardPreviewView: View {
     @State private var presentation: RewardPreviewPresentation?
     @State private var previewsNewFish = true
@@ -84,6 +174,7 @@ struct RewardPreviewView: View {
     @State private var onboardingPreviewSessionID = UUID()
     @State private var showsCoreTutorialPreview = false
     @State private var coreTutorialPreviewSessionID = UUID()
+    @State private var coreTutorialPreviewDataStore = CoreTutorialPreviewDataStore()
     @State private var previewHistory = RewardPreviewCatalog.historyItems
     @State private var replayedPreviewHistoryID: UUID?
 
@@ -185,8 +276,15 @@ struct RewardPreviewView: View {
                 .accessibilityIdentifier("rewardPreview.onboarding")
 
                 Button {
-                    coreTutorialPreviewSessionID = UUID()
-                    showsCoreTutorialPreview = true
+                    do {
+                        try coreTutorialPreviewDataStore.reset()
+                        coreTutorialPreviewSessionID = UUID()
+                        showsCoreTutorialPreview = true
+                    } catch {
+#if DEBUG
+                        print("[CORE TUTORIAL PREVIEW] reset failed: \(error)")
+#endif
+                    }
                 } label: {
                     Label("Core Tutorial Preview", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
                 }
@@ -206,10 +304,17 @@ struct RewardPreviewView: View {
             .id(onboardingPreviewSessionID)
         }
         .fullScreenCover(isPresented: $showsCoreTutorialPreview) {
-            CoreTutorialPreviewHost {
-                showsCoreTutorialPreview = false
+            if let modelContainer = coreTutorialPreviewDataStore.modelContainer {
+                CoreTutorialPreviewHost(modelContainer: modelContainer) {
+                    showsCoreTutorialPreview = false
+                }
+                .id(coreTutorialPreviewSessionID)
+            } else {
+                ContentUnavailableView(
+                    "Previewを開始できません",
+                    systemImage: "exclamationmark.triangle"
+                )
             }
-            .id(coreTutorialPreviewSessionID)
         }
     }
 
@@ -234,13 +339,17 @@ struct RewardPreviewView: View {
 }
 
 private struct CoreTutorialPreviewHost: View {
+    let modelContainer: ModelContainer
     let onFinish: () -> Void
 
     private let suiteName: String
     private let defaults: UserDefaults
     private let sessionStore: TimerSessionStore
 
-    init(onFinish: @escaping () -> Void) {
+    init(
+        modelContainer: ModelContainer,
+        onFinish: @escaping () -> Void
+    ) {
         let suiteName = "CoreTutorialPreview.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName) ?? UserDefaults()
         defaults.removePersistentDomain(forName: suiteName)
@@ -253,6 +362,7 @@ private struct CoreTutorialPreviewHost: View {
         )
         defaults.set(true, forKey: OnboardingStore.storageKey)
 
+        self.modelContainer = modelContainer
         self.onFinish = onFinish
         self.suiteName = suiteName
         self.defaults = defaults
@@ -271,18 +381,7 @@ private struct CoreTutorialPreviewHost: View {
             onCoreTutorialPreviewFinished: finish
         )
         .defaultAppStorage(defaults)
-        .modelContainer(
-            for: [
-                Player.self,
-                PlayerFish.self,
-                AquariumDecorationPlacement.self,
-                StudyDailyRecord.self,
-                FocusCategory.self,
-                FocusSessionRecord.self,
-                RewardHistoryEntry.self
-            ],
-            inMemory: true
-        )
+        .modelContainer(modelContainer)
         .overlay(alignment: .top) {
             Button(action: finish) {
                 Label("プレビュー終了", systemImage: "xmark.circle.fill")

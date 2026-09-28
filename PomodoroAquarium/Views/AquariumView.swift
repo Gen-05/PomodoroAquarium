@@ -64,8 +64,10 @@ struct AquariumView: View {
         }
         .ignoresSafeArea()
         .onAppear {
-            _ = try? AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
             updateDisplayedFish()
+        }
+        .task {
+            await initializePersistentAquariumDataAfterAppearance()
         }
         .onChange(of: fishSelectionRevision, initial: true) { _, _ in
             updateDisplayedFish()
@@ -117,12 +119,35 @@ struct AquariumView: View {
             return
         }
 
-        if AquariumFishSelection.initializeIfNeeded(for: player) {
-            try? modelContext.save()
-        }
         let activeFish = player.activeAquariumFish
         if activeFish.map(\.id) != displayedFishIDs {
             displayedFish = activeFish
+        }
+    }
+
+    @MainActor
+    private func initializePersistentAquariumDataAfterAppearance() async {
+        // SwiftDataのQuery observer構築中に同期saveしないよう、次のMainActorターンで初期化する。
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+
+        do {
+            _ = try AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
+            guard !Task.isCancelled else { return }
+
+            if let player,
+               AquariumFishSelection.initializeIfNeeded(for: player) {
+                try modelContext.save()
+            }
+            updateDisplayedFish()
+        } catch {
+#if DEBUG
+            let nsError = error as NSError
+            print(
+                "[AQUARIUM INIT] failed error=\(String(reflecting: error)) " +
+                "domain=\(nsError.domain) code=\(nsError.code)"
+            )
+#endif
         }
     }
 

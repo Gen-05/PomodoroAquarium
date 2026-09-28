@@ -20,6 +20,41 @@ private enum HomeStatusRowLayout {
     static let sideWidthRatio: CGFloat = 0.25
 }
 
+struct HomePlayerInitializationResult {
+    let player: Player
+    let didCreatePlayer: Bool
+    let didInitializeAquariumSelection: Bool
+}
+
+@MainActor
+enum HomePlayerInitialization {
+    /// `@Query` の更新前でも既存Playerを再利用し、Homeの再表示で重複生成しない。
+    static func prepare(in modelContext: ModelContext) throws -> HomePlayerInitializationResult {
+        var descriptor = FetchDescriptor<Player>()
+        descriptor.fetchLimit = 1
+
+        let existingPlayer = try modelContext.fetch(descriptor).first
+        let player = existingPlayer ?? Player()
+        let didCreatePlayer = existingPlayer == nil
+        if didCreatePlayer {
+            modelContext.insert(player)
+        }
+
+        let didInitializeAquariumSelection = AquariumFishSelection.initializeIfNeeded(
+            for: player
+        )
+        if didCreatePlayer || didInitializeAquariumSelection {
+            try modelContext.save()
+        }
+
+        return HomePlayerInitializationResult(
+            player: player,
+            didCreatePlayer: didCreatePlayer,
+            didInitializeAquariumSelection: didInitializeAquariumSelection
+        )
+    }
+}
+
 private extension View {
     func homeStatusGlass() -> some View {
         background {
@@ -337,43 +372,9 @@ struct HomeView: View {
                 inspectPersistedTimerSession()
                 DailyFishAcquisitionStore.resetIfNeeded(defaults: appDefaults)
             }
-            let now = Date()
-            let calendar = Calendar.current
-            let today = DateFormatter.yyyyMMdd.string(from: now)
-
-            let currentPlayer: Player
-            if let player {
-                currentPlayer = player
-            } else {
-                let newPlayer = Player()
-                modelContext.insert(newPlayer)
-                currentPlayer = newPlayer
-            }
-
-            if AquariumFishSelection.initializeIfNeeded(for: currentPlayer) {
-                try? modelContext.save()
-            }
-            if lastStudyDate.isEmpty {
-                lastStudyDate = today
-            } else if let lastDate = DateFormatter.yyyyMMdd.date(from: lastStudyDate),
-                      !calendar.isDate(lastDate, inSameDayAs: now) {
-                let yesterday = calendar.date(byAdding: .day, value: -1, to: now)
-
-                if let yesterday,
-                   calendar.isDate(lastDate, inSameDayAs: yesterday) {
-                    currentPlayer.yesterdayStudyMinutes = currentPlayer.todayStudyMinutes
-                } else {
-                    currentPlayer.yesterdayStudyMinutes = 0
-                }
-
-                currentPlayer.todayStudyMinutes = 0
-                lastStudyDate = today
-            } else if DateFormatter.yyyyMMdd.date(from: lastStudyDate) == nil {
-                currentPlayer.yesterdayStudyMinutes = 0
-                currentPlayer.todayStudyMinutes = 0
-                lastStudyDate = today
-            }
-
+        }
+        .task {
+            await initializeHomeDataAfterAppearance()
         }
         .onChange(of: aquariumEditorCategory) { _, category in
             clearAquariumSelections()
@@ -1666,6 +1667,53 @@ struct HomeView: View {
         .foregroundStyle(.white)
         .padding(14)
         .background(.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    @MainActor
+    private func initializeHomeDataAfterAppearance() async {
+        // SwiftDataのQuery observerがappearance中に組み上がるタイミングを避ける。
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+
+        do {
+            let initialization = try HomePlayerInitialization.prepare(in: modelContext)
+            guard !Task.isCancelled else { return }
+            updateDailyStudyTotalsIfNeeded(for: initialization.player, now: Date())
+        } catch {
+#if DEBUG
+            let nsError = error as NSError
+            print(
+                "[HOME INIT] failed error=\(String(reflecting: error)) " +
+                "domain=\(nsError.domain) code=\(nsError.code)"
+            )
+#endif
+        }
+    }
+
+    private func updateDailyStudyTotalsIfNeeded(for player: Player, now: Date) {
+        let calendar = Calendar.current
+        let today = DateFormatter.yyyyMMdd.string(from: now)
+
+        if lastStudyDate.isEmpty {
+            lastStudyDate = today
+        } else if let lastDate = DateFormatter.yyyyMMdd.date(from: lastStudyDate),
+                  !calendar.isDate(lastDate, inSameDayAs: now) {
+            let yesterday = calendar.date(byAdding: .day, value: -1, to: now)
+
+            if let yesterday,
+               calendar.isDate(lastDate, inSameDayAs: yesterday) {
+                player.yesterdayStudyMinutes = player.todayStudyMinutes
+            } else {
+                player.yesterdayStudyMinutes = 0
+            }
+
+            player.todayStudyMinutes = 0
+            lastStudyDate = today
+        } else if DateFormatter.yyyyMMdd.date(from: lastStudyDate) == nil {
+            player.yesterdayStudyMinutes = 0
+            player.todayStudyMinutes = 0
+            lastStudyDate = today
+        }
     }
 
     private func inspectPersistedTimerSession() {

@@ -177,6 +177,65 @@ struct AquariumFishSelectionTests {
         #expect(restoredEmpty.activeAquariumFish.isEmpty)
     }
 
+    @Test func homePlayerInitializationCanRunRepeatedlyWithoutDuplicates() throws {
+        let container = try makeContainer()
+        let context = ModelContext(container)
+
+        let first = try HomePlayerInitialization.prepare(in: context)
+        let second = try HomePlayerInitialization.prepare(in: context)
+
+        #expect(first.didCreatePlayer)
+        #expect(first.didInitializeAquariumSelection)
+        #expect(!second.didCreatePlayer)
+        #expect(!second.didInitializeAquariumSelection)
+        #expect(first.player.persistentModelID == second.player.persistentModelID)
+        #expect(try context.fetchCount(FetchDescriptor<Player>()) == 1)
+        #expect(first.player.hasInitializedActiveAquariumFish)
+    }
+
+    @Test func homePlayerInitializationRemainsSaveableAfterTutorialRewardChanges() throws {
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let first = try HomePlayerInitialization.prepare(in: context)
+        let tutorialFish = PlayerFish(species: .clownfish)
+        first.player.ownedFish.append(tutorialFish)
+        first.player.activeAquariumFishIDs = [tutorialFish.id]
+        first.player.hasGrantedCoreTutorialReward = true
+        first.player.hasSavedCoreTutorialAquarium = true
+        try context.save()
+
+        let afterTutorial = try HomePlayerInitialization.prepare(in: context)
+        try context.save()
+
+        #expect(!afterTutorial.didCreatePlayer)
+        #expect(!afterTutorial.didInitializeAquariumSelection)
+        #expect(afterTutorial.player.ownedFish.map(\.id) == [tutorialFish.id])
+        #expect(afterTutorial.player.activeAquariumFishIDs == [tutorialFish.id])
+        #expect(try context.fetchCount(FetchDescriptor<Player>()) == 1)
+    }
+
+    @Test func previewPlayerInitializationCannotMutateProductionContainer() throws {
+        let productionContainer = try makeContainer()
+        let productionContext = ModelContext(productionContainer)
+        let production = try HomePlayerInitialization.prepare(in: productionContext)
+
+        let previewContainer = try makeContainer()
+        let previewContext = ModelContext(previewContainer)
+        let preview = try HomePlayerInitialization.prepare(in: previewContext)
+        preview.player.coins = 10
+        preview.player.ownedFish.append(PlayerFish(species: .clownfish))
+        try previewContext.save()
+
+        let restoredProduction = try #require(
+            productionContext.fetch(FetchDescriptor<Player>()).first
+        )
+        #expect(restoredProduction.persistentModelID == production.player.persistentModelID)
+        #expect(restoredProduction.coins == 0)
+        #expect(restoredProduction.ownedFish.isEmpty)
+        #expect(try productionContext.fetchCount(FetchDescriptor<Player>()) == 1)
+        #expect(try previewContext.fetchCount(FetchDescriptor<Player>()) == 1)
+    }
+
     private func makeFish(count: Int) -> [PlayerFish] {
         (0..<count).map { index in
             PlayerFish(species: FishSpecies.allCases[index % FishSpecies.allCases.count])
