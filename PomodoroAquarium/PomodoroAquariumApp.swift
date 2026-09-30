@@ -17,7 +17,8 @@ struct PomodoroAquariumApp: App {
 #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         usesInMemoryUITestStore = arguments.contains("-core-tutorial-ui-test") ||
-            arguments.contains("-core-tutorial-in-memory")
+            arguments.contains("-core-tutorial-in-memory") ||
+            arguments.contains("-statistics-tap-ui-test")
         // UI Test専用。Releaseの起動・保存フローには影響しない。
         if arguments.contains("-reset-onboarding") {
             UserDefaults.standard.removeObject(forKey: OnboardingStore.storageKey)

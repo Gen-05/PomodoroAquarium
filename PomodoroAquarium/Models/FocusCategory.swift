@@ -305,7 +305,25 @@ enum FocusCategoryService {
     }
 }
 
-/// 日別集計とは別に、将来のカテゴリ別集計へ使う完了セッション明細。
+enum FocusMethod: String, Codable, CaseIterable, Identifiable {
+    case pomodoro
+    case timer
+    case stopwatch
+    case legacy
+
+    var id: Self { self }
+
+    var displayName: String {
+        switch self {
+        case .pomodoro: "ポモドーロ"
+        case .timer: "タイマー"
+        case .stopwatch: "ストップウォッチ"
+        case .legacy: "ポモドーロ"
+        }
+    }
+}
+
+/// 日別集計とは別に、将来のカテゴリ・集中方法別集計へ使う完了セッション明細。
 @Model
 final class FocusSessionRecord {
     @Attribute(.unique) var id: UUID
@@ -313,25 +331,41 @@ final class FocusSessionRecord {
     var durationMinutes: Int
     /// Optionalにして、カテゴリを持たない旧履歴を「勉強」へfallbackできるようにする。
     var categoryID: String?
+    /// Optionalのまま追加し、保存値を持たない旧履歴を推測せずlegacyとして扱う。
+    var focusMethodRawValue: String?
 
     init(
         id: UUID = UUID(),
         completedAt: Date,
         durationMinutes: Int,
-        categoryID: String? = FocusCategoryDefaults.studyID
+        categoryID: String? = FocusCategoryDefaults.studyID,
+        focusMethod: FocusMethod? = nil
     ) {
         self.id = id
         self.completedAt = completedAt
         self.durationMinutes = max(0, durationMinutes)
         self.categoryID = categoryID
+        focusMethodRawValue = focusMethod?.rawValue
     }
 
     var resolvedCategoryID: String {
         FocusCategoryDefaults.resolvedCategoryID(categoryID)
     }
+
+    var focusMethod: FocusMethod {
+        FocusMethod(rawValue: focusMethodRawValue ?? "") ?? .legacy
+    }
 }
 
 enum FocusSessionHistoryMigration {
+    struct FocusMethodMigrationResult: Equatable {
+        let legacyRecordCount: Int
+        let migratedRecordCount: Int
+        let migratedMinutes: Int
+        let totalMinutesBefore: Int
+        let totalMinutesAfter: Int
+    }
+
     /// 旧日別履歴を「勉強」の1日分明細として一度だけ補完する。
     /// 以後の完了分はStudyHistoryServiceがセッション単位で追記する。
     @MainActor
@@ -346,11 +380,41 @@ enum FocusSessionHistoryMigration {
                 context.insert(FocusSessionRecord(
                     completedAt: record.day,
                     durationMinutes: record.studyMinutes,
-                    categoryID: FocusCategoryDefaults.studyID
+                    categoryID: FocusCategoryDefaults.studyID,
+                    focusMethod: .pomodoro
                 ))
             }
             record.categoryHistoryMigratedAt = migratedAt
         }
         try context.save()
+    }
+
+    /// 未リリース期間に作成された集中方法未設定の履歴を、既知のPomodoro履歴へ変換する。
+    /// record自体は維持し、集中方法フィールドだけを更新するため、複数回呼んでも安全。
+    @discardableResult
+    @MainActor
+    static func migrateLegacyFocusMethodsToPomodoroIfNeeded(
+        in context: ModelContext
+    ) throws -> FocusMethodMigrationResult {
+        let records = try context.fetch(FetchDescriptor<FocusSessionRecord>())
+        let totalMinutesBefore = records.reduce(0) { $0 + max(0, $1.durationMinutes) }
+        let legacyRecords = records.filter { $0.focusMethod == .legacy }
+        let migratedMinutes = legacyRecords.reduce(0) { $0 + max(0, $1.durationMinutes) }
+
+        for record in legacyRecords {
+            record.focusMethodRawValue = FocusMethod.pomodoro.rawValue
+        }
+        if !legacyRecords.isEmpty {
+            try context.save()
+        }
+
+        let totalMinutesAfter = records.reduce(0) { $0 + max(0, $1.durationMinutes) }
+        return FocusMethodMigrationResult(
+            legacyRecordCount: legacyRecords.count,
+            migratedRecordCount: legacyRecords.count,
+            migratedMinutes: migratedMinutes,
+            totalMinutesBefore: totalMinutesBefore,
+            totalMinutesAfter: totalMinutesAfter
+        )
     }
 }

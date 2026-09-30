@@ -611,6 +611,7 @@ struct TimerView: View {
                 completedStudyMinutes,
                 existingTodayMinutesBeforeCompletion: todayMinutesBeforeCompletion,
                 categoryID: viewModel.selectedCategoryID,
+                focusMethod: viewModel.mode.focusMethod,
                 in: modelContext
             )
 

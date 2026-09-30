@@ -59,6 +59,115 @@ final class PomodoroAquariumUITests: XCTestCase {
     }
 
     @MainActor
+    func testStatisticsEndpointLabelsRenderInsideChart() {
+        let app = XCUIApplication()
+        launchReturningUser(app)
+
+        app.buttons["mainTab.statistics"].tap()
+        XCTAssertTrue(app.navigationBars["統計"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.otherElements["focusPeriodBarChart"].waitForExistence(timeout: 5))
+
+        let monthlyScreenshot = XCTAttachment(screenshot: app.screenshot())
+        monthlyScreenshot.name = "statistics-monthly-axis"
+        monthlyScreenshot.lifetime = .keepAlways
+        add(monthlyScreenshot)
+
+        let dailyButton = app.buttons["日間"]
+        XCTAssertTrue(dailyButton.exists)
+        dailyButton.tap()
+        XCTAssertTrue(app.otherElements["focusPeriodBarChart"].waitForExistence(timeout: 3))
+
+        let dailyScreenshot = XCTAttachment(screenshot: app.screenshot())
+        dailyScreenshot.name = "statistics-daily-axis"
+        dailyScreenshot.lifetime = .keepAlways
+        add(dailyScreenshot)
+    }
+
+    @MainActor
+    func testStatisticsTapSelectionAndVerticalScrolling() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-statistics-tap-ui-test")
+        launchReturningUser(app)
+
+        app.buttons["mainTab.statistics"].tap()
+        XCTAssertTrue(app.navigationBars["統計"].waitForExistence(timeout: 5))
+
+        let chart = app.otherElements["focusPeriodBarChart"].firstMatch
+        let selection = app.descendants(matching: .any)["statistics.selectedBucket"]
+        XCTAssertTrue(chart.waitForExistence(timeout: 5))
+
+        let calendar = Calendar.current
+        let now = Date()
+        let day = calendar.component(.day, from: now)
+        let month = calendar.component(.month, from: now)
+        let dayCount = calendar.range(of: .day, in: .month, for: now)?.count ?? 30
+        let monthX = min(
+            0.975,
+            (36.0 + ((Double(day) - 0.5) / Double(dayCount)) * 306.0) / 342.0
+        )
+
+        chart.coordinate(withNormalizedOffset: CGVector(dx: monthX, dy: 0.65)).tap()
+        XCTAssertTrue(selection.waitForExistence(timeout: 3))
+        XCTAssertTrue(selection.label.contains("\(month)月\(day)日"))
+        XCTAssertTrue(selection.label.contains("2時間45分"))
+
+        // 指を離しても固定され、期間切替で解除される。
+        XCTAssertTrue(selection.exists)
+        app.buttons["日間"].tap()
+        XCTAssertFalse(selection.exists)
+
+        chart.coordinate(withNormalizedOffset: CGVector(dx: 0.61, dy: 0.65)).tap()
+        XCTAssertTrue(selection.waitForExistence(timeout: 3))
+        XCTAssertTrue(selection.label.contains("13時台"))
+        XCTAssertTrue(selection.label.contains("2時間15分"))
+
+        chart.coordinate(withNormalizedOffset: CGVector(dx: 0.69, dy: 0.65)).tap()
+        XCTAssertTrue(selection.label.contains("15時台"))
+        XCTAssertTrue(selection.label.contains("30分"))
+
+        let initialChartY = chart.frame.minY
+        chart.swipeUp()
+        XCTAssertLessThan(chart.frame.minY, initialChartY)
+
+        let scrollEnd = app.otherElements["statistics.scrollEnd"]
+        let tabBar = app.otherElements["mainTab.customTabBar"]
+        XCTAssertTrue(scrollEnd.exists)
+        XCTAssertTrue(tabBar.exists)
+        XCTAssertLessThanOrEqual(scrollEnd.frame.maxY, tabBar.frame.minY)
+    }
+
+    @MainActor
+    func testStatisticsMonthEndBarsAndSelection() {
+        for (month, lastDay) in [(9, 30), (7, 31)] {
+            let app = XCUIApplication()
+            app.launchArguments.append("-statistics-month-end-\(lastDay)")
+            launchReturningUser(app)
+            app.buttons["mainTab.statistics"].tap()
+
+            let chart = app.otherElements["focusPeriodBarChart"].firstMatch
+            let selection = app.descendants(matching: .any)["statistics.selectedBucket"]
+            XCTAssertTrue(chart.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["2時間15分"].waitForExistence(timeout: 5))
+
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "statistics-month-end-\(lastDay)"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+
+            for day in (lastDay - 2)...lastDay {
+                let chartWidth = chart.frame.width
+                let x = (36 + Double(day) / Double(lastDay + 1) * (chartWidth - 36))
+                    / chartWidth
+                chart.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.65)).tap()
+                XCTAssertTrue(selection.waitForExistence(timeout: 3))
+                XCTAssertTrue(selection.label.contains("\(month)月\(day)日"))
+                XCTAssertTrue(selection.label.contains("45分"))
+            }
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testCategoryAndColorSheetsCloseBeforeStudyStartsNormally() {
         let app = XCUIApplication()
         launchReturningUser(app)
@@ -553,7 +662,7 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(statisticsTab.exists)
         statisticsTab.tap()
         XCTAssertTrue(app.navigationBars["統計"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.otherElements["monthlyStudyCalendar"].exists)
+        XCTAssertTrue(app.otherElements["focusPeriodBarChart"].exists)
 
         let moreTab = app.buttons["mainTab.more"]
         moreTab.tap()

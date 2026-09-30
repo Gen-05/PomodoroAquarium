@@ -31,6 +31,24 @@ struct ContentView: View {
             try? FocusSessionHistoryMigration.migrateLegacyDailyRecordsIfNeeded(
                 in: modelContext
             )
+            do {
+                let result = try FocusSessionHistoryMigration
+                    .migrateLegacyFocusMethodsToPomodoroIfNeeded(in: modelContext)
+#if DEBUG
+                if result.migratedRecordCount > 0 {
+                    print(
+                        "Focus method migration: legacy=\(result.legacyRecordCount), " +
+                        "migrated=\(result.migratedRecordCount), " +
+                        "migratedMinutes=\(result.migratedMinutes), " +
+                        "minutes=\(result.totalMinutesBefore)->\(result.totalMinutesAfter)"
+                    )
+                }
+#endif
+            } catch {
+#if DEBUG
+                print("Focus method migration failed: \(error)")
+#endif
+            }
         }
     }
 }

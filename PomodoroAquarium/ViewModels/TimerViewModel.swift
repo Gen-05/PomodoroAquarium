@@ -33,6 +33,14 @@ enum TimerMode: String, CaseIterable, Identifiable {
     var showsTimeSettings: Bool {
         self != .stopwatch
     }
+
+    var focusMethod: FocusMethod {
+        switch self {
+        case .pomodoro: .pomodoro
+        case .countdown: .timer
+        case .stopwatch: .stopwatch
+        }
+    }
 }
 
 enum StudySessionEndReason: Equatable {

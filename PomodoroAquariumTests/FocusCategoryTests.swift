@@ -343,6 +343,7 @@ struct FocusCategoryTests {
             25,
             on: completedAt,
             categoryID: FocusCategoryDefaults.readingID,
+            focusMethod: .timer,
             in: container.mainContext
         )
 
@@ -351,6 +352,7 @@ struct FocusCategoryTests {
         #expect(sessions.first?.durationMinutes == 25)
         #expect(sessions.first?.completedAt == completedAt)
         #expect(sessions.first?.resolvedCategoryID == FocusCategoryDefaults.readingID)
+        #expect(sessions.first?.focusMethod == .timer)
     }
 
     @Test func missingLegacyCategoryFallsBackToStudy() {
@@ -362,6 +364,31 @@ struct FocusCategoryTests {
 
         #expect(legacyRecord.resolvedCategoryID == FocusCategoryDefaults.studyID)
         #expect(FocusCategoryDefaults.resolvedCategoryID(nil) == FocusCategoryDefaults.studyID)
+        #expect(legacyRecord.focusMethod == .legacy)
+    }
+
+    @Test func completedSessionsPersistEachFocusMethod() throws {
+        let container = try makeContainer()
+        let methods: [FocusMethod] = [.pomodoro, .timer, .stopwatch]
+
+        for (offset, method) in methods.enumerated() {
+            try StudyHistoryService.addStudyMinutes(
+                25,
+                on: Date(timeIntervalSince1970: 1_800_000_000 + Double(offset * 86_400)),
+                categoryID: FocusCategoryDefaults.studyID,
+                focusMethod: method,
+                in: container.mainContext
+            )
+        }
+
+        let sessions = try container.mainContext.fetch(
+            FetchDescriptor<FocusSessionRecord>(sortBy: [SortDescriptor(\.completedAt)])
+        )
+        #expect(sessions.map(\.focusMethod) == methods)
+        #expect(sessions.allSatisfy { $0.resolvedCategoryID == FocusCategoryDefaults.studyID })
+        #expect(TimerMode.pomodoro.focusMethod == .pomodoro)
+        #expect(TimerMode.countdown.focusMethod == .timer)
+        #expect(TimerMode.stopwatch.focusMethod == .stopwatch)
     }
 
     @Test func legacyDailyHistoryIsMigratedToStudyOnce() throws {
@@ -385,6 +412,82 @@ struct FocusCategoryTests {
         #expect(sessions.count == 1)
         #expect(sessions.first?.durationMinutes == 40)
         #expect(sessions.first?.resolvedCategoryID == FocusCategoryDefaults.studyID)
+        #expect(sessions.first?.focusMethod == .pomodoro)
+    }
+
+    @Test func legacyFocusMethodsAreMigratedToPomodoroWithoutChangingSessionData() throws {
+        let container = try makeContainer()
+        let nilDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let emptyDate = Date(timeIntervalSince1970: 1_700_086_400)
+        let legacyDate = Date(timeIntervalSince1970: 1_700_172_800)
+        let nilMethod = FocusSessionRecord(
+            completedAt: nilDate,
+            durationMinutes: 400,
+            categoryID: FocusCategoryDefaults.readingID
+        )
+        let emptyMethod = FocusSessionRecord(
+            completedAt: emptyDate,
+            durationMinutes: 30,
+            categoryID: "custom-math"
+        )
+        emptyMethod.focusMethodRawValue = ""
+        let explicitLegacy = FocusSessionRecord(
+            completedAt: legacyDate,
+            durationMinutes: 23,
+            categoryID: FocusCategoryDefaults.studyID,
+            focusMethod: .legacy
+        )
+        let pomodoro = FocusSessionRecord(
+            completedAt: Date(timeIntervalSince1970: 1_700_259_200),
+            durationMinutes: 25,
+            focusMethod: .pomodoro
+        )
+        let timer = FocusSessionRecord(
+            completedAt: Date(timeIntervalSince1970: 1_700_345_600),
+            durationMinutes: 40,
+            focusMethod: .timer
+        )
+        let stopwatch = FocusSessionRecord(
+            completedAt: Date(timeIntervalSince1970: 1_700_432_000),
+            durationMinutes: 15,
+            focusMethod: .stopwatch
+        )
+        let records = [nilMethod, emptyMethod, explicitLegacy, pomodoro, timer, stopwatch]
+        records.forEach(container.mainContext.insert)
+        try container.mainContext.save()
+
+        let originalIDs = Set(records.map(\.id))
+        let originalTotal = records.reduce(0) { $0 + $1.durationMinutes }
+        let firstResult = try FocusSessionHistoryMigration
+            .migrateLegacyFocusMethodsToPomodoroIfNeeded(in: container.mainContext)
+        let secondResult = try FocusSessionHistoryMigration
+            .migrateLegacyFocusMethodsToPomodoroIfNeeded(in: container.mainContext)
+        let migrated = try container.mainContext.fetch(
+            FetchDescriptor<FocusSessionRecord>(sortBy: [SortDescriptor(\.completedAt)])
+        )
+
+        #expect(firstResult.legacyRecordCount == 3)
+        #expect(firstResult.migratedRecordCount == 3)
+        #expect(firstResult.migratedMinutes == 453)
+        #expect(firstResult.totalMinutesBefore == originalTotal)
+        #expect(firstResult.totalMinutesAfter == originalTotal)
+        #expect(secondResult.legacyRecordCount == 0)
+        #expect(secondResult.migratedRecordCount == 0)
+        #expect(secondResult.migratedMinutes == 0)
+        #expect(Set(migrated.map(\.id)) == originalIDs)
+        #expect(migrated.count == records.count)
+        #expect(migrated.map(\.focusMethod) == [
+            .pomodoro, .pomodoro, .pomodoro, .pomodoro, .timer, .stopwatch
+        ])
+        #expect(migrated[0].completedAt == nilDate)
+        #expect(migrated[0].durationMinutes == 400)
+        #expect(migrated[0].categoryID == FocusCategoryDefaults.readingID)
+        #expect(migrated[1].completedAt == emptyDate)
+        #expect(migrated[1].durationMinutes == 30)
+        #expect(migrated[1].categoryID == "custom-math")
+        #expect(migrated[2].completedAt == legacyDate)
+        #expect(migrated[2].durationMinutes == 23)
+        #expect(migrated[2].categoryID == FocusCategoryDefaults.studyID)
     }
 
     @Test func selectedCategoryIsPersistedWhenSessionStarts() throws {

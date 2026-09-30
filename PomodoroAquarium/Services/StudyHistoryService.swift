@@ -8,6 +8,7 @@ enum StudyHistoryService {
         on date: Date = Date(),
         existingTodayMinutesBeforeCompletion: Int = 0,
         categoryID: String? = FocusCategoryDefaults.studyID,
+        focusMethod: FocusMethod = .pomodoro,
         calendar: Calendar = .current,
         in context: ModelContext
     ) throws {
@@ -25,7 +26,8 @@ enum StudyHistoryService {
                 context.insert(FocusSessionRecord(
                     completedAt: existingRecord.day,
                     durationMinutes: existingRecord.studyMinutes,
-                    categoryID: FocusCategoryDefaults.studyID
+                    categoryID: FocusCategoryDefaults.studyID,
+                    focusMethod: .pomodoro
                 ))
             }
             existingRecord.categoryHistoryMigratedAt = date
@@ -42,7 +44,8 @@ enum StudyHistoryService {
         context.insert(FocusSessionRecord(
             completedAt: date,
             durationMinutes: minutes,
-            categoryID: FocusCategoryDefaults.resolvedCategoryID(categoryID)
+            categoryID: FocusCategoryDefaults.resolvedCategoryID(categoryID),
+            focusMethod: focusMethod
         ))
         try context.save()
     }
