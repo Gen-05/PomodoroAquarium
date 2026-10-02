@@ -962,15 +962,15 @@ struct PomodoroAquariumTests {
     }
 
     @Test func homeTimerEntryReflectsBreakAndNextSetState() {
-        #expect(HomeTimerEntryPresentation.title(for: .study, state: .idle) == "勉強をはじめる")
-        #expect(HomeTimerEntryPresentation.title(for: .study, state: .running) == "勉強をはじめる")
-        #expect(HomeTimerEntryPresentation.title(for: .study, state: .paused) == "勉強をはじめる")
+        #expect(HomeTimerEntryPresentation.title(for: .study, state: .idle) == "はじめよう")
+        #expect(HomeTimerEntryPresentation.title(for: .study, state: .running) == "はじめよう")
+        #expect(HomeTimerEntryPresentation.title(for: .study, state: .paused) == "はじめよう")
         #expect(HomeTimerEntryPresentation.title(for: .breakTime, state: .running) == "休憩に戻る")
         #expect(HomeTimerEntryPresentation.title(
             for: .awaitingNextSet,
             state: .completed
         ) == "次のセット確認へ戻る")
-        #expect(HomeTimerEntryPresentation.title(for: .finished, state: .completed) == "勉強をはじめる")
+        #expect(HomeTimerEntryPresentation.title(for: .finished, state: .completed) == "はじめよう")
     }
 
     @Test func mainTabSelectionDoesNotChangeWhenStudyBlocksButtonAndBindingRequests() {

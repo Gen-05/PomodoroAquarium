@@ -155,6 +155,45 @@ struct RewardHistoryTests {
         #expect(!recent.contains { $0.id == ids[0] || $0.id == ids[1] })
     }
 
+    @Test func recentHistoryIsNewestFirst() throws {
+        let context = ModelContext(try makeContainer())
+        let older = RewardHistoryEntry(
+            fishID: UUID(),
+            fishSpecies: .clownfish,
+            fishName: "クマノミ",
+            rarity: .common,
+            fishCountDelta: 1,
+            pointDelta: 10,
+            acquiredAt: Date(timeIntervalSince1970: 100),
+            wasNewFish: true,
+            previousOwnedCount: 0,
+            currentOwnedCount: 1
+        )
+        let newer = RewardHistoryEntry(
+            fishID: UUID(),
+            fishSpecies: .seahorse,
+            fishName: "タツノオトシゴ",
+            rarity: .rare,
+            fishCountDelta: 1,
+            pointDelta: 20,
+            acquiredAt: Date(timeIntervalSince1970: 200),
+            wasNewFish: true,
+            previousOwnedCount: 0,
+            currentOwnedCount: 1
+        )
+        context.insert(older)
+        context.insert(newer)
+        try context.save()
+
+        #expect(try RewardHistoryService.recent(in: context).map(\.id) == [newer.id, older.id])
+    }
+
+    @Test func recentHistoryIsEmptyWhenNothingWasAcquired() throws {
+        let context = ModelContext(try makeContainer())
+
+        #expect(try RewardHistoryService.recent(in: context).isEmpty)
+    }
+
 #if DEBUG
     @Test func previewHistoryAndReplayDoNotMutateProductionModels() throws {
         let context = ModelContext(try makeContainer())

@@ -278,6 +278,8 @@ struct TimerView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // `navigationDestination(isPresented:)`のdestination値にpredicate付きQueryを直接持たせると、
     // iOS 26でdestination preferenceが安定せず再登録を繰り返すため、ここではQuery自体を
     // 安定させ、少数のカテゴリに対するarchive除外はactiveFocusCategoriesで行う。
@@ -329,6 +331,15 @@ struct TimerView: View {
     @State private var showsNotificationIntroduction = false
     @State private var tutorialCompletionTask: Task<Void, Never>?
     @State private var isCompletingCoreTutorialStudy = false
+    @State private var focusDisplay = FocusDisplayState()
+    @State private var isTimerViewVisible = false
+    @State private var studyStartPresentation = StudyStartPresentation()
+    @State private var studyStartFadeProgress: CGFloat = 0
+    @State private var studyStartControlsOpacity: Double = 1
+    @State private var studyStartIsRevealingRunningUI = false
+    @State private var studyStartCanvasFrame: CGRect = .zero
+    @State private var studyStartButtonFrame: CGRect = .zero
+    @State private var studyStartOrigin = CGPoint(x: 0.5, y: 0.72)
 
     var body: some View {
         ZStack {
@@ -341,10 +352,24 @@ struct TimerView: View {
             VStack(spacing: 18) {
                 Spacer()
                 sessionConfigurationControls
+                    .modifier(FocusDisplayControlsModifier(isHidden: focusDisplay.isFocusDisplayMode))
                 focusRulesControl
+                    .modifier(FocusDisplayControlsModifier(isHidden: focusDisplay.isFocusDisplayMode))
                 timerDisplay
+                    .overlay(alignment: .top) {
+                        if viewModel.state == .paused {
+                            Text("一時停止中")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .offset(y: -28)
+                        }
+                    }
+                    .opacity(focusDisplay.isFocusDisplayMode ? 0.45 : 1)
+                    .animation(.easeInOut(duration: FocusDisplayState.fadeDuration), value: focusDisplay.isFocusDisplayMode)
                 pomodoroProgress
+                    .modifier(FocusDisplayControlsModifier(isHidden: focusDisplay.isFocusDisplayMode))
                 sessionActionControls
+                    .modifier(FocusDisplayControlsModifier(isHidden: focusDisplay.isFocusDisplayMode))
                 Spacer()
             }
             .padding(.horizontal, 32)
@@ -353,6 +378,55 @@ struct TimerView: View {
             // 固定すべきTimer操作UIへ伝播させない。
             .transaction { transaction in
                 transaction.animation = nil
+            }
+            .opacity(isCoreTutorialStudy
+                     ? (studyStartPresentation.isPresenting && studyStartPresentation.effect == .fade
+                        ? 1 - Double(studyStartFadeProgress) : 1)
+                     : studyStartControlsOpacity)
+            .accessibilityHidden(isStudyStartQuietOverlay)
+        }
+        .background {
+            // Measure the full overlay canvas once per layout, not on animation frames.
+            GeometryReader { geometry in
+                Color.clear.onGeometryChange(for: CGRect.self) { proxy in
+                    proxy.frame(in: .global)
+                } action: { frame in
+                    studyStartCanvasFrame = frame
+                }
+            }
+            .ignoresSafeArea()
+        }
+        .allowsHitTesting(!studyStartPresentation.isPresenting)
+        .overlay {
+            if studyStartPresentation.isPresenting {
+                StudyStartRippleView(
+                    effect: studyStartPresentation.effect,
+                    fadeProgress: studyStartFadeProgress,
+                    origin: studyStartOrigin
+                )
+                .id(studyStartPresentation.requestID)
+                .ignoresSafeArea()
+            }
+        }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0).onEnded { _ in
+                focusDisplay.userInteracted()
+            },
+            // Do not intercept UIKit-backed configuration Pickers before running.
+            including: focusDisplayContext.canAutoHide && !focusDisplay.isFocusDisplayMode
+                ? .all : .subviews
+        )
+        .overlay {
+            if focusDisplay.isFocusDisplayMode {
+                // This layer consumes the wake-up tap, including over hidden buttons.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .onTapGesture { focusDisplay.userInteracted() }
+                    .accessibilityLabel("操作を表示")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("timer.showControls")
             }
         }
         .overlayPreferenceValue(CoreTutorialTargetPreferenceKey.self) { targets in
@@ -367,22 +441,95 @@ struct TimerView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(
-            viewModel.locksMainTabNavigation || isCoreTutorialStudy || isCompletingCoreTutorialStudy
+            viewModel.locksMainTabNavigation || isCoreTutorialStudy || isCompletingCoreTutorialStudy ||
+                isStudyStartQuietOverlay
         )
+        .toolbar {
+            if isStudyStartQuietOverlay && !studyStartIsRevealingRunningUI {
+                ToolbarItem(placement: .topBarLeading) {
+                    // Keep the navigation row's height while its noninteractive back cue fades.
+                    // Outside this transition, the original native back button is unchanged.
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.cyan)
+                        .frame(width: 32, height: 32)
+                        .background(.black.opacity(0.12), in: Circle())
+                        .opacity(studyStartControlsOpacity)
+                        .animation(.easeOut(duration: 0.25), value: studyStartControlsOpacity)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .preference(key: TimerFocusDisplayPreferenceKey.self,
+                    value: focusDisplay.isFocusDisplayMode || isStudyStartQuietOverlay)
         .onAppear {
+            isTimerViewVisible = true
+#if DEBUG
+            prepareShoreWaveVisualTestIfNeeded()
+#endif
             _ = try? FocusCategoryService.createDefaultsIfNeeded(in: modelContext)
             ensureSelectedFocusCategoryIsActive()
             configureStudyCompletion()
             prepareCoreTutorialStudyIfNeeded()
             viewModel.restorePersistedSessionIfNeeded()
             viewModel.synchronizeTime()
+            focusDisplay.update(context: focusDisplayContext)
+        }
+        .onChange(of: focusDisplayContext) { _, context in
+            focusDisplay.update(context: context)
+        }
+        .task(id: focusDisplay.timeoutID) {
+            guard let id = focusDisplay.timeoutID, let deadline = focusDisplay.deadline else { return }
+            do {
+                try await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow)))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            guard focusDisplayContext.canAutoHide else {
+                focusDisplay.reset()
+                return
+            }
+            focusDisplay.timeout(id: id)
+        }
+        .task(id: studyStartPresentation.requestID) {
+            await performStudyStartPresentation()
+        }
+        .onChange(of: studyStartPresentation.requestID) { _, id in
+            if id == nil {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    studyStartFadeProgress = 0
+                    studyStartIsRevealingRunningUI = false
+                }
+                withAnimation(.easeInOut(duration: 0.25)) { studyStartControlsOpacity = 1 }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { studyStartPresentation.reset() }
+        }
+        .onChange(of: viewModel.state) { _, state in
+            if !studyStartPresentation.canContinue(state: state, phase: viewModel.phase) {
+                studyStartPresentation.reset()
+            }
+        }
+        .onChange(of: viewModel.phase) { _, phase in
+            if !studyStartPresentation.canContinue(state: viewModel.state, phase: phase) {
+                studyStartPresentation.reset()
+            }
         }
         .onChange(of: activeFocusCategoryIDs) { _, _ in
             ensureSelectedFocusCategoryIsActive()
         }
         .onDisappear {
+            isTimerViewVisible = false
+            studyStartPresentation.reset()
+            studyStartControlsOpacity = 1
+            studyStartIsRevealingRunningUI = false
+            focusDisplay.reset()
             tutorialCompletionTask?.cancel()
             tutorialCompletionTask = nil
             if isCompletingCoreTutorialStudy {
@@ -396,19 +543,19 @@ struct TimerView: View {
                 restoreStoredTimerConfiguration()
             }
         }
-        .alert(viewModel.isStudyTime ? "勉強を終了しますか？" : "休憩を終了しますか？", isPresented: $showsEndConfirmation) {
+        .alert(viewModel.isStudyTime ? "集中を終了しますか？" : "休憩を終了しますか？", isPresented: $showsEndConfirmation) {
             Button("キャンセル", role: .cancel) {}
             Button("終了する", role: .destructive) {
                 viewModel.endCurrentSession()
             }
         } message: {
             if viewModel.isStudyTime {
-                Text("現在の勉強時間を報酬計算します。\n\n今回の勉強時間: \(viewModel.elapsedStudyMinutes)分")
+                Text("現在までの集中時間で報酬を計算します。\n\n今回の集中時間: \(viewModel.elapsedStudyMinutes)分")
             } else {
-                Text("現在の休憩を終了して、次の勉強へ進みます。")
+                Text("現在の休憩を終了して、次の集中へ進みます。")
             }
         }
-        .alert("勉強終了をお知らせ", isPresented: $showsNotificationIntroduction) {
+        .alert("集中終了をお知らせ", isPresented: $showsNotificationIntroduction) {
             Button("あとで", role: .cancel) {
                 notificationsEnabled = false
                 viewModel.resumeTimer()
@@ -425,7 +572,7 @@ struct TimerView: View {
                 }
             }
         } message: {
-            Text("勉強や休憩が終わった時に通知でお知らせできます。")
+            Text("集中や休憩が終わった時に通知でお知らせできます。")
         }
         .alert("次のセットを始めますか？", isPresented: Binding(
             get: { viewModel.shouldConfirmNextSet },
@@ -439,7 +586,7 @@ struct TimerView: View {
                 viewModel.startNextSet()
             }
         } message: {
-            Text("休憩が終了しました。次の勉強セットを開始できます。")
+            Text("休憩が終了しました。次の集中セットを開始できます。")
         }
         .alert("魚が逃げてしまいました", isPresented: Binding(
             get: { viewModel.shouldPresentBackgroundFailureAlert },
@@ -563,6 +710,19 @@ struct TimerView: View {
             viewModel.resumeTimer()
         }
     }
+
+#if DEBUG
+    private func prepareShoreWaveVisualTestIfNeeded() {
+        guard ProcessInfo.processInfo.arguments.contains("-shore-wave-ui-test"),
+              modelContext.container.configurations.allSatisfy({ $0.isStoredInMemoryOnly }),
+              let player, player.ownedFish.isEmpty else { return }
+        let fish = PlayerFish(species: .clownfish)
+        modelContext.insert(fish)
+        player.ownedFish = [fish]
+        player.activeAquariumFishIDs = [fish.id]
+        player.hasInitializedActiveAquariumFish = true
+    }
+#endif
 
     private func configureStudyCompletion() {
         viewModel.onStudyFinished = {
@@ -773,9 +933,77 @@ struct TimerView: View {
         coreTutorial?.usesTutorialStudySetup == true
     }
 
+    private var isStudyStartQuietOverlay: Bool {
+        studyStartPresentation.isPresenting && !isCoreTutorialStudy
+    }
+
+    private var focusDisplayContext: FocusDisplayState.Context {
+        .init(
+            timerState: viewModel.state,
+            phase: viewModel.phase,
+            isActive: scenePhase == .active,
+            // Start the existing ten-second timeout with running, even as the ripple fades.
+            isVisible: isTimerViewVisible &&
+                (!studyStartPresentation.isPresenting || studyStartPresentation.hasStarted),
+            isTutorial: coreTutorial?.isActive == true || isCoreTutorialStudy
+        )
+    }
+
+    private func performStudyStartPresentation() async {
+        guard let id = studyStartPresentation.requestID,
+              let startDeadline = studyStartPresentation.startDeadline,
+              let deadline = studyStartPresentation.deadline else { return }
+        let effect = studyStartPresentation.effect
+        if !isCoreTutorialStudy {
+            withAnimation(.easeOut(duration: effect == .ripple ? 0.25 : 0.2)) {
+                studyStartControlsOpacity = 0
+            }
+        }
+        if studyStartPresentation.effect == .fade {
+            withAnimation(.easeOut(duration: studyStartPresentation.effect.startDelay)) {
+                studyStartFadeProgress = 1
+            }
+        }
+        if effect == .ripple {
+            let revealDeadline = startDeadline.addingTimeInterval(-effect.runningUIFadeDuration)
+            do {
+                try await Task.sleep(for: .seconds(max(0, revealDeadline.timeIntervalSinceNow)))
+            } catch { return }
+            guard !Task.isCancelled else { return }
+            guard isTimerViewVisible, scenePhase == .active,
+                  StudyStartPresentation.canStart(state: viewModel.state, phase: viewModel.phase),
+                  !isStudyStartDisabledForTutorial else {
+                if studyStartPresentation.requestID == id { studyStartPresentation.reset() }
+                return
+            }
+            // View-only running layout; the model is still idle until this fade completes.
+            studyStartIsRevealingRunningUI = true
+            withAnimation(.easeInOut(duration: effect.runningUIFadeDuration)) {
+                studyStartControlsOpacity = 1
+            }
+        }
+        do {
+            try await Task.sleep(for: .seconds(max(0, startDeadline.timeIntervalSinceNow)))
+        } catch { return }
+        guard !Task.isCancelled else { return }
+        guard isTimerViewVisible, scenePhase == .active,
+              StudyStartPresentation.canStart(state: viewModel.state, phase: viewModel.phase),
+              !isStudyStartDisabledForTutorial else {
+            if studyStartPresentation.requestID == id { studyStartPresentation.reset() }
+            return
+        }
+        guard studyStartPresentation.start(id: id) else { return }
+        handlePrimaryTimerAction()
+        do {
+            try await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow)))
+        } catch { return }
+        guard !Task.isCancelled else { return }
+        _ = studyStartPresentation.complete(id: id)
+    }
+
     @ViewBuilder
     private var sessionConfigurationControls: some View {
-        if viewModel.canConfigureSession {
+        if viewModel.canConfigureSession && !studyStartIsRevealingRunningUI {
             VStack(spacing: 8) {
                 if viewModel.isStudyTime &&
                     !isCoreTutorialStudy {
@@ -805,7 +1033,8 @@ struct TimerView: View {
 
     @ViewBuilder
     private var focusRulesControl: some View {
-        if viewModel.canConfigureSession && viewModel.isStudyTime && !isCoreTutorialStudy {
+        if viewModel.canConfigureSession && !studyStartIsRevealingRunningUI &&
+            viewModel.isStudyTime && !isCoreTutorialStudy {
             Button {
                 showsFocusRules = true
             } label: {
@@ -825,6 +1054,7 @@ struct TimerView: View {
     private var timerDisplay: some View {
         HStack(spacing: 12) {
             Text(timerDisplayText)
+                .accessibilityIdentifier("timer.timeDisplay")
                 .font(.system(size: 72, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
@@ -832,7 +1062,7 @@ struct TimerView: View {
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
 
-            if viewModel.canConfigureSession && viewModel.mode.showsTimeSettings {
+            if viewModel.canConfigureSession && !studyStartIsRevealingRunningUI && viewModel.mode.showsTimeSettings {
                 Button {
                     showsTimeSettings = true
                 } label: {
@@ -868,18 +1098,36 @@ struct TimerView: View {
                 showsEndConfirmation = true
             }
             .buttonStyle(AquariumSecondaryButtonStyle())
-        } else if viewModel.isRunning {
+        } else if viewModel.isRunning || studyStartIsRevealingRunningUI {
             Button("一時停止") {
                 handlePrimaryTimerAction()
             }
             .buttonStyle(AquariumPrimaryButtonStyle())
         } else if viewModel.isStudyTime {
-            Button("勉強開始") {
-                handlePrimaryTimerAction()
+            Button("START") {
+                guard scenePhase == .active, isTimerViewVisible,
+                      !isStudyStartDisabledForTutorial,
+                      !studyStartPresentation.isPresenting,
+                      !showsNotificationIntroduction else { return }
+                if studyStartCanvasFrame.width > 0 && !studyStartButtonFrame.isEmpty {
+                    studyStartOrigin = CGPoint(
+                        x: (studyStartButtonFrame.midX - studyStartCanvasFrame.minX) / studyStartCanvasFrame.width,
+                        y: (studyStartButtonFrame.midY - studyStartCanvasFrame.minY) / studyStartCanvasFrame.height
+                    )
+                }
+                studyStartPresentation.begin(
+                    state: viewModel.state, phase: viewModel.phase,
+                    reduceMotion: reduceMotion, isTutorial: isCoreTutorialStudy
+                )
             }
-            .buttonStyle(AquariumStudyStartButtonStyle())
+            .buttonStyle(StudyStartButtonStyle())
+            .onGeometryChange(for: CGRect.self) { geometry in
+                geometry.frame(in: .global)
+            } action: { frame in
+                studyStartButtonFrame = frame
+            }
             .coreTutorialTarget(.studyStart)
-            .disabled(isStudyStartDisabledForTutorial)
+            .disabled(isStudyStartDisabledForTutorial || studyStartPresentation.isPresenting || showsNotificationIntroduction)
             .accessibilityHidden(isStudyStartHiddenForTutorial)
             .accessibilityIdentifier("timer.startStudy")
         } else {
@@ -1055,6 +1303,27 @@ struct TimerView: View {
             ),
             totalSets: setCount
         )
+    }
+}
+
+private struct FocusDisplayControlsModifier: ViewModifier {
+    let isHidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityElement(children: .contain)
+            .opacity(isHidden ? 0 : 1)
+            .allowsHitTesting(!isHidden)
+            .accessibilityHidden(isHidden)
+            .animation(.easeInOut(duration: FocusDisplayState.fadeDuration), value: isHidden)
+    }
+}
+
+struct TimerFocusDisplayPreferenceKey: PreferenceKey {
+    static let defaultValue = false
+
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
     }
 }
 
@@ -1461,7 +1730,7 @@ private struct TimerTimeSettingsSheet: View {
                 if mode == .pomodoro {
                     HStack(alignment: .top, spacing: 4) {
                         pickerColumn(
-                            title: "勉強時間",
+                            title: "集中時間",
                             selection: $studyMinutes,
                             values: 1...180,
                             suffix: "分"
@@ -1489,7 +1758,7 @@ private struct TimerTimeSettingsSheet: View {
                     }
                 } else {
                     durationPicker(
-                        title: "勉強時間",
+                        title: "集中時間",
                         hours: $timerHours,
                         minutes: $timerMinuteComponent,
                         maximumTotalMinutes: CountdownDurationConfiguration.totalMinutesRange.upperBound

@@ -119,6 +119,8 @@ struct HomeView: View {
     @Query private var decorationPlacements: [AquariumDecorationPlacement]
     @State private var showsInterruptionBanner = false
     @State private var showsTimerScreen = false
+    @State private var homeStartTransition = HomeStartTransitionState()
+    @State private var dailyMessageDate = Date.now
     @State private var isEditingAquarium = false
     @State private var aquariumEditorCategory: AquariumEditorCategory = .fish
     @State private var selectedAquariumFishID: UUID?
@@ -376,6 +378,45 @@ struct HomeView: View {
         .task {
             await initializeHomeDataAfterAppearance()
         }
+        .task(id: homeStartTransition.requestID) {
+            guard let id = homeStartTransition.requestID else { return }
+            do {
+                try await Task.sleep(for: .seconds(HomeStartTransitionState.navigationDelay))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled,
+                  scenePhase == .active,
+                  !showsTimerScreen,
+                  coreTutorial?.isActive != true || isHomeStartTutorialInteractionAllowed,
+                  homeStartTransition.consume(id: id) else { return }
+            coreTutorial?.didTapHomeStart()
+            showsTimerScreen = true
+        }
+        .task(id: scenePhase) {
+            guard mode == .home, scenePhase == .active else { return }
+            // A single midnight wake-up, not a periodic timer or an animation.
+            while !Task.isCancelled {
+                dailyMessageDate = .now
+                let calendar = Calendar.current
+                guard let nextDay = calendar.date(
+                    byAdding: .day,
+                    value: 1,
+                    to: calendar.startOfDay(for: dailyMessageDate)
+                ) else { return }
+                do {
+                    try await Task.sleep(for: .seconds(max(1, nextDay.timeIntervalSinceNow)))
+                } catch {
+                    return
+                }
+            }
+        }
+        .onChange(of: showsTimerScreen) { _, isPresented in
+            if !isPresented { homeStartTransition.reset() }
+        }
+        .onDisappear {
+            homeStartTransition.reset()
+        }
         .onChange(of: aquariumEditorCategory) { _, category in
             clearAquariumSelections()
             if category != .fish {
@@ -417,6 +458,7 @@ struct HomeView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            if newPhase != .active { homeStartTransition.reset() }
             if newPhase == .background {
                 discardAquariumEditorSession(closeEditor: false)
             }
@@ -466,8 +508,7 @@ struct HomeView: View {
                 guard coreTutorial?.isActive != true || isHomeStartTutorialInteractionAllowed else {
                     return
                 }
-                coreTutorial?.didTapHomeStart()
-                showsTimerScreen = true
+                _ = homeStartTransition.begin(isDestinationPresented: showsTimerScreen)
             } label: {
                 Label(
                     HomeTimerEntryPresentation.title(
@@ -477,14 +518,35 @@ struct HomeView: View {
                     systemImage: "timer"
                 )
             }
-            .buttonStyle(AquariumStudyStartButtonStyle())
+            .buttonStyle(HomeWaterSurfaceButtonStyle())
             .frame(maxWidth: 290)
             .coreTutorialTarget(.homeStart)
             .disabled(
-                coreTutorial?.isActive == true && !isHomeStartTutorialInteractionAllowed
+                homeStartTransition.isOpening ||
+                    (coreTutorial?.isActive == true && !isHomeStartTutorialInteractionAllowed)
             )
             .accessibilityHidden(coreTutorial?.isActive == true && !isHomeStartTutorialInteractionAllowed)
             .accessibilityIdentifier("home.startStudy")
+            .accessibilityLabel(HomeTimerEntryPresentation.title(
+                for: timerViewModel.phase,
+                state: timerViewModel.state
+            ))
+            .overlay {
+                if homeStartTransition.isOpening {
+                    HomeStartRipple()
+                }
+            }
+            .overlay(alignment: .bottom) {
+                Text(HomeDailyMessage.message(on: dailyMessageDate))
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .alignmentGuide(.bottom) { $0[.top] - 12 }
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("home.dailyMessage")
+            }
 
             Spacer(minLength: 24)
         }
@@ -1650,9 +1712,9 @@ struct HomeView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.yellow)
             VStack(alignment: .leading, spacing: 3) {
-                Text("前回の勉強は中断されました")
+                Text("前回の集中は中断されました")
                     .font(.subheadline.weight(.semibold))
-                Text("勉強時間と魚獲得には反映されません")
+                Text("集中時間と魚獲得には反映されません")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.8))
             }
@@ -1745,7 +1807,7 @@ enum HomeTimerEntryPresentation {
         case .awaitingNextSet:
             "次のセット確認へ戻る"
         case .study, .finished:
-            "勉強をはじめる"
+            "はじめよう"
         }
     }
 }

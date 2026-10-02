@@ -124,10 +124,10 @@ struct SettingsView: View {
     private var notificationSettingsContent: some View {
         switch notificationStatus {
         case .authorized:
-            Toggle("勉強・休憩終了の通知", isOn: $notificationsEnabled)
+            Toggle("集中・休憩終了の通知", isOn: $notificationsEnabled)
             Label("通知は許可されています", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-            Text("勉強・休憩終了時に通知します。")
+            Text("集中・休憩終了時に通知します。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 

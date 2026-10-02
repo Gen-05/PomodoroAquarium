@@ -13,12 +13,12 @@ struct StudyCompletionRewardView: View {
 
     var body: some View {
         VStack(spacing: 22) {
-            Text("🎉 勉強完了！")
+            Text("🎉 集中完了！")
                 .font(.largeTitle.bold())
 
             rewardRow(
                 icon: "📘",
-                title: "今日の勉強報酬",
+                title: "今日の集中報酬",
                 amount: displayedStudyReward
             )
             .opacity(showsStudyReward ? 1 : 0)

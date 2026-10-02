@@ -222,40 +222,17 @@ struct RewardPreviewView: View {
             } header: {
                 Text("Reward Preview")
             } footer: {
-                Text("演出だけを再生します。所持魚、今日の獲得数、コイン、勉強記録は変更されません。")
+                Text("演出だけを再生します。所持魚、今日の獲得数、コイン、集中記録は変更されません。")
             }
             Section {
                 ForEach(previewHistory) { history in
                     Button {
                         presentReplay(history)
                     } label: {
-                        HStack(spacing: 10) {
-                            Circle()
-                                .fill(history.rarity.rewardColor)
-                                .frame(width: 10, height: 10)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("\(history.fishName) ・ \(history.rarity.rawValue)")
-                                    .foregroundStyle(.primary)
-                                Text(history.acquiredAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 3) {
-                                Text("+\(history.pointDelta)pt")
-                                    .font(.caption.monospacedDigit())
-                                Label(
-                                    history.isAcknowledged ? "確認済み" : "未確認",
-                                    systemImage: history.isAcknowledged
-                                        ? "checkmark.circle.fill"
-                                        : "exclamationmark.circle.fill"
-                                )
-                                .font(.caption2)
-                                .foregroundStyle(
-                                    history.isAcknowledged ? Color.secondary : Color.orange
-                                )
-                            }
-                        }
+                        RewardHistoryRow(
+                            history: history,
+                            showsAcknowledgementStatus: true
+                        )
                     }
                     .accessibilityLabel(
                         "\(history.fishName)、\(history.isAcknowledged ? "確認済み" : "未確認")"

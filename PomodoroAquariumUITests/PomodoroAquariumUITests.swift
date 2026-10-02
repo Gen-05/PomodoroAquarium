@@ -41,13 +41,18 @@ final class PomodoroAquariumUITests: XCTestCase {
             "-hasCompletedCoreTutorial", "YES"
         ]
         app.launch()
-        XCTAssertTrue(app.buttons["勉強をはじめる"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
     }
 
     @MainActor
     func testHomeStudyButtonNavigatesToTimerViewWithinThreeSeconds() {
         let app = XCUIApplication()
+        app.launchArguments += ["-core-tutorial-in-memory", "-timerSessionState", ""]
         launchReturningUser(app)
+
+        XCTAssertEqual(app.buttons["home.startStudy"].label, "はじめよう")
+        XCTAssertTrue(app.staticTexts["home.dailyMessage"].exists)
+        keepScreenshot(app, name: "home-water-surface-entry")
 
         app.buttons["home.startStudy"].tap()
 
@@ -55,7 +60,152 @@ final class PomodoroAquariumUITests: XCTestCase {
             app.buttons["timer.startStudy"].waitForExistence(timeout: 3),
             "TimerView should be presented within three seconds of the real Home button tap"
         )
+        XCTAssertTrue(app.buttons["START"].exists)
         XCTAssertTrue(app.buttons["ポモドーロ"].exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "timer.startStudy").count, 1)
+        XCTAssertFalse(app.buttons["一時停止"].exists)
+        XCTAssertFalse(app.staticTexts["home.dailyMessage"].exists)
+        keepScreenshot(app, name: "unchanged-timer-setup")
+
+        // A single Back returns Home: there is no duplicate destination on the stack.
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["timer.startStudy"].exists)
+    }
+
+    @MainActor
+    func testRunningFocusDisplayForAllThreeModes() {
+        for mode in ["ポモドーロ", "タイマー", "ストップウォッチ"] {
+            let app = XCUIApplication()
+            app.launchArguments += ["-core-tutorial-in-memory", "-shore-wave-ui-test", "-hasShownNotificationIntroduction", "YES", "-timerSessionState", ""]
+            launchReturningUser(app)
+            app.buttons["home.startStudy"].tap()
+            XCTAssertTrue(app.buttons["timer.startStudy"].waitForExistence(timeout: 3))
+            app.buttons[mode].tap()
+            XCTAssertTrue(app.buttons[mode].isSelected)
+            XCTAssertEqual(app.buttons["timer.startStudy"].label, "START")
+            if mode != "ポモドーロ" {
+                XCTAssertFalse(app.descendants(matching: .any)["ポモドーロの進捗"].exists)
+            }
+            if mode == "ストップウォッチ" {
+                XCTAssertEqual(app.staticTexts["timer.timeDisplay"].label, "00:00")
+            }
+            keepScreenshot(app, name: "start-\(mode)-setup")
+            app.buttons["timer.startStudy"].tap()
+            let later = app.buttons["あとで"]
+            if later.waitForExistence(timeout: 1) { later.tap() }
+
+            let pause = app.buttons["一時停止"]
+            let wake = app.descendants(matching: .any)["timer.showControls"].firstMatch
+            let time = app.descendants(matching: .any)["timer.timeDisplay"].firstMatch
+            XCTAssertTrue(pause.waitForExistence(timeout: 3))
+            let pausePosition = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: pause.frame.midX, dy: pause.frame.midY))
+            let timeFrame = time.frame
+            keepScreenshot(app, name: "focus-\(mode)-normal")
+            XCTAssertTrue(wake.waitForExistence(timeout: 14))
+            // Opacity preserves view identity; XCTest may still report hidden views as existing.
+            sleep(1)
+            XCTAssertFalse(pause.isHittable)
+            XCTAssertTrue(time.exists)
+            if mode == "ストップウォッチ" {
+                XCTAssertTrue(time.label.hasPrefix("00:"), "Stopwatch must show elapsed time, not a countdown")
+            }
+            XCTAssertEqual(time.frame.minY, timeFrame.minY, accuracy: 1)
+            if mode == "ポモドーロ" {
+                XCTAssertFalse(app.descendants(matching: .any)["ポモドーロの進捗"].isHittable)
+            }
+            keepScreenshot(app, name: "focus-\(mode)-hidden")
+
+            // Wake at exactly the pause button's old location: the same tap must NOT pause.
+            pausePosition.tap()
+            XCTAssertTrue(wake.waitForNonExistence(timeout: 3))
+            XCTAssertTrue(pause.waitForExistence(timeout: 3))
+            XCTAssertFalse(app.buttons["再開する"].exists)
+            XCTAssertTrue(wake.waitForExistence(timeout: 14))
+            // Also wake from the area previously occupied by the bottom tab bar.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.94)).tap()
+            XCTAssertTrue(wake.waitForNonExistence(timeout: 3))
+            XCTAssertTrue(pause.waitForExistence(timeout: 3))
+            pause.tap()
+            XCTAssertTrue(app.buttons["再開する"].waitForExistence(timeout: 3))
+            let remainsVisible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: wake)
+            remainsVisible.isInverted = true
+            wait(for: [remainsVisible], timeout: 11)
+            XCTAssertTrue(app.buttons["再開する"].exists)
+            XCTAssertTrue(app.buttons["終了する"].exists)
+            keepScreenshot(app, name: "focus-\(mode)-paused")
+            app.buttons["再開する"].tap()
+            XCTAssertTrue(pause.waitForExistence(timeout: 3))
+            XCTAssertTrue(wake.waitForExistence(timeout: 14))
+
+            // Foreground restoration resets only the display timer, not the session timer.
+            if mode == "ポモドーロ" {
+                XCUIDevice.shared.press(.home)
+                app.activate()
+                XCTAssertTrue(pause.waitForExistence(timeout: 3))
+                XCTAssertFalse(wake.exists)
+                XCTAssertTrue(wake.waitForExistence(timeout: 14))
+            }
+            wake.tap()
+            XCTAssertTrue(wake.waitForNonExistence(timeout: 3))
+            XCTAssertTrue(pause.waitForExistence(timeout: 3))
+            pause.tap()
+            app.buttons["終了する"].tap()
+            let endAlert = app.alerts["集中を終了しますか？"]
+            XCTAssertTrue(endAlert.waitForExistence(timeout: 3))
+            endAlert.buttons["終了する"].tap()
+            XCTAssertTrue(app.buttons["報酬を見る"].waitForExistence(timeout: 3))
+            XCTAssertFalse(wake.exists)
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testShoreWaveStartsAndReturnsToRunningUI() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-core-tutorial-in-memory", "-shore-wave-ui-test", "-hasShownNotificationIntroduction", "YES", "-timerSessionState", ""]
+        launchReturningUser(app)
+        app.buttons["home.startStudy"].tap()
+        XCTAssertTrue(app.buttons["timer.startStudy"].waitForExistence(timeout: 3))
+        XCTAssertEqual(app.buttons["timer.startStudy"].label, "START")
+        // Keep the setup visible briefly for the simulator recording's before/after comparison.
+        sleep(3)
+        app.buttons["timer.startStudy"].tap()
+        let pause = app.buttons["一時停止"]
+        XCTAssertTrue(pause.waitForExistence(timeout: 3))
+        let controlsReady = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hittable == true"), object: pause
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [controlsReady], timeout: 3), .completed)
+        keepScreenshot(app, name: "shore-wave-running")
+        app.terminate()
+    }
+
+    @MainActor
+    private func keepScreenshot(_ app: XCUIApplication, name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    func testAcquisitionHistoryEmptyStateFromMore() {
+        let app = XCUIApplication()
+        launchReturningUser(app)
+
+        app.buttons["mainTab.more"].tap()
+        XCTAssertTrue(app.buttons["more.acquisitionHistory"].waitForExistence(timeout: 5))
+        app.buttons["more.acquisitionHistory"].tap()
+
+        XCTAssertTrue(app.navigationBars["獲得履歴"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["まだ獲得履歴はありません"].exists)
+
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "acquisition-history-empty"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     @MainActor
@@ -199,7 +349,7 @@ final class PomodoroAquariumUITests: XCTestCase {
         pauseButton.tap()
         XCTAssertTrue(app.buttons["終了する"].waitForExistence(timeout: 3))
         app.buttons["終了する"].tap()
-        let endAlert = app.alerts["勉強を終了しますか？"]
+        let endAlert = app.alerts["集中を終了しますか？"]
         XCTAssertTrue(endAlert.waitForExistence(timeout: 3))
         endAlert.buttons["終了する"].tap()
         XCTAssertTrue(app.buttons["報酬を見る"].waitForExistence(timeout: 3))
@@ -215,7 +365,7 @@ final class PomodoroAquariumUITests: XCTestCase {
         app.launch()
         for page in 0..<3 {
             XCTAssertTrue(app.staticTexts["onboarding.title.\(page)"].waitForExistence(timeout: 5))
-            XCTAssertFalse(app.buttons["勉強をはじめる"].exists)
+            XCTAssertFalse(app.buttons["home.startStudy"].exists)
             if page == 0 {
                 for step in ["集中", "魚をゲット", "水族館が育つ"] {
                     XCTAssertTrue(app.staticTexts[step].exists)
@@ -244,7 +394,7 @@ final class PomodoroAquariumUITests: XCTestCase {
                 app.buttons["onboarding.next"].tap()
             }
         }
-        let studyButton = app.buttons["勉強をはじめる"]
+        let studyButton = app.buttons["home.startStudy"]
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         let homeIDs = ["home.dailyFishProgress", "home.coinBalance", "home.todayStudyMinutes"]
         let before = homeIDs.map { app.descendants(matching: .any)[$0].label }
@@ -275,7 +425,7 @@ final class PomodoroAquariumUITests: XCTestCase {
     @MainActor
     func testCoreTutorialUsesRealControlsAndCompletesWithoutWaiting25Minutes() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-core-tutorial-ui-test"]
+        app.launchArguments = ["-core-tutorial-ui-test", "-timerSessionState", ""]
         app.launch()
 
         XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.homeFishIntro"].waitForExistence(timeout: 5))
@@ -617,7 +767,7 @@ final class PomodoroAquariumUITests: XCTestCase {
         let app = XCUIApplication()
         launchReturningUser(app)
 
-        let studyButton = app.buttons["勉強をはじめる"]
+        let studyButton = app.buttons["home.startStudy"]
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         let dailyFishProgress = app.descendants(matching: .any)["home.dailyFishProgress"]
         let increaseFishLimitButton = app.buttons["home.increaseDailyFishLimit"]
@@ -698,11 +848,11 @@ final class PomodoroAquariumUITests: XCTestCase {
         let app = XCUIApplication()
         launchReturningUser(app)
 
-        XCTAssertTrue(app.buttons["勉強をはじめる"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["mainTab.hitShield"].exists)
-        app.buttons["勉強をはじめる"].tap()
-        XCTAssertTrue(app.buttons["勉強開始"].waitForExistence(timeout: 5))
-        app.buttons["勉強開始"].tap()
+        app.buttons["home.startStudy"].tap()
+        XCTAssertTrue(app.buttons["START"].waitForExistence(timeout: 5))
+        app.buttons["START"].tap()
 
         let laterButton = app.buttons["あとで"]
         if laterButton.waitForExistence(timeout: 1) {
@@ -751,7 +901,7 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(app.buttons["終了する"].waitForExistence(timeout: 5))
 
         app.buttons["終了する"].tap()
-        let endAlert = app.alerts["勉強を終了しますか？"]
+        let endAlert = app.alerts["集中を終了しますか？"]
         XCTAssertTrue(endAlert.waitForExistence(timeout: 5))
         endAlert.buttons["終了する"].tap()
 
@@ -936,7 +1086,7 @@ final class PomodoroAquariumUITests: XCTestCase {
         tapSurface.tap()
         XCTAssertTrue(homeTab.waitForExistence(timeout: 2))
         homeTab.tap()
-        let studyButton = app.buttons["勉強をはじめる"]
+        let studyButton = app.buttons["home.startStudy"]
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         Thread.sleep(forTimeInterval: 4.5)
         XCTAssertTrue(studyButton.exists)

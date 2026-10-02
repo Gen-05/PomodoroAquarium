@@ -11,6 +11,13 @@ struct MoreView: View {
             .accessibilityIdentifier("more.book")
 
             NavigationLink {
+                AcquisitionHistoryView()
+            } label: {
+                Label("獲得履歴", systemImage: "clock.arrow.circlepath")
+            }
+            .accessibilityIdentifier("more.acquisitionHistory")
+
+            NavigationLink {
                 SettingsView()
             } label: {
                 Label("設定", systemImage: "gearshape.fill")

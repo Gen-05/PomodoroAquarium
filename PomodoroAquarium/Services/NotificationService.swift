@@ -148,7 +148,7 @@ final class NotificationService: NSObject, TimerNotificationScheduling,
     func scheduleStudyEnd(at date: Date) {
         schedule(
             identifier: Identifier.studyEnd,
-            title: "勉強終了！",
+            title: "集中終了！",
             body: "おつかれさまでした。報酬を確認しましょう。",
             at: date
         )
@@ -158,7 +158,7 @@ final class NotificationService: NSObject, TimerNotificationScheduling,
         schedule(
             identifier: Identifier.breakEnd,
             title: "休憩終了！",
-            body: "次の勉強セットを始められます。",
+            body: "次の集中セットを始められます。",
             at: date
         )
     }

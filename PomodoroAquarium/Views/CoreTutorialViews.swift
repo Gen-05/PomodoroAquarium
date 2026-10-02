@@ -127,7 +127,7 @@ enum CoreTutorialConversationScript {
 
     static let homeStart: [CoreTutorialConversationPage] = [
         .message("では、実際に集中してみましょう。"),
-        .message("「勉強をはじめる」を押してみてください。")
+        .message("それでは、「はじめよう」を押してみましょう。")
     ]
 
     static let studyMode: [CoreTutorialConversationPage] = [
@@ -136,7 +136,7 @@ enum CoreTutorialConversationScript {
     ]
 
     static let studySettings: [CoreTutorialConversationPage] = [
-        .message("勉強時間や休憩時間、セット数はあとから自由に変更できます。"),
+        .message("集中時間や休憩時間、セット数はあとから自由に変更できます。"),
         .message("今回は標準の設定で進めます。")
     ]
 
@@ -146,7 +146,7 @@ enum CoreTutorialConversationScript {
         .message(StudyFocusRulesContent.backgroundLimit),
         .message("今回はチュートリアルなので、25分待たずに進めます。"),
         .message("集中完了後の流れをすぐ体験してみましょう。"),
-        .message("準備ができたら、「勉強開始」を押してみてください。")
+        .message("準備ができたら、「START」を押してみましょう。")
     ]
 
     static let rewardFollowUp: [CoreTutorialConversationPage] = [

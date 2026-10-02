@@ -195,6 +195,7 @@ struct MainTabView: View {
     @State private var aquariumEditorNavigation = AquariumEditorNavigationCoordinator()
     @State private var homeNavigationResetRequestID: UUID?
     @State private var areAquariumViewingControlsVisible = true
+    @State private var isStudyFocusDisplayMode = false
     @State private var aquariumViewingControlsAutoHideTask: Task<Void, Never>?
     @State private var coreTutorial: CoreTutorialCoordinator
     @State private var showsCoreTutorialCompletion = false
@@ -372,7 +373,12 @@ struct MainTabView: View {
                     whileStudyLocked: timerViewModel.locksMainTabNavigation
                 ) {
                     tabBarHitShield(bottomSafeArea: geometry.safeAreaInsets.bottom)
+                        .allowsHitTesting(!isStudyFocusDisplayMode)
+                        .accessibilityHidden(isStudyFocusDisplayMode)
                 }
+            }
+            .onPreferenceChange(TimerFocusDisplayPreferenceKey.self) { isFocusDisplayMode in
+                isStudyFocusDisplayMode = isFocusDisplayMode
             }
             .tint(.cyan)
             .onReceive(timer) { _ in
@@ -451,7 +457,7 @@ struct MainTabView: View {
             .allowsHitTesting(true)
             .ignoresSafeArea(edges: .bottom)
             .zIndex(MainTabBarHitShieldLayout.zIndex)
-            .accessibilityLabel("勉強中はタブ操作不可")
+            .accessibilityLabel("集中中はタブ操作不可")
             .accessibilityIdentifier("mainTab.hitShield")
     }
 
@@ -525,7 +531,7 @@ struct MainTabView: View {
     }
 
     private var shouldShowBottomTabBar: Bool {
-        AquariumViewingControlsPolicy.shouldShowBottomTabBar(
+        !isStudyFocusDisplayMode && AquariumViewingControlsPolicy.shouldShowBottomTabBar(
             selectedTab: tabSelectionState.selection,
             tabMode: aquariumEditorNavigation.tabMode,
             areControlsVisible: areAquariumViewingControlsVisible

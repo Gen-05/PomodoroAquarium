@@ -33,7 +33,7 @@ struct StudyFinishedView: View {
                         .foregroundStyle(.cyan)
                         .shadow(color: .cyan.opacity(0.35), radius: 14)
 
-                    Text(endReason.isNormalCompletion ? "🎉 勉強終了！" : "勉強が途中で終了しました")
+                    Text(endReason.isNormalCompletion ? "🎉 集中終了！" : "集中が途中で終了しました")
                         .font(.largeTitle.bold())
                         .multilineTextAlignment(.center)
                         .lineLimit(StudyFinishedLayout.titleLineLimit)
@@ -51,7 +51,7 @@ struct StudyFinishedView: View {
                     }
 
                     if !endReason.isNormalCompletion {
-                        Text("終了地点までの勉強時間で報酬を計算します")
+                        Text("終了地点までの集中時間で報酬を計算します")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
