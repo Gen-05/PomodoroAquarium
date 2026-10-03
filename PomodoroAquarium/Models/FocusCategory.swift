@@ -329,6 +329,16 @@ final class FocusSessionRecord {
     @Attribute(.unique) var id: UUID
     var completedAt: Date
     var durationMinutes: Int
+    /// 新しい記録は正確な秒数を保持する。旧履歴はdurationMinutes * 60へfallback。
+    var durationSeconds: Int?
+    /// nilは魚進捗へ未処理。0も処理済みであり、session IDと共に二重加算を防ぐ。
+    var fishEarnedCount: Int?
+    /// nilは新ポイント方式へ未処理。0も処理済み。coinsと同じsaveで確定する。
+    var pointReward: Int?
+    /// 通常レートへ割り当てた有効秒数。残りは低レート。日次端数の復元根拠。
+    var normalPointSeconds: Int?
+    /// sessionの即時claim判定済み印。未受取権は日次カウンターに残し、演出とは独立。
+    var hasGrantedFishReward = false
     /// Optionalにして、カテゴリを持たない旧履歴を「勉強」へfallbackできるようにする。
     var categoryID: String?
     /// Optionalのまま追加し、保存値を持たない旧履歴を推測せずlegacyとして扱う。
@@ -339,17 +349,25 @@ final class FocusSessionRecord {
         completedAt: Date,
         durationMinutes: Int,
         categoryID: String? = FocusCategoryDefaults.studyID,
-        focusMethod: FocusMethod? = nil
+        focusMethod: FocusMethod? = nil,
+        durationSeconds: Int? = nil
     ) {
         self.id = id
         self.completedAt = completedAt
         self.durationMinutes = max(0, durationMinutes)
+        self.durationSeconds = durationSeconds.map { max(0, $0) }
         self.categoryID = categoryID
         focusMethodRawValue = focusMethod?.rawValue
     }
 
     var resolvedCategoryID: String {
         FocusCategoryDefaults.resolvedCategoryID(categoryID)
+    }
+
+    var validFocusSeconds: Int {
+        if let durationSeconds { return max(0, durationSeconds) }
+        let (seconds, overflowed) = max(0, durationMinutes).multipliedReportingOverflow(by: 60)
+        return overflowed ? Int.max : seconds
     }
 
     var focusMethod: FocusMethod {

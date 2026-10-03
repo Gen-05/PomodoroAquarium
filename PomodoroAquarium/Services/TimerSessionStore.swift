@@ -25,6 +25,22 @@ struct PersistedTimerSession: Codable, Equatable {
     let currentSet: Int?
     let totalSets: Int?
     let processIdentifier: String
+    /// 秒未満の端数もpause/relaunchをまたいで維持する。旧データは既存経過秒から復元。
+    var validFocusElapsed: TimeInterval? = nil
+    var validFocusUpdatedAt: Date? = nil
+    var focusSessionID: UUID? = nil
+}
+
+/// 終了理由と有効時間を分離した、報酬計算とは独立した記録用結果。
+struct FinalizedFocusSession: Codable, Equatable {
+    let id: UUID
+    let completedAt: Date
+    let validFocusSeconds: Int
+    let endReason: StudySessionEndReason
+    let categoryID: String
+    let focusMethod: FocusMethod
+
+    var durationMinutes: Int { validFocusSeconds / 60 }
 }
 
 enum TimerSessionLaunchStatus: Equatable {
@@ -41,6 +57,7 @@ final class TimerSessionStore {
     private enum Key {
         static let session = "timerSessionState"
         static let interruptionBannerPending = "timerInterruptionBannerPending"
+        static let pendingFocusSessions = "pendingValidFocusSessions"
     }
 
     private let defaults: UserDefaults
@@ -73,7 +90,10 @@ final class TimerSessionStore {
         studyTime: Int,
         breakTime: Int,
         currentSet: Int,
-        totalSets: Int
+        totalSets: Int,
+        validFocusElapsed: TimeInterval? = nil,
+        validFocusUpdatedAt: Date? = nil,
+        focusSessionID: UUID? = nil
     ) -> PersistedTimerSession {
         PersistedTimerSession(
             sessionIsActive: true,
@@ -91,8 +111,33 @@ final class TimerSessionStore {
             breakTime: breakTime,
             currentSet: currentSet,
             totalSets: totalSets,
-            processIdentifier: processIdentifier
+            processIdentifier: processIdentifier,
+            validFocusElapsed: validFocusElapsed,
+            validFocusUpdatedAt: validFocusUpdatedAt,
+            focusSessionID: focusSessionID
         )
+    }
+
+    /// SwiftDataへの保存確認までは結果を残す。再起動時の再送は同じUUIDで冪等に扱う。
+    func enqueueFocusSession(_ result: FinalizedFocusSession) {
+        var pending = pendingFocusSessions()
+        guard !pending.contains(where: { $0.id == result.id }) else { return }
+        pending.append(result)
+        savePendingFocusSessions(pending)
+    }
+
+    func pendingFocusSessions() -> [FinalizedFocusSession] {
+        guard let data = defaults.data(forKey: Key.pendingFocusSessions) else { return [] }
+        return (try? JSONDecoder().decode([FinalizedFocusSession].self, from: data)) ?? []
+    }
+
+    func acknowledgeFocusSession(id: UUID) {
+        savePendingFocusSessions(pendingFocusSessions().filter { $0.id != id })
+    }
+
+    private func savePendingFocusSessions(_ pending: [FinalizedFocusSession]) {
+        guard let data = try? JSONEncoder().encode(pending) else { return }
+        defaults.set(data, forKey: Key.pendingFocusSessions)
     }
 
     func launchStatus(at _: Date) -> TimerSessionLaunchStatus {

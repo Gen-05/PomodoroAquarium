@@ -113,6 +113,16 @@ enum FishRewardGenericSilhouette {
 enum FishRewardImageLayout {
     static let displayScale: CGFloat = 0.88
     static let maximumDisplaySize: CGFloat = 264
+    static let maximumStageWidth: CGFloat = 340
+    static let stageHeight: CGFloat = 270
+
+    /// 1匹演出とPreviewまとめで同じ基準frameを使う。サイズの計算式は従来どおり。
+    static func detailDisplaySize(for species: FishSpecies, stageSize: CGSize) -> CGFloat {
+        FishDetailImageLayout.displaySize(
+            for: species,
+            availableSize: CGSize(width: min(stageSize.width, maximumStageWidth), height: stageSize.height)
+        )
+    }
 
     static func displaySize(from detailDisplaySize: CGFloat) -> CGFloat {
         min(
@@ -483,6 +493,8 @@ struct FishRewardView: View {
     @State private var fishAuraScale: CGFloat = 0.86
     @State private var fishAuraOpacity = 0.0
     @State private var hasFishAppeared = false
+    @State private var isSequencePresentationFinished = false
+    private var sequence: FishRewardSequenceHooks?
 #if DEBUG
     @State private var debugFrames: [String: CGRect] = [:]
 #endif
@@ -492,6 +504,11 @@ struct FishRewardView: View {
         self._strokeAnimation = State(
             initialValue: FishDetailStrokeAnimationState(species: result.species)
         )
+    }
+
+    init(result: FishAcquisitionResult, sequence: FishRewardSequenceHooks) {
+        self.init(result: result)
+        self.sequence = sequence
     }
 
     private var species: FishSpecies { result.species }
@@ -575,6 +592,9 @@ struct FishRewardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .rewardLayoutProbe("screen")
+        .task {
+            if sequence?.startsAutomatically == true { revealFish() }
+        }
 #if DEBUG
         .onPreferenceChange(FishRewardFramePreference.self) { frames in
             if frames != debugFrames { debugFrames = frames }
@@ -586,9 +606,9 @@ struct FishRewardView: View {
         }
 #endif
         .contentShape(Rectangle())
-        .onTapGesture(perform: revealFish)
+        .onTapGesture(perform: handleFishTap)
         .accessibilityAction(named: Text("魚を確認")) {
-            revealFish()
+            handleFishTap()
         }
         .presentationBackground(Color.black)
         .interactiveDismissDisabled(!presentation.showsResultInformation)
@@ -618,16 +638,45 @@ struct FishRewardView: View {
     @ViewBuilder
     private var resultAction: some View {
         if presentation.showsResultInformation {
-            Button("閉じる") { dismiss() }
-                .buttonStyle(AquariumStudyStartButtonStyle())
-                .frame(maxWidth: 260)
-                .accessibilityIdentifier("fishReward.close")
-                .transition(.opacity)
+            if let sequence {
+                if result.isNewFish {
+                    Button("タップして次へ", action: sequence.onAdvance)
+                        .buttonStyle(AquariumStudyStartButtonStyle())
+                        .frame(maxWidth: 260)
+                        .disabled(!isSequencePresentationFinished)
+                        .transition(.opacity)
+                } else {
+                    Color.clear.frame(height: 50).accessibilityHidden(true)
+                }
+            } else {
+                standardCloseAction
+            }
         } else {
             Color.clear
                 .frame(height: 50)
                 .accessibilityHidden(true)
         }
+    }
+
+    private var standardCloseAction: some View {
+        Button("閉じる") { dismiss() }
+            .buttonStyle(AquariumStudyStartButtonStyle())
+            .frame(maxWidth: 260)
+            .accessibilityIdentifier("fishReward.close")
+            .transition(.opacity)
+    }
+
+    private func handleFishTap() {
+        if let sequence {
+            if presentation.showsSilhouette && !sequence.startsAutomatically {
+                // 連続演出の最初だけ、通常の1匹Rewardと同じtap待機を維持する。
+                revealFish()
+            } else if isSequencePresentationFinished && presentation.showsResultInformation && result.isNewFish {
+                sequence.onAdvance()
+            }
+            return
+        }
+        revealFish()
     }
 
     private var fishStage: some View {
@@ -658,13 +707,9 @@ struct FishRewardView: View {
                     .accessibilityHidden(true)
                     .accessibilityIdentifier("fishReward.genericSilhouette")
                 } else {
-                    let availableSize = CGSize(
-                        width: min(geometry.size.width, 340),
-                        height: geometry.size.height
-                    )
-                    let detailImageSize = FishDetailImageLayout.displaySize(
+                    let detailImageSize = FishRewardImageLayout.detailDisplaySize(
                         for: species,
-                        availableSize: availableSize
+                        stageSize: geometry.size
                     )
                     let imageSize = FishRewardImageLayout.displaySize(
                         from: detailImageSize
@@ -716,7 +761,7 @@ struct FishRewardView: View {
             .rewardLayoutProbe("container")
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 270)
+        .frame(height: FishRewardImageLayout.stageHeight)
         .accessibilityIdentifier("fishReward.fishStage")
     }
 
@@ -943,6 +988,15 @@ struct FishRewardView: View {
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.22)) {
                 presentation.finishReveal()
+            }
+            if let sequence {
+                // Result text/NEW fade must also finish before the wrapper starts its short hold.
+                do {
+                    try await Task.sleep(for: .seconds(result.isNewFish ? 0.35 : 0.22))
+                } catch { return }
+                guard !Task.isCancelled else { return }
+                isSequencePresentationFinished = true
+                sequence.onPresentationFinished()
             }
             revealTask = nil
         }

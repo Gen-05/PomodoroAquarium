@@ -623,7 +623,7 @@ struct HomeView: View {
     private var dailyFishProgress: some View {
         HStack(spacing: 5) {
             Image(systemName: "fish.fill")
-            Text("\(todayFishAcquisitionCount) / \(DailyFishAcquisitionPolicy.basicLimit)")
+            Text("\(todayFishAcquisitionCount) / \(todayFishLimit)")
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -649,10 +649,17 @@ struct HomeView: View {
         .homeStatusGlass()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            "今日の魚獲得数 \(todayFishAcquisitionCount)匹、基本上限 \(DailyFishAcquisitionPolicy.basicLimit)匹"
+            "今日の魚獲得数 \(todayFishAcquisitionCount)匹、現在の上限 \(todayFishLimit)匹"
         )
         .accessibilityIdentifier("home.dailyFishProgress")
         .coreTutorialTarget(.dailyFish)
+    }
+
+    private var todayFishLimit: Int {
+        guard let player, let date = player.dailyGrantedFishDate,
+              Calendar.current.isDateInToday(date) else { return DailyFishAcquisitionPolicy.basicLimit }
+        return min(DailyFishAcquisitionPolicy.maximumLimit,
+                   max(DailyFishAcquisitionPolicy.basicLimit, player.dailyFishLimit))
     }
 
     private var todayFishAcquisitionCount: Int {
@@ -1760,22 +1767,15 @@ struct HomeView: View {
             lastStudyDate = today
         } else if let lastDate = DateFormatter.yyyyMMdd.date(from: lastStudyDate),
                   !calendar.isDate(lastDate, inSameDayAs: now) {
-            let yesterday = calendar.date(byAdding: .day, value: -1, to: now)
-
-            if let yesterday,
-               calendar.isDate(lastDate, inSameDayAs: yesterday) {
-                player.yesterdayStudyMinutes = player.todayStudyMinutes
-            } else {
-                player.yesterdayStudyMinutes = 0
-            }
-
             player.todayStudyMinutes = 0
             lastStudyDate = today
         } else if DateFormatter.yyyyMMdd.date(from: lastStudyDate) == nil {
-            player.yesterdayStudyMinutes = 0
             player.todayStudyMinutes = 0
             lastStudyDate = today
         }
+        _ = try? PreviousDayFocusDurationService.synchronizeMinutes(
+            for: player, before: now, calendar: calendar, in: modelContext
+        )
     }
 
     private func inspectPersistedTimerSession() {

@@ -22,7 +22,7 @@ struct HomeDashboardTests {
     }
 
     @Test func basicDailyFishLimitIsIsolatedBehindPolicy() {
-        #expect(DailyFishAcquisitionPolicy.basicLimit == 5)
+        #expect(DailyFishAcquisitionPolicy.basicLimit == 3)
     }
 
     @Test func dailyFishCountIncrementsAndResetsOnANewDay() throws {

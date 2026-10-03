@@ -43,7 +43,7 @@ enum TimerMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum StudySessionEndReason: Equatable {
+enum StudySessionEndReason: String, Codable, Equatable {
     case completed
     case userEnded
     case interrupted
@@ -83,9 +83,17 @@ final class TimerViewModel {
     private var backgroundNotificationSessionIdentifier: String?
     private var stopwatchRunStartDate: Date?
     private var stopwatchElapsedAtRunStart = 0
+    private var validFocusElapsed: TimeInterval = 0
+    private var validFocusRunStartedAt: Date?
+    private var focusSessionID: UUID?
+    private(set) var lastValidFocusSeconds = 0
     
     var onStudyFinished: (() -> Void)?
     var onBreakFinished: (() -> Void)?
+    /// 記録専用。trueは永続保存済みを意味する。報酬callbackは従来の終了条件を維持。
+    var onFocusSessionFinalized: ((FinalizedFocusSession) -> Bool)?
+
+    var validFocusSeconds: Int { Int(validFocusDuration(at: now()).rounded(.down)) }
     
     var timeRemaining: Int
     private(set) var mode: TimerMode = .pomodoro
@@ -221,6 +229,10 @@ final class TimerViewModel {
         // 同期時に終了した場合は、既に次のセッションへ切り替わっている。
         guard isRunning else { return }
 
+        if phase == .study {
+            validFocusElapsed = validFocusDuration(at: now())
+            validFocusRunStartedAt = nil
+        }
         if mode != .stopwatch {
             notificationService.cancelCurrentSessionNotification()
         }
@@ -252,6 +264,14 @@ final class TimerViewModel {
         }
         hasHandledCurrentSessionCompletion = false
         let currentDate = now()
+        if phase == .study {
+            if state == .idle {
+                validFocusElapsed = 0
+                focusSessionID = UUID()
+                lastValidFocusSeconds = 0
+            }
+            validFocusRunStartedAt = currentDate
+        }
         if isStudyTime, backgroundNotificationSessionIdentifier == nil {
             backgroundNotificationSessionIdentifier = UUID().uuidString
             didExceedBackgroundLimit = false
@@ -301,6 +321,9 @@ final class TimerViewModel {
         currentSet += 1
         phase = .study
         state = .idle
+        validFocusElapsed = 0
+        validFocusRunStartedAt = nil
+        focusSessionID = nil
         timeRemaining = studyTime * 60
         endDate = nil
         hasHandledCurrentSessionCompletion = false
@@ -364,6 +387,10 @@ final class TimerViewModel {
     }
     
     func resetTimer() {
+        validFocusElapsed = 0
+        validFocusRunStartedAt = nil
+        focusSessionID = nil
+        lastValidFocusSeconds = 0
         state = .idle
         phase = .study
         currentSet = 1
@@ -444,6 +471,7 @@ final class TimerViewModel {
     func recordActiveReturn() -> TimeInterval? {
         let currentDate = now()
         let shouldFailSession = shouldFailForBackgroundLimit(at: currentDate)
+        let failureFocusEnd = backgroundEnteredAt
         guard let duration = consumeBackgroundDuration(at: currentDate) else { return nil }
 
         notificationService.cancelBackgroundLimitNotifications(
@@ -451,7 +479,7 @@ final class TimerViewModel {
         )
 
         if shouldFailSession {
-            finishStudySessionForBackgroundLimit()
+            finishStudySessionForBackgroundLimit(focusEndedAt: failureFocusEnd ?? currentDate)
         } else if sessionStore.load()?.sessionIsActive == true,
            (state == .running || state == .paused) {
             if state == .running,
@@ -468,6 +496,7 @@ final class TimerViewModel {
     }
 
     func restorePersistedSessionIfNeeded() {
+        deliverPendingFocusSessions()
         guard !hasAttemptedRestore else { return }
         hasAttemptedRestore = true
 
@@ -488,8 +517,9 @@ final class TimerViewModel {
 
         let currentDate = now()
         if shouldFailForBackgroundLimit(at: currentDate) {
+            let failureFocusEnd = backgroundEnteredAt ?? currentDate
             _ = consumeBackgroundDuration(at: currentDate)
-            finishStudySessionForBackgroundLimit()
+            finishStudySessionForBackgroundLimit(focusEndedAt: failureFocusEnd)
             return
         }
 
@@ -515,6 +545,8 @@ final class TimerViewModel {
     }
 
     private func restore(_ session: PersistedTimerSession, at currentDate: Date) {
+        studyTime = session.studyTime
+        breakTime = session.breakTime
         phase = session.isStudyTime ? .study : .breakTime
         totalSets = max(session.totalSets ?? totalSets, 1)
         currentSet = min(max(session.currentSet ?? 1, 1), totalSets)
@@ -524,6 +556,12 @@ final class TimerViewModel {
         state = session.isRunning ? .running : .paused
         timeRemaining = session.timeRemaining
         let savedElapsed = max(0, session.elapsedStudySeconds ?? 0)
+        validFocusElapsed = max(0, session.validFocusElapsed ?? TimeInterval(
+            session.elapsedStudySeconds ?? max(0, session.studyTime * 60 - session.timeRemaining)
+        ))
+        validFocusRunStartedAt = session.isRunning
+            ? (session.validFocusUpdatedAt ?? session.lastHeartbeatDate) : nil
+        focusSessionID = session.focusSessionID ?? UUID()
         stopwatchElapsedSeconds = mode == .stopwatch ? savedElapsed : 0
         stopwatchElapsedAtRunStart = stopwatchElapsedSeconds
         stopwatchRunStartDate = nil
@@ -532,6 +570,7 @@ final class TimerViewModel {
         backgroundEnteredAt = session.backgroundEnteredAt
         hasHandledCurrentSessionCompletion = false
         let shouldFailSession = shouldFailForBackgroundLimit(at: currentDate)
+        let failureFocusEnd = backgroundEnteredAt
         if consumeBackgroundDuration(at: currentDate) != nil {
             notificationService.cancelBackgroundLimitNotifications(
                 for: backgroundNotificationSessionIdentifier
@@ -539,7 +578,7 @@ final class TimerViewModel {
         }
 
         if shouldFailSession {
-            finishStudySessionForBackgroundLimit()
+            finishStudySessionForBackgroundLimit(focusEndedAt: failureFocusEnd ?? currentDate)
             return
         }
 
@@ -573,10 +612,20 @@ final class TimerViewModel {
             return
         }
 
+        studyTime = session.studyTime
+        breakTime = session.breakTime
         phase = .finished
         totalSets = max(session.totalSets ?? totalSets, 1)
         currentSet = min(max(session.currentSet ?? 1, 1), totalSets)
         mode = TimerMode(rawValue: session.timerModeRawValue ?? "") ?? .pomodoro
+        selectedCategoryID = FocusCategoryDefaults.resolvedCategoryID(session.selectedCategoryID)
+        focusSessionID = session.focusSessionID ?? UUID()
+        // 不明な再起動後の時間は推測せず、最後に保存された有効時間だけを保持する。
+        validFocusElapsed = max(0, session.validFocusElapsed ?? TimeInterval(
+            session.elapsedStudySeconds ?? max(0, session.studyTime * 60 - session.timeRemaining)
+        ))
+        validFocusRunStartedAt = nil
+        finalizeFocusSession(at: session.lastHeartbeatDate, reason: .interrupted)
         state = .completed
         timeRemaining = session.studyTime * 60
         endDate = nil
@@ -627,7 +676,10 @@ final class TimerViewModel {
             studyTime: studyTime,
             breakTime: breakTime,
             currentSet: currentSet,
-            totalSets: totalSets
+            totalSets: totalSets,
+            validFocusElapsed: validFocusDuration(at: date),
+            validFocusUpdatedAt: isRunning ? date : nil,
+            focusSessionID: focusSessionID
         ))
     }
 
@@ -638,6 +690,15 @@ final class TimerViewModel {
     ) {
         guard !hasHandledCurrentSessionCompletion else { return }
         hasHandledCurrentSessionCompletion = true
+        if phase == .study {
+            if forceFinishPomodoro {
+                // Tutorialは既存の疑似報酬・履歴経路だけを使う。
+                lastValidFocusSeconds = (completedStudyMinutes ?? studyTime) * 60
+            } else {
+                let completionDate = studyEndReason == .completed ? (endDate ?? now()) : now()
+                finalizeFocusSession(at: completionDate, reason: studyEndReason)
+            }
+        }
         state = .completed
         endDate = nil
         lastHeartbeatDate = nil
@@ -676,14 +737,18 @@ final class TimerViewModel {
         stopwatchRunStartDate = nil
     }
 
-    /// 通常の完了callbackを通さず、離脱超過したstudyを失敗として一度だけ破棄する。
-    /// 記録・魚・ポイント・日次獲得数はすべてonStudyFinished側にあるため、ここでは更新しない。
-    private func finishStudySessionForBackgroundLimit() {
+    /// 報酬callbackは通さず、最後の離脱を除外した記録だけを確定する。
+    private func finishStudySessionForBackgroundLimit(focusEndedAt: Date) {
         guard state == .running,
               phase == .study,
               !hasHandledCurrentSessionCompletion else { return }
 
         hasHandledCurrentSessionCompletion = true
+        finalizeFocusSession(
+            at: focusEndedAt.addingTimeInterval(BackgroundStudyLimit.failureInterval),
+            reason: .backgroundLimitExceeded,
+            focusEndedAt: focusEndedAt
+        )
         state = .completed
         phase = .finished
         timeRemaining = studyTime * 60
@@ -750,6 +815,44 @@ final class TimerViewModel {
             notificationService.scheduleStudyEnd(at: endDate)
         } else {
             notificationService.scheduleBreakEnd(at: endDate)
+        }
+    }
+
+    private func validFocusDuration(at date: Date) -> TimeInterval {
+        var seconds = validFocusElapsed
+        if let validFocusRunStartedAt {
+            // 復元後にbackgroundEnteredAtまで巻き戻す場合は保存後の離脱秒を差し引く。
+            seconds += date.timeIntervalSince(validFocusRunStartedAt)
+        }
+        return max(0, seconds)
+    }
+
+    private func finalizeFocusSession(
+        at completedAt: Date,
+        reason: StudySessionEndReason,
+        focusEndedAt: Date? = nil
+    ) {
+        lastValidFocusSeconds = Int(validFocusDuration(at: focusEndedAt ?? completedAt).rounded(.down))
+        validFocusElapsed = TimeInterval(lastValidFocusSeconds)
+        validFocusRunStartedAt = nil
+        guard lastValidFocusSeconds > 0 else { return }
+        sessionStore.enqueueFocusSession(FinalizedFocusSession(
+            id: focusSessionID ?? UUID(),
+            completedAt: completedAt,
+            validFocusSeconds: lastValidFocusSeconds,
+            endReason: reason,
+            categoryID: selectedCategoryID,
+            focusMethod: mode.focusMethod
+        ))
+        deliverPendingFocusSessions()
+    }
+
+    private func deliverPendingFocusSessions() {
+        guard let onFocusSessionFinalized else { return }
+        for result in sessionStore.pendingFocusSessions() {
+            if onFocusSessionFinalized(result) {
+                sessionStore.acknowledgeFocusSession(id: result.id)
+            }
         }
     }
 }

@@ -9,7 +9,7 @@ enum CurrencyService {
         max(0, player?.coins ?? 0)
     }
 
-    /// 完了前後の今日累計に対応する報酬差分を25分単位で計算する。
+    /// Tutorial/旧仕様の互換計算。本番sessionの付与はDailyPointProgressServiceのみ。
     static func studyCompletionReward(
         for minutes: Int,
         todayStudyMinutesBeforeCompletion: Int

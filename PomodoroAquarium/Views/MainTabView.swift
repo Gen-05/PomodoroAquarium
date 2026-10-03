@@ -201,9 +201,9 @@ struct MainTabView: View {
     @State private var showsCoreTutorialCompletion = false
     @State private var hasReconciledCoreTutorial = false
     @State private var hasCheckedRewardRecovery = false
-    @State private var pendingRewardRecovery: RewardHistorySnapshot?
-    @State private var replayReward: RewardHistorySnapshot?
-    @State private var replayRewardHistoryID: UUID?
+    @State private var pendingRewardRecovery: FishRewardBatch?
+    @State private var replayReward: FishRewardBatch?
+    @State private var replayRewardHistoryIDs: [UUID] = []
     @State private var showsRewardRecoveryPrompt = false
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -383,10 +383,12 @@ struct MainTabView: View {
             .tint(.cyan)
             .onReceive(timer) { _ in
                 timerViewModel.tick()
+                resetDailyFishProgressIfNeeded()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 switch TimerScenePhaseTrackingPolicy.action(for: newPhase) {
                 case .measureActiveReturn:
+                    resetDailyFishProgressIfNeeded()
                     timerViewModel.recordActiveReturn()
                     timerViewModel.synchronizeTime()
                     updateAquariumViewingControlsAutoHide()
@@ -419,12 +421,15 @@ struct MainTabView: View {
                 setIdleTimerDisabled(false)
             }
             .onAppear {
+                resetDailyFishProgressIfNeeded()
                 reconcileCoreTutorialIfNeeded()
                 checkForUnacknowledgedRewardIfNeeded()
                 synchronizeIdleTimer()
             }
             .onChange(of: players.count) { _, _ in
+                resetDailyFishProgressIfNeeded()
                 reconcileCoreTutorialIfNeeded()
+                checkForUnacknowledgedRewardIfNeeded()
             }
         }
         .alert("前回の報酬があります", isPresented: $showsRewardRecoveryPrompt) {
@@ -433,7 +438,7 @@ struct MainTabView: View {
             }
             Button("見る") {
                 guard let pendingRewardRecovery else { return }
-                replayRewardHistoryID = pendingRewardRecovery.id
+                replayRewardHistoryIDs = pendingRewardRecovery.historyIDs
                 replayReward = pendingRewardRecovery
                 self.pendingRewardRecovery = nil
             }
@@ -441,7 +446,11 @@ struct MainTabView: View {
             Text("獲得した魚とポイントをもう一度確認しますか？")
         }
         .fullScreenCover(item: $replayReward, onDismiss: acknowledgeReplayedReward) { reward in
-            FishRewardView(result: reward.replayResult())
+            if reward.results.count == 1, let result = reward.results.first {
+                FishRewardView(result: result)
+            } else {
+                MultipleFishRewardView(results: reward.results)
+            }
         }
     }
 
@@ -583,6 +592,16 @@ struct MainTabView: View {
         UIApplication.shared.isIdleTimerDisabled = isDisabled
     }
 
+    private func resetDailyFishProgressIfNeeded() {
+        guard let player = players.first else { return }
+        _ = try? DailyPointProgressService.resetIfNeeded(for: player, in: modelContext)
+        // 既存tick/active復帰を利用する。新しいTimerは追加せず、日付変更時だけsaveする。
+        if (try? DailyFishProgressService.resetIfNeeded(for: player, in: modelContext)) == true {
+            _ = try? PreviousDayFocusDurationService.synchronizeMinutes(for: player, in: modelContext)
+            try? modelContext.save()
+        }
+    }
+
     private func updateAquariumViewingControlsAutoHide() {
         if isAquariumViewingControlsAutoHideActive {
             showAndScheduleAquariumViewingControls()
@@ -664,18 +683,25 @@ struct MainTabView: View {
         guard !hasCheckedRewardRecovery,
               coreTutorialMode == .production,
               !coreTutorial.isActive else { return }
-        hasCheckedRewardRecovery = true
-        guard let entry = try? RewardHistoryService.latestUnacknowledged(in: modelContext) else {
+        guard let player else { return }
+        do {
+            try DailyPointProgressService.processPending(for: player, in: modelContext)
+            try FishRewardBatchService.grantPending(to: player, defaults: appDefaults, in: modelContext)
+        } catch {
+            // 保存失敗なら未処理印を残し、次回の起動チェックで再試行する。
             return
         }
-        pendingRewardRecovery = RewardHistorySnapshot(entry: entry)
+        hasCheckedRewardRecovery = true
+        guard let batch = try? FishRewardBatchService.latestUnacknowledgedBatch(in: modelContext) else {
+            return
+        }
+        pendingRewardRecovery = batch
         showsRewardRecoveryPrompt = true
     }
 
     private func acknowledgeReplayedReward() {
-        guard let replayRewardHistoryID else { return }
-        try? RewardHistoryService.acknowledge(id: replayRewardHistoryID, in: modelContext)
-        self.replayRewardHistoryID = nil
+        try? FishRewardBatchService.acknowledge(replayRewardHistoryIDs, in: modelContext)
+        replayRewardHistoryIDs = []
     }
 
     private func coreTutorialAllowsSelecting(_ tab: MainAppTab) -> Bool {

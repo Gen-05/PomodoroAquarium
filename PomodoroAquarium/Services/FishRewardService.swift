@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import SwiftData
 
 struct FishRewardService {
     static let minimumStudyMinutes = 25
@@ -46,21 +47,33 @@ struct FishRewardService {
     @discardableResult
     static func awardFish(
         for studyMinutes: Int,
-        to player: Player
+        to player: Player,
+        on date: Date = Date(),
+        calendar: Calendar = .current,
+        in context: ModelContext? = nil
     ) -> PlayerFish? {
-        guard studyMinutes >= minimumStudyMinutes,
-              let selectedRarity = selectRarity(
-                using: rarityProbabilities(for: player.yesterdayStudyMinutes)
-              ),
-              let selectedSpecies = FishSpecies.allCases
-                .filter({ $0.rarity == selectedRarity })
-                .randomElement() else {
-            return nil
+        guard studyMinutes >= minimumStudyMinutes else { return nil }
+        let previousDayMinutes: Int
+        if let context = context ?? player.modelContext {
+            guard let minutes = try? PreviousDayFocusDurationService.synchronizeMinutes(
+                for: player, before: date, calendar: calendar, in: context
+            ) else { return nil }
+            previousDayMinutes = minutes
+        } else {
+            // 未保存の単匹Preview/helperには前日記録がない。古いPlayerキャッシュへ戻らない。
+            previousDayMinutes = 0
         }
+        guard let selectedSpecies = drawSpecies(using: rarityProbabilities(for: previousDayMinutes)) else { return nil }
 
         let newFish = PlayerFish(species: selectedSpecies)
         player.ownedFish.append(newFish)
         return newFish
+    }
+
+    /// 閾値判定は日次進捗側へ分離。各呼び出しで既存の抽選を独立に行う。
+    static func drawSpecies(using probabilities: RarityProbabilities) -> FishSpecies? {
+        guard let rarity = selectRarity(using: probabilities) else { return nil }
+        return FishSpecies.allCases.filter { $0.rarity == rarity }.randomElement()
     }
 
     private static func interpolate(

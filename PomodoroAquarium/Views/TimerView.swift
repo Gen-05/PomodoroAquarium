@@ -310,18 +310,18 @@ struct TimerView: View {
             totalSets: configuredSetCount
         )
         self._viewModel = State(initialValue: tempViewModel)
-        self._fishAcquisition = State(initialValue: nil)
-        self._pendingFishAcquisition = State(initialValue: nil)
         self._completionReward = State(initialValue: nil)
         self._pendingCompletionReward = State(initialValue: nil)
     }
     
     @State private var viewModel: TimerViewModel
-    @State private var fishAcquisition: FishAcquisitionResult?
-    @State private var pendingFishAcquisition: FishAcquisitionResult?
+    @State private var fishRewardBatch: FishRewardBatch?
+    @State private var pendingFishRewardBatches: [FishRewardBatch] = []
+    @State private var lastFinalizedRewardBatch: FishRewardBatch?
+    @State private var lastFinalizedPointReward = 0
     @State private var completionReward: StudyCompletionReward?
     @State private var pendingCompletionReward: StudyCompletionReward?
-    @State private var rewardHistoryID: UUID?
+    @State private var rewardHistoryIDs: [UUID] = []
     @State private var studyFinishedMinutes: Int?
     @State private var studyFinishedEndReason: StudySessionEndReason = .completed
     @State private var showsEndConfirmation = false
@@ -521,6 +521,11 @@ struct TimerView: View {
                 studyStartPresentation.reset()
             }
         }
+        .onChange(of: viewModel.shouldPresentBackgroundFailureAlert) { _, isPresented in
+            if !isPresented && (pendingCompletionReward != nil || !pendingFishRewardBatches.isEmpty) {
+                presentPendingCompletionReward()
+            }
+        }
         .onChange(of: activeFocusCategoryIDs) { _, _ in
             ensureSelectedFocusCategoryIsActive()
         }
@@ -658,17 +663,21 @@ struct TimerView: View {
         }
         .fullScreenCover(
             isPresented: Binding(
-                get: { fishAcquisition != nil },
+                get: { fishRewardBatch != nil },
                 set: { isPresented in
                     if !isPresented {
-                        fishAcquisition = nil
+                        fishRewardBatch = nil
                     }
                 }
             ),
             onDismiss: finishFishRewardPresentation
         ) {
-            if let fishAcquisition {
-                FishRewardView(result: fishAcquisition)
+            if let fishRewardBatch {
+                if fishRewardBatch.results.count == 1, let result = fishRewardBatch.results.first {
+                    FishRewardView(result: result)
+                } else {
+                    MultipleFishRewardView(results: fishRewardBatch.results)
+                }
             }
         }
     }
@@ -725,13 +734,64 @@ struct TimerView: View {
 #endif
 
     private func configureStudyCompletion() {
+        viewModel.onFocusSessionFinalized = { session in
+            do {
+                // 過去日の復元結果に、今日の移行用累計を混ぜない。
+                let baseline = Calendar.current.isDateInToday(session.completedAt)
+                    ? (player?.todayStudyMinutes ?? 0) : 0
+                try StudyHistoryService.recordValidFocusSession(
+                    session,
+                    existingTodayMinutesBeforeCompletion: baseline,
+                    in: modelContext
+                )
+                guard let player else { return false }
+                let pointReward = try DailyPointProgressService.process(
+                    sessionID: session.id, for: player, in: modelContext
+                )
+                lastFinalizedPointReward = pointReward
+                try DailyFishProgressService.process(
+                    sessionID: session.id,
+                    for: player,
+                    in: modelContext
+                )
+                let batch = try FishRewardBatchService.grant(
+                    sessionID: session.id, to: player, defaults: defaults, in: modelContext
+                )
+                lastFinalizedRewardBatch = batch
+                if let batch {
+                    pendingFishRewardBatches.append(batch)
+                    try FishRewardBatchService.recordPoints(pointReward, for: batch, in: modelContext)
+                }
+                // failureにはonStudyFinishedが来ないが、確定済み有効秒数のptは失わない。
+                if session.endReason == .backgroundLimitExceeded || session.endReason == .interrupted {
+                    if pointReward > 0 || batch != nil {
+                        pendingCompletionReward = StudyCompletionReward(
+                            studyReward: pointReward, streakReward: 0,
+                            streakDays: player.studyStreakDays, didEarnFish: batch != nil
+                        )
+                    }
+                    if session.endReason == .interrupted {
+                        Task { @MainActor in
+                            await Task.yield()
+                            presentPendingCompletionReward()
+                        }
+                    }
+                }
+                return true
+            } catch {
+                // 未保存結果はTimerSessionStoreへ残し、次の復元時に再送する。
+                return false
+            }
+        }
         viewModel.onStudyFinished = {
+            defer {
+                lastFinalizedRewardBatch = nil
+                lastFinalizedPointReward = 0
+            }
             let completedStudyMinutes = viewModel.lastCompletedStudyMinutes
             studyFinishedEndReason = viewModel.lastStudySessionEndReason ?? .completed
             studyFinishedMinutes = completedStudyMinutes
             guard let player else {
-                rewardHistoryID = nil
-                pendingFishAcquisition = nil
                 pendingCompletionReward = StudyCompletionReward(
                     studyReward: 0,
                     streakReward: 0,
@@ -742,12 +802,15 @@ struct TimerView: View {
             }
 
             if coreTutorial?.step == .reward {
-                rewardHistoryID = nil
                 let fishResult = try? coreTutorial?.grantRewardIfNeeded(
                     to: player,
                     in: modelContext
                 )
-                pendingFishAcquisition = fishResult
+                if let fishResult {
+                    pendingFishRewardBatches.append(FishRewardBatch(
+                        id: UUID(), results: [fishResult], historyIDs: []
+                    ))
+                }
                 pendingCompletionReward = StudyCompletionReward(
                     studyReward: CurrencyService.studyCompletionReward(
                         for: CoreTutorialRewardService.studyMinutes,
@@ -760,51 +823,21 @@ struct TimerView: View {
                 return
             }
 
-            let coinReward = CurrencyService.studyCompletionReward(
-                for: completedStudyMinutes,
-                todayStudyMinutesBeforeCompletion: player.todayStudyMinutes
-            )
-            let todayMinutesBeforeCompletion = player.todayStudyMinutes
+            // ポイントは全終了理由共通のfinalized callbackで保存済み。ここでは表示のみ。
+            let awardedStudyReward = lastFinalizedPointReward
             player.todayStudyMinutes += completedStudyMinutes
             player.totalStudyMinutes += completedStudyMinutes
-            try? StudyHistoryService.addStudyMinutes(
-                completedStudyMinutes,
-                existingTodayMinutesBeforeCompletion: todayMinutesBeforeCompletion,
-                categoryID: viewModel.selectedCategoryID,
-                focusMethod: viewModel.mode.focusMethod,
-                in: modelContext
-            )
 
             guard StudyCompletionReward.isEligibleForExistingRewards(
                 forStudyMinutes: completedStudyMinutes
             ) else {
-                rewardHistoryID = nil
-                pendingFishAcquisition = nil
                 pendingCompletionReward = StudyCompletionReward(
-                    studyReward: 0,
+                    studyReward: awardedStudyReward,
                     streakReward: 0,
                     streakDays: player.studyStreakDays,
-                    didEarnFish: false
+                    didEarnFish: !pendingFishRewardBatches.isEmpty
                 )
                 return
-            }
-
-            let fishResult = FishAcquisitionResult.capture(for: player) {
-                FishRewardService.awardFish(for: completedStudyMinutes, to: player)
-            }
-            if fishResult != nil {
-                DailyFishAcquisitionStore.recordAcquisition()
-            }
-
-            var awardedStudyReward = 0
-            if coinReward > 0 {
-                if (try? CurrencyService.addCoins(
-                    coinReward,
-                    to: player,
-                    in: modelContext
-                )) != nil {
-                    awardedStudyReward = coinReward
-                }
             }
 
             let streakUpdate = try? StudyStreakService.recordStudyCompletion(
@@ -813,26 +846,19 @@ struct TimerView: View {
             )
 
             let streakReward = streakUpdate?.awardedCoins ?? 0
-            if let fishResult {
+            if let batch = lastFinalizedRewardBatch {
                 let (totalPointDelta, overflowed) = awardedStudyReward
                     .addingReportingOverflow(streakReward)
-                let history = try? RewardHistoryService.record(
-                    result: fishResult,
-                    pointDelta: overflowed ? Int.max : totalPointDelta,
-                    in: modelContext
+                try? FishRewardBatchService.recordPoints(
+                    overflowed ? Int.max : totalPointDelta, for: batch, in: modelContext
                 )
-                rewardHistoryID = history?.id
-            } else {
-                rewardHistoryID = nil
             }
-            // 履歴を保存してから、各報酬画面を表示可能なpending stateへ渡す。
-            pendingFishAcquisition = fishResult
 
             pendingCompletionReward = StudyCompletionReward(
                 studyReward: awardedStudyReward,
                 streakReward: streakReward,
                 streakDays: streakUpdate?.streakDays ?? player.studyStreakDays,
-                didEarnFish: fishResult != nil
+                didEarnFish: !pendingFishRewardBatches.isEmpty
             )
         }
         viewModel.onBreakFinished = nil
@@ -898,20 +924,24 @@ struct TimerView: View {
     }
 
     private func presentPendingFishReward() {
-        if let pendingFishAcquisition {
-            fishAcquisition = pendingFishAcquisition
-            self.pendingFishAcquisition = nil
+        guard fishRewardBatch == nil else { return }
+        if !pendingFishRewardBatches.isEmpty {
+            let batch = pendingFishRewardBatches.removeFirst()
+            rewardHistoryIDs = batch.historyIDs
+            fishRewardBatch = batch
         } else {
             finishStudyFlow()
         }
     }
 
     private func finishFishRewardPresentation() {
-        if let rewardHistoryID {
-            try? RewardHistoryService.acknowledge(id: rewardHistoryID, in: modelContext)
-            self.rewardHistoryID = nil
+        try? FishRewardBatchService.acknowledge(rewardHistoryIDs, in: modelContext)
+        rewardHistoryIDs = []
+        if !pendingFishRewardBatches.isEmpty {
+            presentPendingFishReward()
+        } else {
+            finishStudyFlow()
         }
-        finishStudyFlow()
     }
 
     private func finishStudyFlow() {

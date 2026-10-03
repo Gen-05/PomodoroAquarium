@@ -2,7 +2,21 @@ import Foundation
 
 enum DailyFishAcquisitionPolicy {
     /// 将来の広告追加枠やAquarium Plusに差し替えられる、無料ユーザー向けの基本表示上限。
-    static let basicLimit = 5
+    static let basicLimit = 3
+    static let maximumLimit = 8
+    /// 将来のentitlement接続時も、初期枠の決定をここへ集約する。
+    static let plusInitialLimit = maximumLimit
+
+    static func unlockedLimit(from current: Int) -> Int {
+        min(min(max(current, basicLimit), maximumLimit) + 1, maximumLimit)
+    }
+
+    static func claimableCount(earned: Int, claimed: Int, limit: Int) -> Int {
+        let earned = min(max(0, earned), maximumLimit)
+        let claimed = max(0, claimed)
+        let limit = min(max(0, limit), maximumLimit)
+        return min(max(0, earned - claimed), max(0, limit - claimed))
+    }
 }
 
 enum DailyFishAcquisitionStorageKey {

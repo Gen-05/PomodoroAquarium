@@ -2,6 +2,34 @@ import Foundation
 import SwiftData
 
 enum StudyHistoryService {
+    /// 終了理由に関係なく有効時間を保存する。同一sessionの再送で累計を二重加算しない。
+    static func recordValidFocusSession(
+        _ session: FinalizedFocusSession,
+        existingTodayMinutesBeforeCompletion: Int = 0,
+        calendar: Calendar = .current,
+        in context: ModelContext
+    ) throws {
+        guard session.validFocusSeconds > 0 else { return }
+        let id = session.id
+        let descriptor = FetchDescriptor<FocusSessionRecord>(predicate: #Predicate { $0.id == id })
+        if try context.fetch(descriptor).first != nil {
+            // 前回saveが失敗し、同じcontextに未保存insertが残っている場合も再試行する。
+            try context.save()
+            return
+        }
+        try addStudyMinutes(
+            session.durationMinutes,
+            on: session.completedAt,
+            existingTodayMinutesBeforeCompletion: existingTodayMinutesBeforeCompletion,
+            categoryID: session.categoryID,
+            focusMethod: session.focusMethod,
+            calendar: calendar,
+            in: context,
+            sessionID: session.id,
+            durationSeconds: session.validFocusSeconds
+        )
+    }
+
     /// 既存の当日累計を移行用の下限として使い、完了した勉強時間を日別履歴へ加算する。
     static func addStudyMinutes(
         _ minutes: Int,
@@ -10,9 +38,11 @@ enum StudyHistoryService {
         categoryID: String? = FocusCategoryDefaults.studyID,
         focusMethod: FocusMethod = .pomodoro,
         calendar: Calendar = .current,
-        in context: ModelContext
+        in context: ModelContext,
+        sessionID: UUID = UUID(),
+        durationSeconds: Int? = nil
     ) throws {
-        guard minutes > 0 else { return }
+        guard minutes > 0 || (durationSeconds ?? 0) > 0 else { return }
 
         let day = calendar.startOfDay(for: date)
         let nextDay = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
@@ -42,10 +72,12 @@ enum StudyHistoryService {
             context.insert(StudyDailyRecord(day: day, studyMinutes: safeMinutes))
         }
         context.insert(FocusSessionRecord(
+            id: sessionID,
             completedAt: date,
             durationMinutes: minutes,
             categoryID: FocusCategoryDefaults.resolvedCategoryID(categoryID),
-            focusMethod: focusMethod
+            focusMethod: focusMethod,
+            durationSeconds: durationSeconds
         ))
         try context.save()
     }

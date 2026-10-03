@@ -31,6 +31,28 @@ class Player {
     var hasClaimedSevenDayStreakReward = false
     var hasClaimedThirtyDayStreakReward = false
     var hasClaimedYearStreakReward = false
+    /// Calendar.currentの日付ごとの、次の魚までの未使用秒数（0..<1500）。
+    var dailyFishProgressSeconds = 0
+    var dailyFishProgressDate: Date?
+    /// 当日の未受取権の保存値。dailyEarned - dailyClaimedと同期し、翌日失効する。
+    var pendingFishEarnedCount = 0
+    /// Homeの獲得数表示用。付与済みsessionと同じトランザクションで保存する。
+    var dailyGrantedFishCount = 0
+    var dailyGrantedFishDate: Date?
+    var dailyEarnedFishCount = 0
+    var dailyFishLimit = 3
+    /// ポイント用端数のみ日次リセット。所持coinsや魚進捗とは独立。
+    var dailyPointProgressDate: Date?
+    var normalPointProgressSeconds = 0
+    var reducedPointProgressUnits = 0
+
+    /// 既存の永続受取数を再利用し、二つのclaimedカウンターを持たない。
+    var dailyClaimedFishCount: Int {
+        get { dailyGrantedFishCount }
+        set { dailyGrantedFishCount = newValue }
+    }
+
+    var dailyPendingFishCount: Int { max(0, dailyEarnedFishCount - dailyClaimedFishCount) }
     
     init(
         ownedFish: [PlayerFish] = [],

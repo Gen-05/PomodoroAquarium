@@ -10,6 +10,44 @@ struct RewardPreviewCatalog {
         var id: String { rarity.rawValue }
     }
 
+    struct MultipleFishEntry: Identifiable {
+        /// 同じ魚種/rarityが複数含まれても、各獲得枠を別のViewとして扱う。
+        let id: Int
+        let item: Item
+        let isNewFish: Bool
+    }
+
+    struct MultipleFishItem: Identifiable {
+        let count: Int
+        var id: Int { count }
+        /// レア度とNEWを独立させた確認用データ。永続Playerの所持数は参照しない。
+        var fish: [MultipleFishEntry] {
+            let items = RewardPreviewCatalog.items
+            let samples: [(item: Item, isNewFish: Bool)]
+            switch count {
+            case 2:
+                samples = [(items[0], true), (items[1], false)]
+            case 3:
+                samples = [(items[0], false), (items[1], true), (items[3], false)]
+            case 4:
+                samples = [(items[0], false), (items[1], false), (items[2], true), (items[3], false)]
+            default:
+                // 5〜8匹は全rarityを含み、8匹はRare / Epic / Commonの3枠でNEW停止。
+                // 後半の同種魚は既取得にし、同じ魚が連続獲得される場合も確認できる。
+                samples = Array([
+                    (items[0], false), (items[1], true), (items[2], true), (items[3], false),
+                    (Item(rarity: .common, species: .pufferfish), true),
+                    (items[1], false), (items[2], false), (items[3], false)
+                ].prefix(count))
+            }
+            return samples.enumerated().map { index, sample in
+                MultipleFishEntry(id: index, item: sample.item, isNewFish: sample.isNewFish)
+            }
+        }
+    }
+
+    static let multipleFishItems = (2...8).map { MultipleFishItem(count: $0) }
+
     static let items: [Item] = [
         Item(rarity: .common, species: .clownfish),
         Item(rarity: .rare, species: .seahorse),
@@ -169,6 +207,8 @@ private final class CoreTutorialPreviewDataStore {
 
 struct RewardPreviewView: View {
     @State private var presentation: RewardPreviewPresentation?
+    @State private var multipleFishPresentation: RewardPreviewCatalog.MultipleFishItem?
+    @State private var showsDailyFishClaimPreview = false
     @State private var previewsNewFish = true
     @State private var showsOnboardingPreview = false
     @State private var onboardingPreviewSessionID = UUID()
@@ -225,6 +265,34 @@ struct RewardPreviewView: View {
                 Text("演出だけを再生します。所持魚、今日の獲得数、コイン、集中記録は変更されません。")
             }
             Section {
+                ForEach(RewardPreviewCatalog.multipleFishItems) { item in
+                    Button {
+                        multipleFishPresentation = item
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "fish.fill")
+                                .foregroundStyle(.cyan)
+                            Text("複数魚 \(item.count)匹")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if item.count == 3 {
+                                Text("75分の代表例")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Image(systemName: "play.fill")
+                                .font(.caption)
+                                .foregroundStyle(.cyan)
+                        }
+                    }
+                    .accessibilityIdentifier("rewardPreview.multipleFish.\(item.count)")
+                }
+            } header: {
+                Text("複数魚獲得 Preview")
+            } footer: {
+                Text("1匹ずつ演出し、NEWだけタップ待ちになります。最後にまとめ表示します。本番データへは保存しません。")
+            }
+            Section {
                 ForEach(previewHistory) { history in
                     Button {
                         presentReplay(history)
@@ -242,6 +310,11 @@ struct RewardPreviewView: View {
                 Text("最近の獲得履歴（in-memory）")
             } footer: {
                 Text("この一覧はPreview内だけのダミー履歴です。本番のSwiftDataへ保存されません。")
+            }
+            Section("日次上限・獲得権 Preview") {
+                Button("earned / claimed / limit / +1枠を確認") {
+                    showsDailyFishClaimPreview = true
+                }
             }
             Section {
                 Button {
@@ -271,8 +344,12 @@ struct RewardPreviewView: View {
             }
         }
         .navigationTitle("Reward Preview")
+        .sheet(isPresented: $showsDailyFishClaimPreview) { DailyFishClaimPreviewView() }
         .fullScreenCover(item: $presentation, onDismiss: acknowledgePreviewReplay) { presentation in
             FishRewardView(result: presentation.result)
+        }
+        .fullScreenCover(item: $multipleFishPresentation) { item in
+            MultipleFishRewardPreviewView(fish: item.fish)
         }
         .fullScreenCover(isPresented: $showsOnboardingPreview) {
             OnboardingView(completionButtonTitle: "プレビュー終了") {

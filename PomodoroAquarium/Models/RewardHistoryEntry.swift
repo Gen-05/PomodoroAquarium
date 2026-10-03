@@ -15,6 +15,8 @@ final class RewardHistoryEntry {
     var wasNewFish: Bool
     var previousOwnedCount: Int
     var currentOwnedCount: Int
+    var rewardSessionID: UUID?
+    var rewardBatchIndex: Int?
 
     init(
         id: UUID = UUID(),
@@ -124,6 +126,9 @@ enum RewardHistoryService {
         result: FishAcquisitionResult,
         pointDelta: Int,
         acquiredAt: Date = Date(),
+        sessionID: UUID? = nil,
+        batchIndex: Int? = nil,
+        saveImmediately: Bool = true,
         in context: ModelContext
     ) throws -> RewardHistoryEntry {
         let entry = RewardHistoryEntry(
@@ -139,9 +144,13 @@ enum RewardHistoryService {
             previousOwnedCount: result.previousOwnedCount,
             currentOwnedCount: result.currentOwnedCount
         )
+        entry.rewardSessionID = sessionID
+        entry.rewardBatchIndex = batchIndex
         context.insert(entry)
-        try pruneIfNeeded(in: context)
-        try context.save()
+        if saveImmediately {
+            try pruneIfNeeded(in: context)
+            try context.save()
+        }
         return entry
     }
 
@@ -175,7 +184,7 @@ enum RewardHistoryService {
     }
 
     @MainActor
-    private static func pruneIfNeeded(in context: ModelContext) throws {
+    static func pruneIfNeeded(in context: ModelContext) throws {
         let descriptor = FetchDescriptor<RewardHistoryEntry>(
             sortBy: [SortDescriptor(\RewardHistoryEntry.acquiredAt, order: .reverse)]
         )

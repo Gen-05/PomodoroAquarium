@@ -4,7 +4,7 @@ struct StudyCompletionReward: Equatable {
     let streakDays: Int
     let didEarnFish: Bool
 
-    /// 既存のポイント・魚・継続報酬処理を実行する条件。結果画面の表示条件ではない。
+    /// 既存の継続報酬の条件。魚・通常ポイントは日次有効秒数の累積側が担う。
     static func isEligibleForExistingRewards(forStudyMinutes minutes: Int) -> Bool {
         minutes >= 25
     }
