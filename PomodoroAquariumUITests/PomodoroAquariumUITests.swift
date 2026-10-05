@@ -74,6 +74,84 @@ final class PomodoroAquariumUITests: XCTestCase {
     }
 
     @MainActor
+    func testCompletedAutomaticPomodoroCanReenterTimerWithoutPop() {
+        verifyPomodoroReentry(automatically: true)
+    }
+
+    @MainActor
+    func testCompletedManualPomodoroCanReenterTimerWithoutPop() {
+        verifyPomodoroReentry(automatically: false)
+    }
+
+    @MainActor
+    private func verifyPomodoroReentry(automatically: Bool) {
+        let app = XCUIApplication()
+        app.launchArguments += ["-core-tutorial-in-memory", "-pomodoro-navigation-ui-test",
+                                "-timerSessionState", "", "-hasShownNotificationIntroduction", "YES",
+                                "-pomodoroStudyDuration", "25", "-pomodoroBreakDuration", "5",
+                                "-pomodoroSetCount", "2", "-pomodoroAutoStartNextSet", automatically ? "YES" : "NO"]
+        launchReturningUser(app)
+        app.buttons["home.startStudy"].tap()
+        XCTAssertTrue(app.buttons["timer.startStudy"].waitForExistence(timeout: 5))
+        app.buttons["timer.startStudy"].tap()
+        XCTAssertTrue(app.buttons["一時停止"].waitForExistence(timeout: 5))
+        let advance = app.buttons["timer.testCompletePhase"]
+        advance.tap() // study1
+        if automatically {
+            XCTAssertTrue(app.buttons["休憩を終える"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["報酬を見る"].exists)
+        } else {
+            finishPomodoroReward(in: app)
+            XCTAssertTrue(app.buttons["休憩を終える"].waitForExistence(timeout: 5))
+        }
+        advance.tap() // break1
+        if !automatically {
+            let next = app.alerts.buttons["次のセットを始める"]
+            XCTAssertTrue(next.waitForExistence(timeout: 5))
+            next.tap()
+        }
+        XCTAssertTrue(app.buttons["一時停止"].waitForExistence(timeout: 5))
+        advance.tap() // final study
+        finishPomodoroReward(in: app)
+        XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
+        keepScreenshot(app, name: "pomodoro-ended-\(automatically)")
+        app.buttons["home.startStudy"].tap()
+        XCTAssertTrue(app.buttons["timer.startStudy"].waitForExistence(timeout: 5))
+        // Destination appeared: now prove it remains there beyond delayed callbacks/onAppear.
+        let unexpectedPop = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true"), object: app.buttons["home.startStudy"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [unexpectedPop], timeout: 3), .timedOut)
+        XCTAssertTrue(app.buttons["timer.startStudy"].exists)
+        XCTAssertFalse(app.buttons["報酬を見る"].exists)
+        XCTAssertFalse(app.staticTexts["fishReward.tapPrompt"].exists)
+        keepScreenshot(app, name: "pomodoro-reentered-\(automatically)")
+    }
+
+    @MainActor
+    private func finishPomodoroReward(in app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["報酬を見る"].waitForExistence(timeout: 5))
+        app.buttons["報酬を見る"].tap()
+        let closePoints = app.buttons["閉じる"].firstMatch
+        XCTAssertTrue(closePoints.waitForExistence(timeout: 5))
+        closePoints.tap()
+        let prompt = app.staticTexts["fishReward.tapPrompt"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 5))
+        prompt.tap()
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline {
+            let summaryClose = app.buttons["rewardPreview.multipleFish.close"]
+            let singleClose = app.buttons["fishReward.close"]
+            if summaryClose.exists && summaryClose.isHittable { summaryClose.tap(); return }
+            if singleClose.exists && singleClose.isHittable { singleClose.tap(); return }
+            let next = app.buttons["タップして次へ"]
+            if next.exists && next.isEnabled && next.isHittable { next.tap() }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTFail("Reward sequence did not reach its closing action")
+    }
+
+    @MainActor
     func testRunningFocusDisplayForAllThreeModes() {
         for mode in ["ポモドーロ", "タイマー", "ストップウォッチ"] {
             let app = XCUIApplication()

@@ -391,6 +391,9 @@ struct HomeView: View {
                   coreTutorial?.isActive != true || isHomeStartTutorialInteractionAllowed,
                   homeStartTransition.consume(id: id) else { return }
             coreTutorial?.didTapHomeStart()
+#if DEBUG
+            TimerNavigationDiagnostics.record("Home.navigation request", model: timerViewModel)
+#endif
             showsTimerScreen = true
         }
         .task(id: scenePhase) {
@@ -412,6 +415,9 @@ struct HomeView: View {
             }
         }
         .onChange(of: showsTimerScreen) { _, isPresented in
+#if DEBUG
+            TimerNavigationDiagnostics.record("Home.navigation presented=\(isPresented)", model: timerViewModel)
+#endif
             if !isPresented { homeStartTransition.reset() }
         }
         .onDisappear {
@@ -428,6 +434,9 @@ struct HomeView: View {
         }
         .onChange(of: homeNavigationResetRequestID) { _, requestID in
             guard mode == .home, requestID != nil else { return }
+#if DEBUG
+            TimerNavigationDiagnostics.record("Home.navigation reset request", model: timerViewModel)
+#endif
             showsTimerScreen = false
         }
         .onChange(of: isAquariumEditorPresented) { _, isEditing in
@@ -509,6 +518,9 @@ struct HomeView: View {
                     return
                 }
                 _ = homeStartTransition.begin(isDestinationPresented: showsTimerScreen)
+#if DEBUG
+                TimerNavigationDiagnostics.record("Home.start tap", model: timerViewModel)
+#endif
             } label: {
                 Label(
                     HomeTimerEntryPresentation.title(

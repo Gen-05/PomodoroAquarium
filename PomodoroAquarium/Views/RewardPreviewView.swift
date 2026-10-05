@@ -209,6 +209,7 @@ struct RewardPreviewView: View {
     @State private var presentation: RewardPreviewPresentation?
     @State private var multipleFishPresentation: RewardPreviewCatalog.MultipleFishItem?
     @State private var showsDailyFishClaimPreview = false
+    @State private var showsLoadingPreview = false
     @State private var previewsNewFish = true
     @State private var showsOnboardingPreview = false
     @State private var onboardingPreviewSessionID = UUID()
@@ -316,6 +317,14 @@ struct RewardPreviewView: View {
                     showsDailyFishClaimPreview = true
                 }
             }
+            Section("画面 Preview") {
+                Button {
+                    showsLoadingPreview = true
+                } label: {
+                    Label("Loading画面 Preview", systemImage: "circle.dotted")
+                }
+                .accessibilityIdentifier("rewardPreview.loading")
+            }
             Section {
                 Button {
                     onboardingPreviewSessionID = UUID()
@@ -345,6 +354,11 @@ struct RewardPreviewView: View {
         }
         .navigationTitle("Reward Preview")
         .sheet(isPresented: $showsDailyFishClaimPreview) { DailyFishClaimPreviewView() }
+        .fullScreenCover(isPresented: $showsLoadingPreview) {
+            AquariumLoadingPreviewHost {
+                showsLoadingPreview = false
+            }
+        }
         .fullScreenCover(item: $presentation, onDismiss: acknowledgePreviewReplay) { presentation in
             FishRewardView(result: presentation.result)
         }
@@ -389,6 +403,29 @@ struct RewardPreviewView: View {
         }
         previewHistory[index].isAcknowledged = true
         self.replayedPreviewHistoryID = nil
+    }
+}
+
+/// 表示と閉じる操作だけ。ContentViewの起動処理や永続データには接続しない。
+private struct AquariumLoadingPreviewHost: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        AquariumLoadingView()
+            .overlay(alignment: .topTrailing) {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 44, height: 44)
+                        .background(.black.opacity(0.12), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 12)
+                .padding(.trailing, 16)
+                .accessibilityLabel("閉じる")
+                .accessibilityIdentifier("loadingPreview.close")
+            }
     }
 }
 

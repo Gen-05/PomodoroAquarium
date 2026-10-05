@@ -231,6 +231,11 @@ struct MainTabView: View {
             forKey: TimerConfigurationStorageKey.pomodoroBreakDuration
         ) ?? "") ?? PomodoroBreakConfiguration.defaultBreakMinutes
         let setCount = PomodoroBreakConfiguration.configuredSetCount(in: defaults)
+#if DEBUG
+        let timerNow = { TimerNavigationDiagnostics.now() }
+#else
+        let timerNow = Date.init
+#endif
         _timerViewModel = State(initialValue: TimerViewModel(
             studyTime: studyMinutes,
             breakTime: PomodoroBreakConfiguration.effectiveBreakMinutes(
@@ -238,7 +243,7 @@ struct MainTabView: View {
                 setCount: setCount
             ),
             totalSets: setCount,
-            now: Date.init,
+            now: timerNow,
             sessionStore: resolvedSessionStore,
             notificationService: notificationService ?? NotificationService.appDefault
         ))
@@ -386,10 +391,12 @@ struct MainTabView: View {
                 resetDailyFishProgressIfNeeded()
             }
             .onChange(of: scenePhase) { _, newPhase in
+                if newPhase != .active { timerViewModel.setAppActive(false) }
                 switch TimerScenePhaseTrackingPolicy.action(for: newPhase) {
                 case .measureActiveReturn:
                     resetDailyFishProgressIfNeeded()
                     timerViewModel.recordActiveReturn()
+                    timerViewModel.setAppActive(true)
                     timerViewModel.synchronizeTime()
                     updateAquariumViewingControlsAutoHide()
                 case .recordBackgroundEntry:
@@ -421,6 +428,7 @@ struct MainTabView: View {
                 setIdleTimerDisabled(false)
             }
             .onAppear {
+                timerViewModel.setAppActive(scenePhase == .active)
                 resetDailyFishProgressIfNeeded()
                 reconcileCoreTutorialIfNeeded()
                 checkForUnacknowledgedRewardIfNeeded()
@@ -684,6 +692,9 @@ struct MainTabView: View {
               coreTutorialMode == .production,
               !coreTutorial.isActive else { return }
         guard let player else { return }
+        // 自動flowの途中では、保存済みの魚も終了時まで画面表示を保留する。
+        guard !timerViewModel.hasPersistedAutomaticPomodoroFlow,
+              !timerViewModel.defersPomodoroRewards else { return }
         do {
             try DailyPointProgressService.processPending(for: player, in: modelContext)
             try FishRewardBatchService.grantPending(to: player, defaults: appDefaults, in: modelContext)

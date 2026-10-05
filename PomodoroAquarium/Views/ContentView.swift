@@ -11,22 +11,33 @@ import SwiftData
 struct ContentView: View {
     @AppStorage(OnboardingStore.storageKey) private var hasCompletedOnboarding = false
     @Environment(\.modelContext) private var modelContext
+    @State private var hasPreparedLaunch = false
 
     var body: some View {
-        Group {
-            if hasCompletedOnboarding {
-                MainTabView()
-                    .transition(.opacity)
-            } else {
-                OnboardingView {
-                    withAnimation(.easeInOut(duration: 0.35)) {
-                        hasCompletedOnboarding = true
+        ZStack {
+            if hasPreparedLaunch {
+                if hasCompletedOnboarding {
+                    MainTabView()
+                        .transition(.opacity)
+                } else {
+                    OnboardingView {
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            hasCompletedOnboarding = true
+                        }
                     }
+                    .transition(.opacity)
                 }
-                .transition(.opacity)
+            } else {
+                AquariumLoadingView()
+                    .transition(.opacity)
+                    .zIndex(1)
             }
         }
         .task {
+            guard !hasPreparedLaunch else { return }
+            // Loadingを先に構築し、既存の初期化完了を待つ。固定秒数は待たせない。
+            await Task.yield()
+            guard !Task.isCancelled else { return }
             _ = try? FocusCategoryService.createDefaultsIfNeeded(in: modelContext)
             try? FocusSessionHistoryMigration.migrateLegacyDailyRecordsIfNeeded(
                 in: modelContext
@@ -48,6 +59,14 @@ struct ContentView: View {
 #if DEBUG
                 print("Focus method migration failed: \(error)")
 #endif
+            }
+            if hasCompletedOnboarding {
+                // Homeと同じ冪等な準備処理を再利用し、Playerの重複生成を避ける。
+                _ = try? HomePlayerInitialization.prepare(in: modelContext)
+            }
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.25)) {
+                hasPreparedLaunch = true
             }
         }
     }

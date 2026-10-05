@@ -1,7 +1,47 @@
 import CoreGraphics
 import Foundation
 
+/// 大型魚の従来設定と、小魚・浮遊系の広い回遊域を分離する。
+enum FishRoamingStyle {
+    case legacy, small, drifting
+
+    var distantTargetProbability: CGFloat {
+        switch self {
+        case .legacy: 0
+        case .small: 0.28
+        case .drifting: 0.24
+        }
+    }
+
+    func bounds(in aquariumSize: CGSize, fishSize: CGFloat) -> FishRoamingBounds {
+        guard self != .legacy, aquariumSize.width > 0, aquariumSize.height > 0 else {
+            return .legacy
+        }
+        // 回転時の半対角と微小な泳動offsetを確保。画像のframe/scaleは変えない。
+        let radius = fishSize * 0.72 + 6
+        let xMargin = min(0.45, max(0.05, radius / aquariumSize.width))
+        let yMargin = min(0.45, max(0.07, radius / aquariumSize.height))
+        return FishRoamingBounds(
+            horizontal: xMargin...(1 - xMargin), vertical: yMargin...(1 - yMargin),
+            horizontalWallMargin: 0.07, verticalWallMargin: 0.06
+        )
+    }
+}
+
+struct FishRoamingBounds {
+    let horizontal: ClosedRange<CGFloat>
+    let vertical: ClosedRange<CGFloat>
+    let horizontalWallMargin: CGFloat
+    let verticalWallMargin: CGFloat
+
+    static let legacy = FishRoamingBounds(
+        horizontal: 0.18...0.82, vertical: 0.16...0.62,
+        horizontalWallMargin: 0.15, verticalWallMargin: 0.12
+    )
+}
+
 struct FishMovementProfile {
+    var roamingStyle: FishRoamingStyle = .legacy
     let baseSpeedRange: ClosedRange<CGFloat>
     let hoverProbability: CGFloat
     let burstProbability: CGFloat
@@ -27,12 +67,13 @@ struct FishMovementProfile {
     let swimPhaseSpeedMultiplier: CGFloat
 
     static let clownfish = FishMovementProfile(
+        roamingStyle: .small,
         baseSpeedRange: 0.020...0.032,
         hoverProbability: 0.34,
         burstProbability: 0.24,
-        gatheringProbability: 0.15,
-        wanderingRadiusX: 0.16...0.35,
-        wanderingRadiusY: 0.13...0.30,
+        gatheringProbability: 0.06,
+        wanderingRadiusX: 0.24...0.48,
+        wanderingRadiusY: 0.24...0.46,
         turnResponsivenessRange: 0.62...1.02,
         depthRange: 0.12...0.92,
         depthScaleRange: 1.0...1.0,
@@ -54,12 +95,13 @@ struct FishMovementProfile {
 
     /// クラゲなど、水中をゆっくり上下に漂う魚種向けの基準profile。
     static let jellyfish = FishMovementProfile(
+        roamingStyle: .drifting,
         baseSpeedRange: 0.008...0.015,
         hoverProbability: 0.55,
         burstProbability: 0,
-        gatheringProbability: 0.08,
-        wanderingRadiusX: 0.08...0.16,
-        wanderingRadiusY: 0.14...0.28,
+        gatheringProbability: 0.03,
+        wanderingRadiusX: 0.12...0.24,
+        wanderingRadiusY: 0.30...0.54,
         turnResponsivenessRange: 0.30...0.55,
         depthRange: 0.18...0.86,
         depthScaleRange: 1.0...1.0,
@@ -81,12 +123,13 @@ struct FishMovementProfile {
 
     /// クラゲ型の浮遊性格を維持し、基準移動速度だけを上げたタツノオトシゴ用profile。
     static let seahorse = FishMovementProfile(
+        roamingStyle: .drifting,
         baseSpeedRange: 0.016...0.030,
         hoverProbability: 0.55,
         burstProbability: 0,
-        gatheringProbability: 0.08,
-        wanderingRadiusX: 0.08...0.16,
-        wanderingRadiusY: 0.14...0.28,
+        gatheringProbability: 0.03,
+        wanderingRadiusX: 0.12...0.24,
+        wanderingRadiusY: 0.30...0.54,
         turnResponsivenessRange: 0.30...0.55,
         depthRange: 0.18...0.86,
         depthScaleRange: 1.0...1.0,
@@ -108,6 +151,7 @@ struct FishMovementProfile {
 
     /// マンタなど、大きな翼で長距離をゆっくり巡航する魚種向けの基準profile。
     static let manta = FishMovementProfile(
+        roamingStyle: .legacy,
         baseSpeedRange: 0.042...0.066,
         hoverProbability: 0.08,
         burstProbability: 0,
@@ -135,6 +179,7 @@ struct FishMovementProfile {
 
     /// ジンベエザメなど、止まらず長距離を安定巡航する大型魚向けの基準profile。
     static let whaleShark = FishMovementProfile(
+        roamingStyle: .legacy,
         baseSpeedRange: 0.026...0.040,
         hoverProbability: 0,
         burstProbability: 0,
@@ -320,6 +365,8 @@ enum AquariumFishMotion {
         var behaviorTimeRemaining: TimeInterval
         var anchorPosition: CGPoint
         var localTarget: CGPoint
+        var roamingDestination: CGPoint?
+        var roamingBounds: FishRoamingBounds
         var currentDepth: CGFloat
         var targetDepth: CGFloat
         var depthVelocity: CGFloat
@@ -423,7 +470,9 @@ enum AquariumFishMotion {
                 behavior: behavior,
                 speedRatio: speedRatio
             )
-            let wallForce = AquariumFishMotion.wallSteering(at: position, strength: wallStrength)
+            let wallForce = AquariumFishMotion.wallSteering(
+                at: position, strength: wallStrength, bounds: roamingBounds
+            )
             let headingWeight: CGFloat
             switch behavior {
             case .hovering: headingWeight = 0.06
@@ -457,8 +506,7 @@ enum AquariumFishMotion {
             let depthSpeed = movementProfile.depthSpeedMultiplier(at: currentDepth)
             position.x += velocity.dx * CGFloat(deltaTime) * depthSpeed
             position.y += velocity.dy * CGFloat(deltaTime) * depthSpeed
-            position.x = min(max(position.x, horizontalRange.lowerBound), horizontalRange.upperBound)
-            position.y = min(max(position.y, verticalRange.lowerBound), verticalRange.upperBound)
+            position = AquariumFishMotion.clampedPoint(position, bounds: roamingBounds)
 
             updateFacing(deltaTime: deltaTime)
             updateSwimPhase(deltaTime: deltaTime)
@@ -820,6 +868,29 @@ enum AquariumFishMotion {
             neighborPositions: NeighborPositions,
             permitsGathering: Bool
         ) where NeighborPositions.Index == Int, NeighborPositions.Element == CGPoint {
+            // 遠い目標は短いbehavior遷移で捨てず、同じ速度で時間をかけて回遊する。
+            // hoverの停留・既存の方向転換は維持し、大型魚はこの分岐を通さない。
+            if movementProfile.roamingStyle != .legacy {
+                if let destination = roamingDestination,
+                   hypot(destination.x - position.x, destination.y - position.y) > 0.07 {
+                    localTarget = destination
+                    desiredDirection = AquariumFishMotion.direction(from: position, to: localTarget)
+                    return
+                }
+                roamingDestination = nil
+                if chance(movementProfile.roamingStyle.distantTargetProbability) {
+                    let x = movementProfile.roamingStyle == .drifting
+                        ? position.x + random(in: -wanderingRadiusX...wanderingRadiusX)
+                        : random(in: roamingBounds.horizontal)
+                    let destination = AquariumFishMotion.clampedPoint(CGPoint(
+                        x: x, y: random(in: roamingBounds.vertical)
+                    ), bounds: roamingBounds)
+                    roamingDestination = destination
+                    localTarget = destination
+                    desiredDirection = AquariumFishMotion.direction(from: position, to: localTarget)
+                    return
+                }
+            }
             let center: CGPoint
             let isGathering: Bool
             if permitsGathering,
@@ -845,8 +916,18 @@ enum AquariumFishMotion {
             localTarget = AquariumFishMotion.clampedPoint(CGPoint(
                 x: center.x + xOffset,
                 y: center.y + random(in: -yRadius...yRadius)
-            ))
+            ), bounds: roamingBounds)
             desiredDirection = AquariumFishMotion.direction(from: position, to: localTarget)
+        }
+
+        mutating func updateRoamingBounds(_ bounds: FishRoamingBounds) {
+            roamingBounds = bounds
+            position = AquariumFishMotion.clampedPoint(position, bounds: bounds)
+            anchorPosition = AquariumFishMotion.clampedPoint(anchorPosition, bounds: bounds)
+            localTarget = AquariumFishMotion.clampedPoint(localTarget, bounds: bounds)
+            if let destination = roamingDestination {
+                roamingDestination = AquariumFishMotion.clampedPoint(destination, bounds: bounds)
+            }
         }
 
         private mutating func perturbedDirection(maxAngle: CGFloat) -> CGVector {
@@ -875,7 +956,8 @@ enum AquariumFishMotion {
     static func initialState(
         for id: UUID,
         profile: FishMovementProfile = .clownfish,
-        speedVariationProfile: SpeedVariationProfile? = nil
+        speedVariationProfile: SpeedVariationProfile? = nil,
+        roamingBounds: FishRoamingBounds = .legacy
     ) -> State {
         let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
         let angle = CGFloat(bytes[4]) / 255 * .pi * 2
@@ -889,7 +971,7 @@ enum AquariumFishMotion {
         let initialBehavior: Behavior = profile.hoverProbability > 0 && bytes[11].isMultiple(of: 3)
             ? .hovering
             : .wandering
-        let initialPosition = initialPosition(for: id)
+        let initialPosition = initialPosition(for: id, bounds: roamingBounds)
         let wanderingRadiusX = interpolated(profile.wanderingRadiusX, byte: bytes[12])
         let wanderingRadiusY = interpolated(profile.wanderingRadiusY, byte: bytes[13])
         let initialDepth = interpolated(profile.depthRange, byte: bytes[14])
@@ -922,7 +1004,9 @@ enum AquariumFishMotion {
             localTarget: clampedPoint(CGPoint(
                 x: initialPosition.x + direction.dx * wanderingRadiusX,
                 y: initialPosition.y + direction.dy * wanderingRadiusY
-            )),
+            ), bounds: roamingBounds),
+            roamingDestination: nil,
+            roamingBounds: roamingBounds,
             currentDepth: initialDepth,
             targetDepth: initialTargetDepth,
             depthVelocity: 0,
@@ -1103,21 +1187,21 @@ enum AquariumFishMotion {
         return 0.90 + Double(bytes[7]) / 255 * 0.20
     }
 
-    static func initialPosition(for id: UUID) -> CGPoint {
+    static func initialPosition(for id: UUID, bounds: FishRoamingBounds = .legacy) -> CGPoint {
         let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
         let xFraction = CGFloat(Int(bytes[0]) * 256 + Int(bytes[1])) / 65_535
         let yFraction = CGFloat(Int(bytes[2]) * 256 + Int(bytes[3])) / 65_535
-        return point(xFraction: xFraction, yFraction: yFraction)
+        return point(xFraction: xFraction, yFraction: yFraction, bounds: bounds)
     }
 
-    static func point(xFraction: CGFloat, yFraction: CGFloat) -> CGPoint {
-        let x = horizontalRange.lowerBound
-            + min(max(xFraction, 0), 1) * (horizontalRange.upperBound - horizontalRange.lowerBound)
-        let y = verticalRange.lowerBound
-            + min(max(yFraction, 0), 1) * (verticalRange.upperBound - verticalRange.lowerBound)
+    static func point(xFraction: CGFloat, yFraction: CGFloat, bounds: FishRoamingBounds = .legacy) -> CGPoint {
+        let x = bounds.horizontal.lowerBound
+            + min(max(xFraction, 0), 1) * (bounds.horizontal.upperBound - bounds.horizontal.lowerBound)
+        let y = bounds.vertical.lowerBound
+            + min(max(yFraction, 0), 1) * (bounds.vertical.upperBound - bounds.vertical.lowerBound)
         return CGPoint(
-            x: min(max(x, horizontalRange.lowerBound), horizontalRange.upperBound),
-            y: min(max(y, verticalRange.lowerBound), verticalRange.upperBound)
+            x: min(max(x, bounds.horizontal.lowerBound), bounds.horizontal.upperBound),
+            y: min(max(y, bounds.vertical.lowerBound), bounds.vertical.upperBound)
         )
     }
 
@@ -1133,14 +1217,16 @@ enum AquariumFishMotion {
         return CGVector(dx: x, dy: y)
     }
 
-    static func wallSteering(at position: CGPoint, strength: CGFloat = 1) -> CGVector {
-        let horizontalMargin: CGFloat = 0.15
-        let verticalMargin: CGFloat = 0.12
+    static func wallSteering(
+        at position: CGPoint, strength: CGFloat = 1, bounds: FishRoamingBounds = .legacy
+    ) -> CGVector {
+        let horizontalMargin = bounds.horizontalWallMargin
+        let verticalMargin = bounds.verticalWallMargin
         var force = CGVector.zero
-        force.dx += edgeForce(position.x - horizontalRange.lowerBound, margin: horizontalMargin)
-        force.dx -= edgeForce(horizontalRange.upperBound - position.x, margin: horizontalMargin)
-        force.dy += edgeForce(position.y - verticalRange.lowerBound, margin: verticalMargin)
-        force.dy -= edgeForce(verticalRange.upperBound - position.y, margin: verticalMargin)
+        force.dx += edgeForce(position.x - bounds.horizontal.lowerBound, margin: horizontalMargin)
+        force.dx -= edgeForce(bounds.horizontal.upperBound - position.x, margin: horizontalMargin)
+        force.dy += edgeForce(position.y - bounds.vertical.lowerBound, margin: verticalMargin)
+        force.dy -= edgeForce(bounds.vertical.upperBound - position.y, margin: verticalMargin)
         return CGVector(dx: force.dx * 1.8 * strength, dy: force.dy * 1.45 * strength)
     }
 
@@ -1175,10 +1261,10 @@ enum AquariumFishMotion {
         normalized(CGVector(dx: end.x - start.x, dy: end.y - start.y))
     }
 
-    static func clampedPoint(_ point: CGPoint) -> CGPoint {
+    static func clampedPoint(_ point: CGPoint, bounds: FishRoamingBounds = .legacy) -> CGPoint {
         CGPoint(
-            x: min(max(point.x, horizontalRange.lowerBound), horizontalRange.upperBound),
-            y: min(max(point.y, verticalRange.lowerBound), verticalRange.upperBound)
+            x: min(max(point.x, bounds.horizontal.lowerBound), bounds.horizontal.upperBound),
+            y: min(max(point.y, bounds.vertical.lowerBound), bounds.vertical.upperBound)
         )
     }
 

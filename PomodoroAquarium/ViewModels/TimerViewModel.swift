@@ -87,6 +87,76 @@ final class TimerViewModel {
     private var validFocusRunStartedAt: Date?
     private var focusSessionID: UUID?
     private(set) var lastValidFocusSeconds = 0
+    private var configuredAutoStartNextSet = false
+    private(set) var isAutomaticPomodoroFlow = false
+    private(set) var pomodoroFlowID: UUID?
+    private var autoFlowBackgroundEnteredAt: Date?
+    private(set) var isTimerScreenVisible = false
+    private(set) var isAppActive = false
+    private var isRestoringSession = false
+    private var automaticStudyEnvironmentReady: Bool {
+        isAppActive && isTimerScreenVisible && !isRestoringSession
+    }
+    var awaitsAutomaticStudyStart: Bool {
+        isAutomaticPomodoroFlow && phase == .awaitingNextSet && currentSet < totalSets
+    }
+    var canAutoStartNextStudy: Bool {
+        awaitsAutomaticStudyStart && automaticStudyEnvironmentReady && !isRunning
+    }
+    var defersPomodoroRewards: Bool { isAutomaticPomodoroFlow && phase != .finished }
+    var hasPersistedAutomaticPomodoroFlow: Bool { sessionStore.load()?.autoStartNextSet == true }
+    var onPomodoroFlowFinished: (() -> Void)?
+
+    func configureAutoStartNextSet(_ enabled: Bool) {
+        guard canConfigureSession else { return }
+        configuredAutoStartNextSet = enabled
+    }
+
+    func setAppActive(_ active: Bool) {
+        // activeにする前に、inactive中に過ぎたbreakだけを確定する。
+        if active, isAutomaticPomodoroFlow { synchronizeTime() }
+        let changed = isAppActive != active
+        isAppActive = active
+        if !active, isAutomaticPomodoroFlow { synchronizeTime() }
+        if active { resumeAutomaticStudyIfReady() }
+        if (changed || active), isAutomaticPomodoroFlow, phase == .breakTime, isRunning {
+            scheduleCurrentSessionNotificationIfNeeded()
+        }
+        if isAutomaticPomodoroFlow && (isRunning || state == .paused || awaitsAutomaticStudyStart) {
+            persistSession(at: now())
+        }
+    }
+
+    /// Navigationの表示状態だけ。app backgroundはこの値を変更しない。
+    func setTimerScreenVisible(_ visible: Bool) {
+        if visible {
+            // 画面外で過ぎたbreakを、画面外の状態のまま先に終了させる。
+            synchronizeTime()
+        }
+        let changed = isTimerScreenVisible != visible
+        isTimerScreenVisible = visible
+        if !visible { synchronizeTime() }
+        if visible { resumeAutomaticStudyIfReady() }
+        if changed, isAutomaticPomodoroFlow, phase == .breakTime, isRunning {
+            scheduleCurrentSessionNotificationIfNeeded()
+        }
+        if isAutomaticPomodoroFlow && (isRunning || state == .paused || awaitsAutomaticStudyStart) {
+            persistSession(at: now())
+        }
+    }
+
+    /// phaseを同期的に消費するため、onAppear/activeが重なっても1回だけ開始する。
+    @discardableResult
+    func resumeAutomaticStudyIfReady() -> Bool {
+        startPendingAutomaticStudy(at: now())
+    }
+
+    private func startPendingAutomaticStudy(at date: Date) -> Bool {
+        guard canAutoStartNextStudy, prepareNextSet() else { return false }
+        autoFlowBackgroundEnteredAt = nil
+        resumeTimer(at: date)
+        return true
+    }
     
     var onStudyFinished: (() -> Void)?
     var onBreakFinished: (() -> Void)?
@@ -117,6 +187,10 @@ final class TimerViewModel {
     }
 
     var shouldConfirmNextSet: Bool {
+        canPrepareNextSet && !isAutomaticPomodoroFlow
+    }
+
+    private var canPrepareNextSet: Bool {
         mode == .pomodoro && phase == .awaitingNextSet && currentSet < totalSets
     }
 
@@ -224,10 +298,12 @@ final class TimerViewModel {
 
     func pauseTimer() {
         guard isRunning else { return }
+        let previousPhase = phase
+        let previousSet = currentSet
         synchronizeTime()
 
         // 同期時に終了した場合は、既に次のセッションへ切り替わっている。
-        guard isRunning else { return }
+        guard isRunning, phase == previousPhase, currentSet == previousSet else { return }
 
         if phase == .study {
             validFocusElapsed = validFocusDuration(at: now())
@@ -240,6 +316,7 @@ final class TimerViewModel {
             for: backgroundNotificationSessionIdentifier
         )
         backgroundEnteredAt = nil
+        autoFlowBackgroundEnteredAt = nil
         state = .paused
         endDate = nil
         if mode == .stopwatch && isStudyTime {
@@ -250,6 +327,10 @@ final class TimerViewModel {
     }
 
     func resumeTimer() {
+        resumeTimer(at: now())
+    }
+
+    private func resumeTimer(at currentDate: Date) {
         guard state != .running else { return }
         guard phase != .awaitingNextSet else { return }
         if phase == .finished {
@@ -262,8 +343,11 @@ final class TimerViewModel {
             didExceedBackgroundLimit = false
             shouldPresentBackgroundFailureAlert = false
         }
+        if phase == .study, state == .idle, currentSet == 1 {
+            isAutomaticPomodoroFlow = mode == .pomodoro && configuredAutoStartNextSet
+            pomodoroFlowID = isAutomaticPomodoroFlow ? UUID() : nil
+        }
         hasHandledCurrentSessionCompletion = false
-        let currentDate = now()
         if phase == .study {
             if state == .idle {
                 validFocusElapsed = 0
@@ -284,7 +368,11 @@ final class TimerViewModel {
             endDate = currentDate.addingTimeInterval(TimeInterval(timeRemaining))
         }
         state = .running
+        if isAutomaticPomodoroFlow, phase == .study, let absence = autoFlowBackgroundEnteredAt {
+            backgroundEnteredAt = max(absence, currentDate)
+        }
         scheduleCurrentSessionNotificationIfNeeded()
+        if backgroundEnteredAt != nil { scheduleBackgroundLimitNotifications() }
         persistSession(at: currentDate)
     }
 
@@ -296,6 +384,8 @@ final class TimerViewModel {
               phase == .study,
               !hasHandledCurrentSessionCompletion else { return false }
         selectedCategoryID = FocusCategoryDefaults.studyID
+        isAutomaticPomodoroFlow = false
+        pomodoroFlowID = nil
         finishCurrentSession(
             completedStudyMinutes: FishRewardService.minimumStudyMinutes,
             studyEndReason: .completed,
@@ -314,10 +404,20 @@ final class TimerViewModel {
         resumeTimer()
     }
 
+    /// running中の休憩だけを短縮する。自動設定OFFなら従来の次セット確認待ち。
+    @discardableResult
+    func endPomodoroBreak() -> Bool {
+        guard mode == .pomodoro, phase == .breakTime, isRunning else { return false }
+        pauseTimer()
+        // pause時の時刻同期で自然終了した場合は、重ねて終了しない。
+        if phase != .breakTime { return true }
+        return endCurrentSession()
+    }
+
     /// 休憩終了確認後、次セットを開始前のstudy状態へ進める。
     @discardableResult
     func prepareNextSet() -> Bool {
-        guard shouldConfirmNextSet else { return false }
+        guard canPrepareNextSet else { return false }
         currentSet += 1
         phase = .study
         state = .idle
@@ -387,6 +487,9 @@ final class TimerViewModel {
     }
     
     func resetTimer() {
+        isAutomaticPomodoroFlow = false
+        pomodoroFlowID = nil
+        autoFlowBackgroundEnteredAt = nil
         validFocusElapsed = 0
         validFocusRunStartedAt = nil
         focusSessionID = nil
@@ -413,6 +516,20 @@ final class TimerViewModel {
         backgroundNotificationSessionIdentifier = nil
         sessionStore.clearSession()
     }
+
+    /// 終了結果の表示が済んだ時だけ、共有modelを次の開始前状態へ戻す。
+    /// 設定・カテゴリ・報酬保存には触れず、実行中/休憩待ちのflowは破棄しない。
+    @discardableResult
+    func finishCompletedSessionPresentation() -> Bool {
+        guard phase == .finished, state == .completed else { return false }
+        resetTimer()
+        lastCompletedStudyMinutes = 0
+        onPomodoroFlowFinished = nil
+        onStudyFinished = nil
+        onBreakFinished = nil
+        onFocusSessionFinalized = nil
+        return true
+    }
     
     func tick() {
         synchronizeTime()
@@ -422,10 +539,14 @@ final class TimerViewModel {
     /// backgroundへ入った時刻と、その時点までの経過時間を保存する。
     /// running中のstudyでは、最初のbackground遷移時刻も保持する。
     func recordLastActiveTime() {
+        setAppActive(false)
         guard sessionStore.load()?.sessionIsActive == true else { return }
         synchronizeTime()
         guard state == .running || state == .paused else { return }
         let currentDate = now()
+        if isAutomaticPomodoroFlow, isRunning, autoFlowBackgroundEnteredAt == nil {
+            autoFlowBackgroundEnteredAt = currentDate
+        }
         if state == .running, isStudyTime {
             if backgroundEnteredAt == nil {
                 backgroundEnteredAt = currentDate
@@ -434,6 +555,12 @@ final class TimerViewModel {
                 backgroundNotificationSessionIdentifier = UUID().uuidString
             }
             didExceedBackgroundLimit = false
+            scheduleBackgroundLimitNotifications()
+        }
+        persistSession(at: currentDate)
+    }
+
+    private func scheduleBackgroundLimitNotifications() {
             if let backgroundEnteredAt, let backgroundNotificationSessionIdentifier {
                 let warningDate = backgroundEnteredAt.addingTimeInterval(
                     BackgroundStudyLimit.warningInterval
@@ -462,17 +589,25 @@ final class TimerViewModel {
                     sessionIdentifier: backgroundNotificationSessionIdentifier
                 )
             }
-        }
-        persistSession(at: currentDate)
     }
 
     /// active復帰時に直前の離脱時間を確定し、永続セッションの開始時刻を消費する。
     @discardableResult
     func recordActiveReturn() -> TimeInterval? {
+        defer { setAppActive(true) }
+        // inactive中のdeadlineを先に確定し、break後のstudyはactive確認まで保留。
+        // すでにrunning中のstudyには従来の5分ルールを適用する。
+        if isAutomaticPomodoroFlow { synchronizeTime() }
+        autoFlowBackgroundEnteredAt = nil
         let currentDate = now()
         let shouldFailSession = shouldFailForBackgroundLimit(at: currentDate)
         let failureFocusEnd = backgroundEnteredAt
-        guard let duration = consumeBackgroundDuration(at: currentDate) else { return nil }
+        guard let duration = consumeBackgroundDuration(at: currentDate) else {
+            if isAutomaticPomodoroFlow && (state == .running || state == .paused) {
+                persistSession(at: currentDate)
+            }
+            return nil
+        }
 
         notificationService.cancelBackgroundLimitNotifications(
             for: backgroundNotificationSessionIdentifier
@@ -513,6 +648,19 @@ final class TimerViewModel {
 
     /// Timer.publishの受信回数ではなく、終了予定時刻との差から残り時間を補正する。
     func synchronizeTime() {
+        // 自動flowだけは、background中に過ぎたphaseのdeadlineも順に解決する。
+        // セット数は有限で、常時Timerや新しい計測方式を追加しない。
+        var didTransition: Bool
+        repeat {
+            let previousPhase = phase
+            let previousSet = currentSet
+            synchronizeCurrentPhase()
+            didTransition = phase != previousPhase || currentSet != previousSet
+        } while isAutomaticPomodoroFlow && isRunning &&
+            (didTransition || endDate.map({ $0 <= now() }) == true)
+    }
+
+    private func synchronizeCurrentPhase() {
         guard isRunning else { return }
 
         let currentDate = now()
@@ -545,21 +693,31 @@ final class TimerViewModel {
     }
 
     private func restore(_ session: PersistedTimerSession, at currentDate: Date) {
+        // 保存時の画面位置や過去のdeadlineから、現在activeであるとは推測しない。
+        isRestoringSession = true
+        defer { isRestoringSession = false }
         studyTime = session.studyTime
         breakTime = session.breakTime
-        phase = session.isStudyTime ? .study : .breakTime
+        phase = session.awaitsAutomaticStudyStart == true ? .awaitingNextSet
+            : (session.isStudyTime ? .study : .breakTime)
         totalSets = max(session.totalSets ?? totalSets, 1)
         currentSet = min(max(session.currentSet ?? 1, 1), totalSets)
         mode = TimerMode(rawValue: session.timerModeRawValue ?? "") ?? .pomodoro
+        isAutomaticPomodoroFlow = mode == .pomodoro && session.autoStartNextSet == true
+        // 離脱前の画面位置だけを復元する。自動開始は現在のactive/表示確認後。
+        isTimerScreenVisible = session.isTimerScreenVisible ?? true
+        pomodoroFlowID = session.pomodoroFlowID
+        autoFlowBackgroundEnteredAt = session.autoFlowBackgroundEnteredAt ?? session.backgroundEnteredAt
         selectedCategoryID = FocusCategoryDefaults.resolvedCategoryID(session.selectedCategoryID)
         backgroundNotificationSessionIdentifier = session.backgroundNotificationSessionIdentifier
-        state = session.isRunning ? .running : .paused
+        state = session.awaitsAutomaticStudyStart == true ? .completed
+            : (session.isRunning ? .running : .paused)
         timeRemaining = session.timeRemaining
         let savedElapsed = max(0, session.elapsedStudySeconds ?? 0)
         validFocusElapsed = max(0, session.validFocusElapsed ?? TimeInterval(
             session.elapsedStudySeconds ?? max(0, session.studyTime * 60 - session.timeRemaining)
         ))
-        validFocusRunStartedAt = session.isRunning
+        validFocusRunStartedAt = session.isRunning && phase == .study
             ? (session.validFocusUpdatedAt ?? session.lastHeartbeatDate) : nil
         focusSessionID = session.focusSessionID ?? UUID()
         stopwatchElapsedSeconds = mode == .stopwatch ? savedElapsed : 0
@@ -571,7 +729,7 @@ final class TimerViewModel {
         hasHandledCurrentSessionCompletion = false
         let shouldFailSession = shouldFailForBackgroundLimit(at: currentDate)
         let failureFocusEnd = backgroundEnteredAt
-        if consumeBackgroundDuration(at: currentDate) != nil {
+        if !isAutomaticPomodoroFlow && consumeBackgroundDuration(at: currentDate) != nil {
             notificationService.cancelBackgroundLimitNotifications(
                 for: backgroundNotificationSessionIdentifier
             )
@@ -591,12 +749,18 @@ final class TimerViewModel {
 
         if isRunning {
             synchronizeTime()
+            if isAutomaticPomodoroFlow {
+                _ = consumeBackgroundDuration(at: currentDate)
+                autoFlowBackgroundEnteredAt = nil
+                notificationService.cancelBackgroundLimitNotifications(for: backgroundNotificationSessionIdentifier)
+            }
             if isRunning {
                 scheduleCurrentSessionNotificationIfNeeded()
                 // 復元した状態を現在のプロセス所有として直ちに保存する。
                 persistSession(at: currentDate)
             }
         } else {
+            autoFlowBackgroundEnteredAt = nil
             persistSession(at: currentDate)
         }
     }
@@ -618,6 +782,8 @@ final class TimerViewModel {
         totalSets = max(session.totalSets ?? totalSets, 1)
         currentSet = min(max(session.currentSet ?? 1, 1), totalSets)
         mode = TimerMode(rawValue: session.timerModeRawValue ?? "") ?? .pomodoro
+        isAutomaticPomodoroFlow = mode == .pomodoro && session.autoStartNextSet == true
+        pomodoroFlowID = session.pomodoroFlowID
         selectedCategoryID = FocusCategoryDefaults.resolvedCategoryID(session.selectedCategoryID)
         focusSessionID = session.focusSessionID ?? UUID()
         // 不明な再起動後の時間は推測せず、最後に保存された有効時間だけを保持する。
@@ -642,6 +808,7 @@ final class TimerViewModel {
         stopwatchElapsedAtRunStart = 0
         stopwatchRunStartDate = nil
         sessionStore.clearSession()
+        if isAutomaticPomodoroFlow { onPomodoroFlowFinished?() }
     }
 
     private func updateHeartbeatIfNeeded() {
@@ -655,7 +822,7 @@ final class TimerViewModel {
     }
 
     private func persistSession(at date: Date) {
-        guard isStudyTime else {
+        guard isStudyTime || isAutomaticPomodoroFlow else {
             lastHeartbeatDate = nil
             sessionStore.clearSession()
             return
@@ -679,7 +846,12 @@ final class TimerViewModel {
             totalSets: totalSets,
             validFocusElapsed: validFocusDuration(at: date),
             validFocusUpdatedAt: isRunning ? date : nil,
-            focusSessionID: focusSessionID
+            focusSessionID: focusSessionID,
+            autoStartNextSet: isAutomaticPomodoroFlow,
+            pomodoroFlowID: pomodoroFlowID,
+            autoFlowBackgroundEnteredAt: autoFlowBackgroundEnteredAt,
+            isTimerScreenVisible: isTimerScreenVisible,
+            awaitsAutomaticStudyStart: awaitsAutomaticStudyStart
         ))
     }
 
@@ -689,6 +861,8 @@ final class TimerViewModel {
         forceFinishPomodoro: Bool = false
     ) {
         guard !hasHandledCurrentSessionCompletion else { return }
+        let transitionDate = studyEndReason == .completed ? (endDate ?? now()) : now()
+        let waitsOutsideTimer = isAutomaticPomodoroFlow && phase == .breakTime && !automaticStudyEnvironmentReady
         hasHandledCurrentSessionCompletion = true
         if phase == .study {
             if forceFinishPomodoro {
@@ -704,7 +878,8 @@ final class TimerViewModel {
         lastHeartbeatDate = nil
         backgroundEnteredAt = nil
         didExceedBackgroundLimit = false
-        notificationService.cancelCurrentSessionNotification()
+        // 画面外のbreak完了では、予約済みの「戻ると開始」通知を消さない。
+        if !waitsOutsideTimer { notificationService.cancelCurrentSessionNotification() }
         notificationService.cancelBackgroundLimitNotifications(
             for: backgroundNotificationSessionIdentifier
         )
@@ -735,6 +910,32 @@ final class TimerViewModel {
         stopwatchElapsedSeconds = 0
         stopwatchElapsedAtRunStart = 0
         stopwatchRunStartDate = nil
+        if isAutomaticPomodoroFlow && !forceFinishPomodoro {
+            switch phase {
+            case .breakTime:
+                if timeRemaining <= 0 {
+                    phase = .awaitingNextSet
+                    onBreakFinished?()
+                    advanceAutomaticStudy(after: transitionDate)
+                } else {
+                    resumeTimer(at: transitionDate)
+                }
+            case .awaitingNextSet:
+                advanceAutomaticStudy(after: transitionDate)
+            case .finished:
+                autoFlowBackgroundEnteredAt = nil
+                onPomodoroFlowFinished?()
+            case .study: break
+            }
+        }
+    }
+
+    private func advanceAutomaticStudy(after transitionDate: Date) {
+        if !startPendingAutomaticStudy(at: transitionDate) {
+            // セット位置・flow ID・報酬はそのまま保持。集中計測はまだ開始しない。
+            autoFlowBackgroundEnteredAt = nil
+            persistSession(at: now())
+        }
     }
 
     /// 報酬callbackは通さず、最後の離脱を除外した記録だけを確定する。
@@ -770,6 +971,8 @@ final class TimerViewModel {
         stopwatchElapsedSeconds = 0
         stopwatchElapsedAtRunStart = 0
         stopwatchRunStartDate = nil
+        autoFlowBackgroundEnteredAt = nil
+        if isAutomaticPomodoroFlow { onPomodoroFlowFinished?() }
     }
 
     /// 5分離脱と通常終了予定のうち、先に成立する方を優先する。
@@ -811,7 +1014,17 @@ final class TimerViewModel {
         guard notificationService.notificationsEnabled,
               mode != .stopwatch,
               let endDate else { return }
-        if isStudyTime {
+        if mode == .pomodoro {
+            let message: PomodoroEndNotification
+            if phase == .study {
+                message = isAutomaticPomodoroFlow && currentSet < totalSets
+                    ? .studyStartsBreak : .studyCompleted
+            } else {
+                message = !isAutomaticPomodoroFlow ? .breakCompleted
+                    : (automaticStudyEnvironmentReady ? .breakStartsStudy : .breakAwaitsTimerScreen)
+            }
+            notificationService.schedulePomodoroEnd(at: endDate, message: message)
+        } else if isStudyTime {
             notificationService.scheduleStudyEnd(at: endDate)
         } else {
             notificationService.scheduleBreakEnd(at: endDate)
@@ -842,7 +1055,8 @@ final class TimerViewModel {
             validFocusSeconds: lastValidFocusSeconds,
             endReason: reason,
             categoryID: selectedCategoryID,
-            focusMethod: mode.focusMethod
+            focusMethod: mode.focusMethod,
+            pomodoroFlowID: pomodoroFlowID
         ))
         deliverPendingFocusSessions()
     }

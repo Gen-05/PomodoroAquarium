@@ -17,6 +17,8 @@ final class RewardHistoryEntry {
     var currentOwnedCount: Int
     var rewardSessionID: UUID?
     var rewardBatchIndex: Int?
+    /// 自動Pomodoroの表示グループ。付与を識別するsession IDとは分離する。
+    var pomodoroFlowID: UUID?
 
     init(
         id: UUID = UUID(),
@@ -128,6 +130,7 @@ enum RewardHistoryService {
         acquiredAt: Date = Date(),
         sessionID: UUID? = nil,
         batchIndex: Int? = nil,
+        pomodoroFlowID: UUID? = nil,
         saveImmediately: Bool = true,
         in context: ModelContext
     ) throws -> RewardHistoryEntry {
@@ -146,6 +149,7 @@ enum RewardHistoryService {
         )
         entry.rewardSessionID = sessionID
         entry.rewardBatchIndex = batchIndex
+        entry.pomodoroFlowID = pomodoroFlowID
         context.insert(entry)
         if saveImmediately {
             try pruneIfNeeded(in: context)

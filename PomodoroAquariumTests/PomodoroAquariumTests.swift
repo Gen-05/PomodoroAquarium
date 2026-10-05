@@ -715,6 +715,78 @@ struct PomodoroAquariumTests {
         #expect(viewModel.shouldConfirmNextSet)
     }
 
+    @Test @MainActor func endRunningPomodoroBreakUsesExistingNextSetPreparation() {
+        let clock = TestClock()
+        let notifications = TestNotificationService()
+        let viewModel = TimerViewModel(
+            studyTime: 25, breakTime: 5, totalSets: 2, now: { clock.now },
+            sessionStore: makeTimerStore(), notificationService: notifications
+        )
+        var studyCompletions = 0
+        var breakCompletions = 0
+        viewModel.onStudyFinished = { studyCompletions += 1 }
+        viewModel.onBreakFinished = { breakCompletions += 1 }
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.tick()
+        viewModel.beginPomodoroBreak()
+        clock.advance(by: 60)
+        #expect(viewModel.endPomodoroBreak())
+        #expect(viewModel.phase == .awaitingNextSet)
+        #expect(viewModel.shouldConfirmNextSet)
+        #expect(!viewModel.isRunning)
+        #expect(viewModel.currentSet == 1)
+        #expect(studyCompletions == 1)
+        #expect(breakCompletions == 1)
+        #expect(notifications.scheduled == nil)
+        #expect(!viewModel.endPomodoroBreak())
+        #expect(breakCompletions == 1)
+        #expect(viewModel.prepareNextSet())
+        #expect(viewModel.currentSet == 2)
+        #expect(viewModel.state == .idle)
+        #expect(!viewModel.isRunning)
+    }
+
+    @Test @MainActor func endBreakActionDoesNotAffectStudyTimerOrStopwatch() {
+        for mode in [TimerMode.pomodoro, .countdown, .stopwatch] {
+            let viewModel = TimerViewModel(studyTime: 25, breakTime: 5, sessionStore: makeTimerStore())
+            viewModel.selectMode(mode)
+            viewModel.resumeTimer()
+            #expect(!viewModel.endPomodoroBreak())
+            #expect(viewModel.isRunning)
+            #expect(viewModel.phase == .study)
+            viewModel.pauseTimer()
+            #expect(viewModel.state == .paused)
+        }
+    }
+
+    @Test @MainActor func breakContinuesUntilExplicitEndAction() {
+        let clock = TestClock()
+        let viewModel = TimerViewModel(
+            studyTime: 25, breakTime: 5, totalSets: 2,
+            now: { clock.now }, sessionStore: makeTimerStore()
+        )
+        var breakCompletions = 0
+        viewModel.onBreakFinished = { breakCompletions += 1 }
+        viewModel.resumeTimer()
+        clock.advance(by: 25 * 60)
+        viewModel.tick()
+        viewModel.beginPomodoroBreak()
+        clock.advance(by: 60)
+        viewModel.tick()
+        #expect(viewModel.timeRemaining == 240)
+        // 確認表示/キャンセルはView stateのみ。pause・終了・残り時間変更を呼ばない。
+        clock.advance(by: 10)
+        viewModel.tick()
+        #expect(viewModel.timeRemaining == 230)
+        #expect(viewModel.isRunning)
+        #expect(viewModel.phase == .breakTime)
+        #expect(breakCompletions == 0)
+        #expect(viewModel.endPomodoroBreak())
+        #expect(viewModel.phase == .awaitingNextSet)
+        #expect(breakCompletions == 1)
+    }
+
     @Test func inProcessBreakContinuesWhileTimerScreenIsNotVisible() {
         let clock = TestClock()
         let viewModel = TimerViewModel(

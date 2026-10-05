@@ -597,10 +597,15 @@ private struct SwimmingFishView: View {
         self.spriteAnimationPhase = AquariumFishMotion.spriteAnimationPhase(for: fishID)
         self.spriteTempoMultiplier = AquariumFishMotion.spriteTempoMultiplier(for: fishID)
 
+        let profile = AquariumFishMotion.movementProfile(for: species)
         let initialMotion = AquariumFishMotion.initialState(
             for: fishID,
-            profile: AquariumFishMotion.movementProfile(for: species),
-            speedVariationProfile: AquariumFishMotion.speedVariationProfile(for: species)
+            profile: profile,
+            speedVariationProfile: AquariumFishMotion.speedVariationProfile(for: species),
+            roamingBounds: profile.roamingStyle.bounds(
+                in: aquariumSize,
+                fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite)
+            )
         )
         self._motion = State(initialValue: initialMotion)
         self._spriteDirectionTransition = State(
@@ -650,6 +655,11 @@ private struct SwimmingFishView: View {
                 if isPaused {
                     simulationTiming.pause()
                 }
+            }
+            .onChange(of: aquariumSize) { _, size in
+                motion.updateRoamingBounds(motion.movementProfile.roamingStyle.bounds(
+                    in: size, fishSize: fishSize
+                ))
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(fishAccessibilityLabel)

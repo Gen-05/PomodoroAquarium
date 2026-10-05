@@ -29,6 +29,11 @@ struct PersistedTimerSession: Codable, Equatable {
     var validFocusElapsed: TimeInterval? = nil
     var validFocusUpdatedAt: Date? = nil
     var focusSessionID: UUID? = nil
+    var autoStartNextSet: Bool? = nil
+    var pomodoroFlowID: UUID? = nil
+    var autoFlowBackgroundEnteredAt: Date? = nil
+    var isTimerScreenVisible: Bool? = nil
+    var awaitsAutomaticStudyStart: Bool? = nil
 }
 
 /// 終了理由と有効時間を分離した、報酬計算とは独立した記録用結果。
@@ -39,6 +44,7 @@ struct FinalizedFocusSession: Codable, Equatable {
     let endReason: StudySessionEndReason
     let categoryID: String
     let focusMethod: FocusMethod
+    var pomodoroFlowID: UUID? = nil
 
     var durationMinutes: Int { validFocusSeconds / 60 }
 }
@@ -93,7 +99,12 @@ final class TimerSessionStore {
         totalSets: Int,
         validFocusElapsed: TimeInterval? = nil,
         validFocusUpdatedAt: Date? = nil,
-        focusSessionID: UUID? = nil
+        focusSessionID: UUID? = nil,
+        autoStartNextSet: Bool? = nil,
+        pomodoroFlowID: UUID? = nil,
+        autoFlowBackgroundEnteredAt: Date? = nil,
+        isTimerScreenVisible: Bool? = nil,
+        awaitsAutomaticStudyStart: Bool? = nil
     ) -> PersistedTimerSession {
         PersistedTimerSession(
             sessionIsActive: true,
@@ -114,7 +125,12 @@ final class TimerSessionStore {
             processIdentifier: processIdentifier,
             validFocusElapsed: validFocusElapsed,
             validFocusUpdatedAt: validFocusUpdatedAt,
-            focusSessionID: focusSessionID
+            focusSessionID: focusSessionID,
+            autoStartNextSet: autoStartNextSet,
+            pomodoroFlowID: pomodoroFlowID,
+            autoFlowBackgroundEnteredAt: autoFlowBackgroundEnteredAt,
+            isTimerScreenVisible: isTimerScreenVisible,
+            awaitsAutomaticStudyStart: awaitsAutomaticStudyStart
         )
     }
 
@@ -142,7 +158,7 @@ final class TimerSessionStore {
 
     func launchStatus(at _: Date) -> TimerSessionLaunchStatus {
         guard let session = load(), session.sessionIsActive else { return .none }
-        guard session.isStudyTime else {
+        guard session.isStudyTime || session.autoStartNextSet == true else {
             clearSession()
             return .none
         }
@@ -154,7 +170,7 @@ final class TimerSessionStore {
         // pause中、またはbackground突入時刻を保存済みのsessionだけを復元する。
         // 旧保存データや不整合sessionを正常完了へ救済すると報酬が誤付与されるため、
         // runningなのにbackgroundEnteredAtがない別processのsessionは安全側で中断する。
-        if !session.isRunning || session.backgroundEnteredAt != nil {
+        if !session.isRunning || session.backgroundEnteredAt != nil || !session.isStudyTime {
             return .recoverable(session)
         }
 

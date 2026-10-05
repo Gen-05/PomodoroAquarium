@@ -7,6 +7,7 @@ protocol TimerNotificationScheduling {
     func requestAuthorization(_ completion: @escaping @Sendable (Bool) -> Void)
     func scheduleStudyEnd(at date: Date)
     func scheduleBreakEnd(at date: Date)
+    func schedulePomodoroEnd(at date: Date, message: PomodoroEndNotification)
     func scheduleBackgroundLimitNotifications(
         warningAt: Date?,
         failureAt: Date?,
@@ -14,6 +15,35 @@ protocol TimerNotificationScheduling {
     )
     func cancelCurrentSessionNotification()
     func cancelBackgroundLimitNotifications(for sessionIdentifier: String?)
+}
+
+/// Pomodoroだけの通知文言。Timer/Stopwatchの既存API・文言は変えない。
+enum PomodoroEndNotification: Equatable {
+    case studyCompleted
+    case studyStartsBreak
+    case breakCompleted
+    case breakStartsStudy
+    case breakAwaitsTimerScreen
+
+    var isStudyEnd: Bool { self == .studyCompleted || self == .studyStartsBreak }
+    var title: String { isStudyEnd ? "集中終了！" : "休憩終了！" }
+    var body: String {
+        switch self {
+        case .studyCompleted: "おつかれさまでした。報酬を確認しましょう。"
+        case .studyStartsBreak: "休憩を開始します。"
+        case .breakCompleted: "次の集中セットを始められます。"
+        case .breakStartsStudy: "集中を再開します。"
+        case .breakAwaitsTimerScreen: "集中画面に戻ると次のセットを開始します。"
+        }
+    }
+}
+
+extension TimerNotificationScheduling {
+    // 既存のFake/無効schedulerも従来APIのまま利用できる。
+    func schedulePomodoroEnd(at date: Date, message: PomodoroEndNotification) {
+        if message.isStudyEnd { scheduleStudyEnd(at: date) }
+        else { scheduleBreakEnd(at: date) }
+    }
 }
 
 enum NotificationSettings {
@@ -99,6 +129,7 @@ final class NotificationService: NSObject, TimerNotificationScheduling,
     private let center: UNUserNotificationCenter
     private let defaults: UserDefaults
     private var schedulableBackgroundSessionIdentifiers = Set<String>()
+    private var schedulableSessionRequestID: UUID?
 
     var notificationsEnabled: Bool {
         NotificationSettings.isEnabled(in: defaults)
@@ -163,6 +194,11 @@ final class NotificationService: NSObject, TimerNotificationScheduling,
         )
     }
 
+    func schedulePomodoroEnd(at date: Date, message: PomodoroEndNotification) {
+        schedule(identifier: message.isStudyEnd ? Identifier.studyEnd : Identifier.breakEnd,
+                 title: message.title, body: message.body, at: date)
+    }
+
     func scheduleBackgroundLimitNotifications(
         warningAt: Date?,
         failureAt: Date?,
@@ -212,6 +248,7 @@ final class NotificationService: NSObject, TimerNotificationScheduling,
     }
 
     func cancelCurrentSessionNotification() {
+        schedulableSessionRequestID = nil
         center.removePendingNotificationRequests(withIdentifiers: Identifier.sessionNotifications)
         center.removeDeliveredNotifications(withIdentifiers: Identifier.sessionNotifications)
     }
@@ -248,10 +285,17 @@ final class NotificationService: NSObject, TimerNotificationScheduling,
     private func schedule(identifier: String, title: String, body: String, at date: Date) {
         cancelCurrentSessionNotification()
         guard notificationsEnabled, date > Date() else { return }
+        let requestID = UUID()
+        schedulableSessionRequestID = requestID
 
         authorizationStatus { [weak self] status in
-            guard case .authorized = status, let self else { return }
-            self.addNotification(identifier: identifier, title: title, body: body, at: date)
+            Task { @MainActor [weak self] in
+                guard case .authorized = status, let self,
+                      self.notificationsEnabled,
+                      self.schedulableSessionRequestID == requestID else { return }
+                // 画面移動による再予約後に、古い許可callbackの文言で上書きしない。
+                self.addNotification(identifier: identifier, title: title, body: body, at: date)
+            }
         }
     }
 

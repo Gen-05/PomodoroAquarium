@@ -16,6 +16,7 @@ enum FishRewardBatchService {
     static func grant(
         sessionID: UUID,
         to player: Player,
+        pomodoroFlowID: UUID? = nil,
         on date: Date = Date(),
         calendar: Calendar = .current,
         defaults: UserDefaults = .standard,
@@ -34,7 +35,8 @@ enum FishRewardBatchService {
             ? min(max(0, count), claimableCount(for: player)) : 0
         return try performClaim(
             count: grantNow, batchID: sessionID, record: record, to: player,
-            on: date, calendar: calendar, defaults: defaults, in: context, draw: draw
+            on: date, calendar: calendar, defaults: defaults, in: context, draw: draw,
+            pomodoroFlowID: pomodoroFlowID
         )
     }
 
@@ -77,7 +79,8 @@ enum FishRewardBatchService {
     private static func performClaim(
         count: Int, batchID: UUID, record: FocusSessionRecord?, to player: Player,
         on date: Date, calendar: Calendar, defaults: UserDefaults, in context: ModelContext,
-        draw: @MainActor (FishRewardService.RarityProbabilities) -> FishSpecies?
+        draw: @MainActor (FishRewardService.RarityProbabilities) -> FishSpecies?,
+        pomodoroFlowID: UUID? = nil
     ) throws -> FishRewardBatch? {
         // 呼び出し元の保存済み時間・進捗をrollbackの対象にしない。
         let previousDayMinutes = try PreviousDayFocusDurationService.synchronizeMinutes(
@@ -108,7 +111,8 @@ enum FishRewardBatchService {
                 results.append(result)
                 let history = try RewardHistoryService.record(
                     result: result, pointDelta: 0, acquiredAt: date,
-                    sessionID: batchID, batchIndex: index, saveImmediately: false, in: context
+                    sessionID: batchID, batchIndex: index, pomodoroFlowID: pomodoroFlowID,
+                    saveImmediately: false, in: context
                 )
                 historyIDs.append(history.id)
             }
@@ -163,6 +167,9 @@ enum FishRewardBatchService {
     /// 同じ確定結果の再表示だけを行う。抽選・所持数更新は一切しない。
     static func latestUnacknowledgedBatch(in context: ModelContext) throws -> FishRewardBatch? {
         guard let latest = try RewardHistoryService.latestUnacknowledged(in: context) else { return nil }
+        if let flowID = latest.pomodoroFlowID {
+            return try batch(forPomodoroFlow: flowID, in: context)
+        }
         let entries: [RewardHistoryEntry]
         if let sessionID = latest.rewardSessionID {
             entries = try context.fetch(FetchDescriptor<RewardHistoryEntry>(
@@ -177,6 +184,19 @@ enum FishRewardBatchService {
             results: entries.map { RewardHistorySnapshot(entry: $0).replayResult() },
             historyIDs: entries.map(\.id)
         )
+    }
+
+    /// 保存済みの魚をflow全体で表示するだけ。再抽選・再付与はしない。
+    static func batch(forPomodoroFlow flowID: UUID, in context: ModelContext) throws -> FishRewardBatch? {
+        let entries = try context.fetch(FetchDescriptor<RewardHistoryEntry>(
+            predicate: #Predicate { $0.pomodoroFlowID == flowID && !$0.isAcknowledged },
+            sortBy: [SortDescriptor(\RewardHistoryEntry.acquiredAt),
+                     SortDescriptor(\RewardHistoryEntry.rewardBatchIndex)]
+        ))
+        guard !entries.isEmpty else { return nil }
+        return FishRewardBatch(id: flowID,
+                               results: entries.map { RewardHistorySnapshot(entry: $0).replayResult() },
+                               historyIDs: entries.map(\.id))
     }
 
     static func acknowledge(_ ids: [UUID], in context: ModelContext) throws {

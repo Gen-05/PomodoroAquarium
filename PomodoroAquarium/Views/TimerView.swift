@@ -309,9 +309,18 @@ struct TimerView: View {
             ),
             totalSets: configuredSetCount
         )
+        if viewModel == nil {
+            tempViewModel.selectCategory(FocusCategorySelectionStore.initialID(
+                defaults: defaults,
+                isTutorial: coreTutorial?.isActive == true || coreTutorial?.isPreviewMode == true
+            ))
+        }
         self._viewModel = State(initialValue: tempViewModel)
         self._completionReward = State(initialValue: nil)
         self._pendingCompletionReward = State(initialValue: nil)
+#if DEBUG
+        TimerNavigationDiagnostics.record("TimerView.init", model: tempViewModel)
+#endif
     }
     
     @State private var viewModel: TimerViewModel
@@ -319,12 +328,17 @@ struct TimerView: View {
     @State private var pendingFishRewardBatches: [FishRewardBatch] = []
     @State private var lastFinalizedRewardBatch: FishRewardBatch?
     @State private var lastFinalizedPointReward = 0
+    @State private var lastFinalizedSessionID: UUID?
+    @State private var presentedPomodoroFlowID: UUID?
+    @State private var isClosingStudyFlow = false
     @State private var completionReward: StudyCompletionReward?
     @State private var pendingCompletionReward: StudyCompletionReward?
     @State private var rewardHistoryIDs: [UUID] = []
     @State private var studyFinishedMinutes: Int?
     @State private var studyFinishedEndReason: StudySessionEndReason = .completed
     @State private var showsEndConfirmation = false
+    @State private var showsBreakEndConfirmation = false
+    @State private var breakEndConfirmationID: UUID?
     @State private var showsTimeSettings = false
     @State private var showsFocusRules = false
     @State private var showsFocusCategorySelection = false
@@ -461,24 +475,34 @@ struct TimerView: View {
             }
         }
         .toolbarBackground(.hidden, for: .navigationBar)
+        .overlay(alignment: .top) { navigationRegressionControls }
         .toolbarColorScheme(.dark, for: .navigationBar)
         .preference(key: TimerFocusDisplayPreferenceKey.self,
                     value: focusDisplay.isFocusDisplayMode || isStudyStartQuietOverlay)
         .onAppear {
+            traceTimerNavigation("TimerView.onAppear")
             isTimerViewVisible = true
 #if DEBUG
             prepareShoreWaveVisualTestIfNeeded()
 #endif
-            _ = try? FocusCategoryService.createDefaultsIfNeeded(in: modelContext)
-            ensureSelectedFocusCategoryIsActive()
+            initializeFocusCategorySelection()
             configureStudyCompletion()
+            configurePomodoroAutoStart()
             prepareCoreTutorialStudyIfNeeded()
             viewModel.restorePersistedSessionIfNeeded()
+            traceTimerNavigation("TimerView.after restore")
+            viewModel.setAppActive(scenePhase == .active)
+            viewModel.setTimerScreenVisible(true)
             viewModel.synchronizeTime()
+            presentAutomaticPomodoroRewardsIfFinished()
             focusDisplay.update(context: focusDisplayContext)
         }
         .onChange(of: focusDisplayContext) { _, context in
             focusDisplay.update(context: context)
+        }
+        .onChange(of: viewModel.currentSet) { _, _ in
+            focusDisplay.reset()
+            focusDisplay.update(context: focusDisplayContext)
         }
         .task(id: focusDisplay.timeoutID) {
             guard let id = focusDisplay.timeoutID, let deadline = focusDisplay.deadline else { return }
@@ -510,6 +534,8 @@ struct TimerView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { studyStartPresentation.reset() }
+            if phase != .active { viewModel.setAppActive(false) }
+            if phase == .active { timerScreenDidBecomeActive() }
         }
         .onChange(of: viewModel.state) { _, state in
             if !studyStartPresentation.canContinue(state: state, phase: viewModel.phase) {
@@ -517,20 +543,33 @@ struct TimerView: View {
             }
         }
         .onChange(of: viewModel.phase) { _, phase in
+            if phase != .breakTime {
+                showsBreakEndConfirmation = false
+                breakEndConfirmationID = nil
+            }
             if !studyStartPresentation.canContinue(state: viewModel.state, phase: phase) {
                 studyStartPresentation.reset()
             }
         }
         .onChange(of: viewModel.shouldPresentBackgroundFailureAlert) { _, isPresented in
             if !isPresented && (pendingCompletionReward != nil || !pendingFishRewardBatches.isEmpty) {
-                presentPendingCompletionReward()
+                if viewModel.isAutomaticPomodoroFlow {
+                    presentAutomaticPomodoroRewardsIfFinished()
+                } else {
+                    presentPendingCompletionReward()
+                }
             }
         }
         .onChange(of: activeFocusCategoryIDs) { _, _ in
             ensureSelectedFocusCategoryIsActive()
         }
         .onDisappear {
+            traceTimerNavigation("TimerView.onDisappear")
+            // app backgroundとアプリ内Navigationを区別する。
+            if scenePhase == .active { viewModel.setTimerScreenVisible(false) }
             isTimerViewVisible = false
+            showsBreakEndConfirmation = false
+            breakEndConfirmationID = nil
             studyStartPresentation.reset()
             studyStartControlsOpacity = 1
             studyStartIsRevealingRunningUI = false
@@ -585,7 +624,7 @@ struct TimerView: View {
         )) {
             Button("今回は終了する", role: .cancel) {
                 viewModel.finishPomodoroSessionAfterBreak()
-                dismiss()
+                closeCompletedStudyFlow()
             }
             Button("次のセットを始める") {
                 viewModel.startNextSet()
@@ -610,13 +649,7 @@ struct TimerView: View {
         .sheet(
             isPresented: $showsTimeSettings
         ) {
-            TimerTimeSettingsSheet(
-                mode: viewModel.mode,
-                studyMinutes: configuredStudyMinutes(for: viewModel.mode),
-                breakMinutes: Int(storedPomodoroBreakDuration) ?? breakTime,
-                setCount: pomodoroSetCount,
-                onSave: saveTimeSettings
-            )
+            timeSettingsSheet
         }
         .sheet(isPresented: $showsFocusRules) {
             StudyFocusRulesSheet()
@@ -625,7 +658,7 @@ struct TimerView: View {
             FocusCategorySelectionSheet(
                 selectedCategoryID: viewModel.selectedCategoryID
             ) { categoryID in
-                viewModel.selectCategory(categoryID)
+                selectFocusCategory(categoryID)
             }
         }
         .sheet(
@@ -682,6 +715,16 @@ struct TimerView: View {
         }
     }
 
+    private func confirmBreakEnd() {
+        guard breakEndConfirmationID != nil else { return }
+        // 先に確認要求を消費し、同じ確認から終了処理を二度呼ばない。
+        breakEndConfirmationID = nil
+        guard viewModel.mode == .pomodoro else { return }
+        guard viewModel.phase == .breakTime else { return }
+        guard viewModel.isRunning else { return }
+        viewModel.endPomodoroBreak()
+    }
+
     private func handlePrimaryTimerAction() {
         if coreTutorial?.isActive == true {
             guard coreTutorial?.step == .waitingForStudyStartTap,
@@ -734,6 +777,12 @@ struct TimerView: View {
 #endif
 
     private func configureStudyCompletion() {
+        viewModel.onPomodoroFlowFinished = {
+            Task { @MainActor in
+                await Task.yield()
+                presentAutomaticPomodoroRewardsIfFinished()
+            }
+        }
         viewModel.onFocusSessionFinalized = { session in
             do {
                 // 過去日の復元結果に、今日の移行用累計を混ぜない。
@@ -749,13 +798,15 @@ struct TimerView: View {
                     sessionID: session.id, for: player, in: modelContext
                 )
                 lastFinalizedPointReward = pointReward
+                lastFinalizedSessionID = session.id
                 try DailyFishProgressService.process(
                     sessionID: session.id,
                     for: player,
                     in: modelContext
                 )
                 let batch = try FishRewardBatchService.grant(
-                    sessionID: session.id, to: player, defaults: defaults, in: modelContext
+                    sessionID: session.id, to: player, pomodoroFlowID: session.pomodoroFlowID,
+                    defaults: defaults, in: modelContext
                 )
                 lastFinalizedRewardBatch = batch
                 if let batch {
@@ -765,12 +816,13 @@ struct TimerView: View {
                 // failureにはonStudyFinishedが来ないが、確定済み有効秒数のptは失わない。
                 if session.endReason == .backgroundLimitExceeded || session.endReason == .interrupted {
                     if pointReward > 0 || batch != nil {
-                        pendingCompletionReward = StudyCompletionReward(
+                        queueCompletionReward(StudyCompletionReward(
                             studyReward: pointReward, streakReward: 0,
                             streakDays: player.studyStreakDays, didEarnFish: batch != nil
-                        )
+                        ), minutes: session.durationMinutes, sessionID: session.id,
+                           flowID: session.pomodoroFlowID)
                     }
-                    if session.endReason == .interrupted {
+                    if session.endReason == .interrupted && session.pomodoroFlowID == nil {
                         Task { @MainActor in
                             await Task.yield()
                             presentPendingCompletionReward()
@@ -787,17 +839,18 @@ struct TimerView: View {
             defer {
                 lastFinalizedRewardBatch = nil
                 lastFinalizedPointReward = 0
+                lastFinalizedSessionID = nil
             }
             let completedStudyMinutes = viewModel.lastCompletedStudyMinutes
             studyFinishedEndReason = viewModel.lastStudySessionEndReason ?? .completed
-            studyFinishedMinutes = completedStudyMinutes
+            if !viewModel.isAutomaticPomodoroFlow { studyFinishedMinutes = completedStudyMinutes }
             guard let player else {
-                pendingCompletionReward = StudyCompletionReward(
+                queueStudyCompletionReward(StudyCompletionReward(
                     studyReward: 0,
                     streakReward: 0,
                     streakDays: 0,
                     didEarnFish: false
-                )
+                ), minutes: completedStudyMinutes)
                 return
             }
 
@@ -811,7 +864,7 @@ struct TimerView: View {
                         id: UUID(), results: [fishResult], historyIDs: []
                     ))
                 }
-                pendingCompletionReward = StudyCompletionReward(
+                queueStudyCompletionReward(StudyCompletionReward(
                     studyReward: CurrencyService.studyCompletionReward(
                         for: CoreTutorialRewardService.studyMinutes,
                         todayStudyMinutesBeforeCompletion: 0
@@ -819,7 +872,7 @@ struct TimerView: View {
                     streakReward: 0,
                     streakDays: player.studyStreakDays,
                     didEarnFish: fishResult != nil
-                )
+                ), minutes: completedStudyMinutes)
                 return
             }
 
@@ -831,12 +884,12 @@ struct TimerView: View {
             guard StudyCompletionReward.isEligibleForExistingRewards(
                 forStudyMinutes: completedStudyMinutes
             ) else {
-                pendingCompletionReward = StudyCompletionReward(
+                queueStudyCompletionReward(StudyCompletionReward(
                     studyReward: awardedStudyReward,
                     streakReward: 0,
                     streakDays: player.studyStreakDays,
                     didEarnFish: !pendingFishRewardBatches.isEmpty
-                )
+                ), minutes: completedStudyMinutes)
                 return
             }
 
@@ -854,23 +907,82 @@ struct TimerView: View {
                 )
             }
 
-            pendingCompletionReward = StudyCompletionReward(
+            queueStudyCompletionReward(StudyCompletionReward(
                 studyReward: awardedStudyReward,
                 streakReward: streakReward,
                 streakDays: streakUpdate?.streakDays ?? player.studyStreakDays,
                 didEarnFish: !pendingFishRewardBatches.isEmpty
-            )
+            ), minutes: completedStudyMinutes)
         }
         viewModel.onBreakFinished = nil
     }
 
-    private func saveTimeSettings(studyMinutes: Int, breakMinutes: Int, setCount: Int) {
+    private var timeSettingsSheet: some View {
+        TimerTimeSettingsSheet(
+            mode: viewModel.mode,
+            studyMinutes: configuredStudyMinutes(for: viewModel.mode),
+            breakMinutes: Int(storedPomodoroBreakDuration) ?? breakTime,
+            setCount: pomodoroSetCount,
+            autoStartNextSet: PomodoroAutoStartSettings.isEnabled(in: defaults),
+            onSave: saveTimeSettings
+        )
+    }
+
+    private func configurePomodoroAutoStart() {
+        viewModel.configureAutoStartNextSet(
+            coreTutorial?.isActive != true && coreTutorial?.isPreviewMode != true &&
+            PomodoroAutoStartSettings.isEnabled(in: defaults)
+        )
+    }
+
+    private func queueStudyCompletionReward(_ reward: StudyCompletionReward, minutes: Int) {
+        queueCompletionReward(reward, minutes: minutes, sessionID: lastFinalizedSessionID,
+                              flowID: viewModel.pomodoroFlowID)
+    }
+
+    private func queueCompletionReward(_ reward: StudyCompletionReward, minutes: Int,
+                                       sessionID: UUID?, flowID: UUID?) {
+        if let flowID, let sessionID {
+            PomodoroFlowRewardStore.append(reward, minutes: minutes, sessionID: sessionID,
+                                          flowID: flowID, defaults: defaults)
+        } else {
+            pendingCompletionReward = reward
+        }
+    }
+
+    private func presentAutomaticPomodoroRewardsIfFinished() {
+        guard viewModel.isAutomaticPomodoroFlow, viewModel.phase == .finished,
+              isTimerViewVisible, scenePhase == .active, !viewModel.shouldPresentBackgroundFailureAlert,
+              let flowID = viewModel.pomodoroFlowID, presentedPomodoroFlowID != flowID else { return }
+        traceTimerNavigation("auto rewards: finished flow, visit marker differs")
+        let batch: FishRewardBatch?
+        do {
+            batch = try FishRewardBatchService.batch(forPomodoroFlow: flowID, in: modelContext)
+        } catch { return }
+        presentedPomodoroFlowID = flowID
+        // 所持魚・履歴は既に確定済み。各setを同じ既存複数魚Viewへまとめるだけ。
+        pendingFishRewardBatches = batch.map { [$0] } ?? []
+        if let summary = PomodoroFlowRewardStore.load(flowID: flowID, defaults: defaults) {
+            pendingCompletionReward = summary.completionReward
+            studyFinishedMinutes = summary.minutes
+        } else {
+            traceTimerNavigation("auto rewards: no saved summary; present pending")
+            presentPendingCompletionReward()
+        }
+    }
+
+    private func saveTimeSettings(studyMinutes: Int, breakMinutes: Int, setCount: Int,
+                                  autoStartNextSet: Bool) {
         if viewModel.mode == .pomodoro {
             storedPomodoroStudyDuration = String(studyMinutes)
             if PomodoroBreakConfiguration.isBreakSelectionEnabled(setCount: setCount) {
                 storedPomodoroBreakDuration = String(breakMinutes)
             }
             pomodoroSetCount = setCount
+            if coreTutorial?.isActive != true && coreTutorial?.isPreviewMode != true {
+                PomodoroAutoStartSettings.save(autoStartNextSet, in: defaults)
+                configurePomodoroAutoStart()
+            }
         } else if viewModel.mode == .countdown {
             storedTimerDuration = String(studyMinutes)
         }
@@ -915,6 +1027,7 @@ struct TimerView: View {
     }
 
     private func presentPendingCompletionReward() {
+        guard !viewModel.defersPomodoroRewards else { return }
         if let pendingCompletionReward {
             completionReward = pendingCompletionReward
             self.pendingCompletionReward = nil
@@ -924,6 +1037,7 @@ struct TimerView: View {
     }
 
     private func presentPendingFishReward() {
+        guard !viewModel.defersPomodoroRewards else { return }
         guard fishRewardBatch == nil else { return }
         if !pendingFishRewardBatches.isEmpty {
             let batch = pendingFishRewardBatches.removeFirst()
@@ -945,18 +1059,70 @@ struct TimerView: View {
     }
 
     private func finishStudyFlow() {
+        guard !isClosingStudyFlow else { return }
+        traceTimerNavigation("finishStudyFlow: pending=\(pendingFishRewardBatches.count)")
+        if let flowID = presentedPomodoroFlowID {
+            PomodoroFlowRewardStore.clear(flowID: flowID, defaults: defaults)
+        }
         if coreTutorial?.step == .reward {
             coreTutorial?.didDismissReward()
             isCompletingCoreTutorialStudy = false
             restoreStoredTimerConfiguration()
+            isClosingStudyFlow = true
+            traceTimerNavigation("dismiss: tutorial reward finished")
             dismiss()
             return
         }
         if viewModel.shouldBeginPomodoroBreak {
             viewModel.beginPomodoroBreak()
         } else {
-            dismiss()
+            closeCompletedStudyFlow()
         }
+    }
+
+    private func closeCompletedStudyFlow() {
+        guard !isClosingStudyFlow, viewModel.finishCompletedSessionPresentation() else { return }
+        isClosingStudyFlow = true
+        // 前visitのsheet/onDismissや非同期callbackを、次のNavigationの条件に残さない。
+        presentedPomodoroFlowID = nil
+        pendingCompletionReward = nil
+        completionReward = nil
+        studyFinishedMinutes = nil
+        pendingFishRewardBatches = []
+        fishRewardBatch = nil
+        rewardHistoryIDs = []
+        lastFinalizedRewardBatch = nil
+        lastFinalizedPointReward = 0
+        lastFinalizedSessionID = nil
+        traceTimerNavigation("cleanup completed; dismiss once")
+        dismiss()
+    }
+
+    private func traceTimerNavigation(_ event: String) {
+#if DEBUG
+        TimerNavigationDiagnostics.record(event, model: viewModel)
+#endif
+    }
+
+    private func timerScreenDidBecomeActive() {
+        if isTimerViewVisible {
+            viewModel.setAppActive(true)
+            viewModel.setTimerScreenVisible(true)
+        }
+        presentAutomaticPomodoroRewardsIfFinished()
+    }
+
+    @ViewBuilder
+    private var navigationRegressionControls: some View {
+#if DEBUG
+        if TimerNavigationDiagnostics.isEnabled {
+            Button("テスト: phase完了") {
+                TimerNavigationDiagnostics.advancePhase(of: viewModel)
+            }
+            .accessibilityIdentifier("timer.testCompletePhase")
+            .padding(.top, 50)
+        }
+#endif
     }
 
     private var isCoreTutorialStudy: Bool {
@@ -1116,6 +1282,24 @@ struct TimerView: View {
             : formatTime(viewModel.displayedSeconds)
     }
 
+    private var pomodoroBreakEndButton: some View {
+        Button("休憩を終える") {
+            guard !showsBreakEndConfirmation else { return }
+            breakEndConfirmationID = UUID()
+            showsBreakEndConfirmation = true
+        }
+        .buttonStyle(AquariumPrimaryButtonStyle())
+        .disabled(showsBreakEndConfirmation)
+        .alert("休憩を終了しますか？", isPresented: $showsBreakEndConfirmation) {
+            Button("キャンセル", role: .cancel) {
+                breakEndConfirmationID = nil
+            }
+            Button("休憩を終える", role: .destructive) {
+                confirmBreakEnd()
+            }
+        }
+    }
+
     @ViewBuilder
     private var sessionActionControls: some View {
         if viewModel.state == .paused {
@@ -1128,6 +1312,8 @@ struct TimerView: View {
                 showsEndConfirmation = true
             }
             .buttonStyle(AquariumSecondaryButtonStyle())
+        } else if viewModel.mode == .pomodoro && viewModel.phase == .breakTime && viewModel.isRunning {
+            pomodoroBreakEndButton
         } else if viewModel.isRunning || studyStartIsRevealingRunningUI {
             Button("一時停止") {
                 handlePrimaryTimerAction()
@@ -1245,6 +1431,22 @@ struct TimerView: View {
         .contentShape(Capsule())
     }
 
+    private func selectFocusCategory(_ categoryID: String) {
+        FocusCategorySelectionStore.select(
+            categoryID, in: viewModel, categories: focusCategories, defaults: defaults,
+            isTutorial: coreTutorial?.isActive == true || coreTutorial?.isPreviewMode == true
+        )
+    }
+
+    private func initializeFocusCategorySelection() {
+        // Queryへの反映待ちで、保存済みのマイカテゴリを不存在と誤判定しない。
+        guard let categories = try? FocusCategoryService.createDefaultsIfNeeded(in: modelContext) else { return }
+        FocusCategorySelectionStore.restore(
+            to: viewModel, categories: categories, defaults: defaults,
+            isTutorial: coreTutorial?.isActive == true || coreTutorial?.isPreviewMode == true
+        )
+    }
+
     private func ensureSelectedFocusCategoryIsActive() {
         let resolvedID = FocusCategoryService.resolvedSelectionID(
             viewModel.selectedCategoryID,
@@ -1333,6 +1535,7 @@ struct TimerView: View {
             ),
             totalSets: setCount
         )
+        configurePomodoroAutoStart()
     }
 }
 
@@ -1715,7 +1918,7 @@ private struct StudyFocusRulesSheet: View {
 
 private struct TimerTimeSettingsSheet: View {
     let mode: TimerMode
-    let onSave: (Int, Int, Int) -> Void
+    let onSave: (Int, Int, Int, Bool) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var studyMinutes: Int
@@ -1724,16 +1927,19 @@ private struct TimerTimeSettingsSheet: View {
     @State private var timerMinuteComponent: Int
     @State private var setCount: Int
     @State private var retainedBreakMinutes: Int
+    @State private var autoStartNextSet: Bool
 
     init(
         mode: TimerMode,
         studyMinutes: Int,
         breakMinutes: Int,
         setCount: Int,
-        onSave: @escaping (Int, Int, Int) -> Void
+        autoStartNextSet: Bool,
+        onSave: @escaping (Int, Int, Int, Bool) -> Void
     ) {
         self.mode = mode
         self.onSave = onSave
+        _autoStartNextSet = State(initialValue: autoStartNextSet)
         let editableTimerMinutes = min(
             max(studyMinutes, CountdownDurationConfiguration.totalMinutesRange.lowerBound),
             CountdownDurationConfiguration.totalMinutesRange.upperBound
@@ -1786,6 +1992,7 @@ private struct TimerTimeSettingsSheet: View {
                             suffix: "セット"
                         )
                     }
+                    autoStartSetting
                 } else {
                     durationPicker(
                         title: "集中時間",
@@ -1835,14 +2042,25 @@ private struct TimerTimeSettingsSheet: View {
                         let savedStudyMinutes = mode == .countdown
                             ? timerTotalMinutes
                             : studyMinutes
-                        onSave(savedStudyMinutes, breakMinutes, setCount)
+                        onSave(savedStudyMinutes, breakMinutes, setCount, autoStartNextSet)
                         dismiss()
                     }
                     .disabled(!canSave)
                 }
             }
         }
-        .presentationDetents([.height(300)])
+        .presentationDetents([.height(mode == .pomodoro ? 420 : 300)])
+    }
+
+    private var autoStartSetting: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("超集中モード", isOn: $autoStartNextSet)
+            Text(PomodoroAutoStartSettings.explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 8)
     }
 
     private var timerTotalMinutes: Int {
