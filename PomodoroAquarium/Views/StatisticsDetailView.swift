@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 棒グラフの選択bucketだけを表示する。将来Plus限定にする際は入口で制御できる。
+/// 全期間のbucket詳細を共通表示する。detail.requiresPlusを将来の入口判定へ接続できる。
 struct StatisticsDetailView: View {
     let detail: FocusBucketDetail
 
@@ -19,6 +19,15 @@ struct StatisticsDetailView: View {
                         Text(durationText(detail.totalMinutes))
                             .font(.title.bold())
                             .monospacedDigit()
+                        if detail.period == .year {
+                            HStack(spacing: 20) {
+                                Text("集中した日 \(detail.focusedDayCount)日")
+                                Text("セッション \(detail.sessionCount)回")
+                            }
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                        }
                     }
 
                     if detail.sessions.isEmpty {
@@ -51,28 +60,21 @@ struct StatisticsDetailView: View {
 
                         Divider()
                         detailSection("セッション") {
-                            ForEach(detail.sessions) { session in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(alignment: .firstTextBaseline) {
-                                        Text("\(timeText(session.startedAt))–\(timeText(session.completedAt))")
-                                            .font(.subheadline.weight(.semibold))
-                                            .monospacedDigit()
-                                        Spacer(minLength: 8)
-                                        Text(durationText(session.durationMinutes))
-                                            .monospacedDigit()
+                            if detail.period == .year {
+                                ForEach(detail.sessionDaySections) { section in
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        Text(dateText(section.day, pattern: "M月d日"))
+                                            .font(.subheadline.bold())
+                                        ForEach(section.sessions) { session in
+                                            sessionRow(session)
+                                        }
                                     }
-                                    HStack(spacing: 6) {
-                                        Circle()
-                                            .fill(session.category.swiftUIColor)
-                                            .frame(width: 8, height: 8)
-                                        Text(session.category.name)
-                                        Text("・")
-                                        Text(session.method.displayName)
-                                    }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    Divider()
                                 }
-                                .accessibilityElement(children: .combine)
+                            } else {
+                                ForEach(detail.sessions) { session in
+                                    sessionRow(session)
+                                }
                             }
                         }
                     }
@@ -101,8 +103,65 @@ struct StatisticsDetailView: View {
         case .month:
             "\(dateText(detail.bucket.start, pattern: "M月d日"))の詳細"
         case .year:
-            "\(dateText(detail.bucket.start, pattern: "M月"))の詳細"
+            dateText(detail.bucket.start, pattern: "yyyy年M月")
         }
+    }
+
+    private func sessionRow(_ session: FocusSessionDetail) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(sessionTimeRange(session))
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                Spacer(minLength: 8)
+                Text(sessionDurationText(session))
+                    .monospacedDigit()
+            }
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(session.category.swiftUIColor)
+                    .frame(width: 8, height: 8)
+                Text(session.category.name)
+                Text("・")
+                if detail.period == .year {
+                    Circle()
+                        .fill(methodColor(session.method))
+                        .frame(width: 6, height: 6)
+                }
+                Text(session.method.displayName)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if let continuationText = session.displaySlice?.continuationText {
+                Text(continuationText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func sessionTimeRange(_ session: FocusSessionDetail) -> String {
+        if detail.period == .day, session.record.sessionStartedAt != nil {
+            let dayStart = Calendar.current.startOfDay(for: detail.bucket.start)
+            let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart)
+            let endText = session.completedAt == dayEnd ? "24:00" : timeText(session.completedAt)
+            return "\(timeText(session.startedAt))–\(endText)"
+        }
+        // 日をまたぐsessionも、日付Sectionに対して開始日時が曖昧にならないようにする。
+        if !Calendar.current.isDate(session.startedAt, inSameDayAs: session.completedAt) {
+            return "\(dateText(session.startedAt, pattern: "M/d HH:mm"))–\(dateText(session.completedAt, pattern: "M/d HH:mm"))"
+        }
+        return "\(timeText(session.startedAt))–\(timeText(session.completedAt))"
+    }
+
+    private func sessionDurationText(_ session: FocusSessionDetail) -> String {
+        guard detail.period == .year || detail.period == .day else { return durationText(session.durationMinutes) }
+        let seconds = session.durationSeconds % 60
+        guard seconds > 0 else { return durationText(session.durationMinutes) }
+        return session.durationMinutes > 0
+            ? "\(durationText(session.durationMinutes))\(seconds)秒"
+            : "\(seconds)秒"
     }
 
     private func detailSection<Content: View>(

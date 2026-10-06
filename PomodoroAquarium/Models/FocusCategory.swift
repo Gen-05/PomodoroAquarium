@@ -328,6 +328,8 @@ enum FocusMethod: String, Codable, CaseIterable, Identifiable {
 final class FocusSessionRecord {
     @Attribute(.unique) var id: UUID
     var completedAt: Date
+    /// 実際の初回study開始日時。旧履歴は不明な開始日を推測せず完了日時へfallback。
+    var sessionStartedAt: Date?
     var durationMinutes: Int
     /// 新しい記録は正確な秒数を保持する。旧履歴はdurationMinutes * 60へfallback。
     var durationSeconds: Int?
@@ -350,10 +352,12 @@ final class FocusSessionRecord {
         durationMinutes: Int,
         categoryID: String? = FocusCategoryDefaults.studyID,
         focusMethod: FocusMethod? = nil,
-        durationSeconds: Int? = nil
+        durationSeconds: Int? = nil,
+        sessionStartedAt: Date? = nil
     ) {
         self.id = id
         self.completedAt = completedAt
+        self.sessionStartedAt = sessionStartedAt
         self.durationMinutes = max(0, durationMinutes)
         self.durationSeconds = durationSeconds.map { max(0, $0) }
         self.categoryID = categoryID
@@ -362,6 +366,12 @@ final class FocusSessionRecord {
 
     var resolvedCategoryID: String {
         FocusCategoryDefaults.resolvedCategoryID(categoryID)
+    }
+
+    var attributionDate: Date { sessionStartedAt ?? completedAt }
+
+    func sessionDay(calendar: Calendar = .current) -> Date {
+        calendar.startOfDay(for: attributionDate)
     }
 
     var validFocusSeconds: Int {

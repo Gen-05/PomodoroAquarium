@@ -12,9 +12,9 @@ enum PreviousDayFocusDurationService {
         }
         let today = calendar.startOfDay(for: date)
         guard let yesterday = calendar.date(byAdding: .day, value: -1, to: today) else { return 0 }
-        let records = try context.fetch(FetchDescriptor<FocusSessionRecord>(predicate: #Predicate {
-            $0.completedAt >= yesterday && $0.completedAt < today
-        }))
+        let records = try context.fetch(FetchDescriptor<FocusSessionRecord>()).filter {
+            $0.attributionDate >= yesterday && $0.attributionDate < today
+        }
         // 端数秒は各recordで捨てず、全秒数を合計してから既存確率APIの整数分へ換算。
         let seconds = records.reduce(0) { sum, record in
             let (next, overflowed) = sum.addingReportingOverflow(record.validFocusSeconds)

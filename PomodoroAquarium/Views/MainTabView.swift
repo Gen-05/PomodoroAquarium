@@ -602,9 +602,10 @@ struct MainTabView: View {
 
     private func resetDailyFishProgressIfNeeded() {
         guard let player = players.first else { return }
-        _ = try? DailyPointProgressService.resetIfNeeded(for: player, in: modelContext)
+        let rewardDate = timerViewModel.dailyRewardReferenceDate()
+        _ = try? DailyPointProgressService.resetIfNeeded(for: player, on: rewardDate, in: modelContext)
         // 既存tick/active復帰を利用する。新しいTimerは追加せず、日付変更時だけsaveする。
-        if (try? DailyFishProgressService.resetIfNeeded(for: player, in: modelContext)) == true {
+        if (try? DailyFishProgressService.resetIfNeeded(for: player, on: rewardDate, in: modelContext)) == true {
             _ = try? PreviousDayFocusDurationService.synchronizeMinutes(for: player, in: modelContext)
             try? modelContext.save()
         }
@@ -696,8 +697,9 @@ struct MainTabView: View {
         guard !timerViewModel.hasPersistedAutomaticPomodoroFlow,
               !timerViewModel.defersPomodoroRewards else { return }
         do {
-            try DailyPointProgressService.processPending(for: player, in: modelContext)
-            try FishRewardBatchService.grantPending(to: player, defaults: appDefaults, in: modelContext)
+            let rewardDate = timerViewModel.dailyRewardReferenceDate()
+            try DailyPointProgressService.processPending(for: player, on: rewardDate, in: modelContext)
+            try FishRewardBatchService.grantPending(to: player, on: rewardDate, defaults: appDefaults, in: modelContext)
         } catch {
             // 保存失敗なら未処理印を残し、次回の起動チェックで再試行する。
             return

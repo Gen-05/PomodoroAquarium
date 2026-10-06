@@ -41,6 +41,12 @@ enum MonthlyFocusChartPosition {
     }
 }
 
+enum YearlyFocusChartPosition {
+    static func xValue(for bucketStart: Date, calendar: Calendar = .current) -> Double {
+        Double(calendar.component(.month, from: bucketStart))
+    }
+}
+
 struct StatisticsView: View {
     let player: Player?
 
@@ -53,6 +59,9 @@ struct StatisticsView: View {
     @State private var presentedDetailBucket: FocusStatisticsBucket?
 
     private var todayMinutes: Int {
+        if !focusSessionRecords.isEmpty {
+            return FocusStatisticsService.dailySummary(containing: Date(), from: focusSessionRecords).totalMinutes
+        }
         let historyMinutes = StudyHistoryService.minutes(on: Date(), from: dailyRecords)
         return dailyRecords.contains { Calendar.current.isDateInToday($0.day) }
             ? historyMinutes
@@ -62,6 +71,9 @@ struct StatisticsView: View {
     private var yesterdayMinutes: Int {
         guard let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) else {
             return 0
+        }
+        if !focusSessionRecords.isEmpty {
+            return FocusStatisticsService.dailySummary(containing: yesterday, from: focusSessionRecords).totalMinutes
         }
         let historyMinutes = StudyHistoryService.minutes(on: yesterday, from: dailyRecords)
         return dailyRecords.contains { Calendar.current.isDate($0.day, inSameDayAs: yesterday) }
@@ -207,6 +219,7 @@ struct StatisticsView: View {
         }
     }
 
+    // 将来はFocusStatisticsFeature.categoryChart.requiresPlusを入口の判定へ接続する。
     private var categoryChartSection: some View {
         let summary = selectedSummary
         let categories = FocusStatisticsService.categorySummary(
@@ -400,7 +413,7 @@ struct StatisticsView: View {
     private var yearlyChart: some View {
         let points = selectedSummary.methodBuckets.map {
             NumericFocusChartPoint(
-                x: Double(Calendar.current.component(.month, from: $0.start)),
+                x: YearlyFocusChartPosition.xValue(for: $0.start),
                 minutes: $0.minutes,
                 bucketStart: $0.start,
                 focusMethod: $0.focusMethod
@@ -411,19 +424,23 @@ struct StatisticsView: View {
             BarMark(
                 x: .value("月", point.x),
                 y: .value("集中時間（分）", point.minutes),
+                width: .fixed(12),
                 stacking: .standard
             )
             .foregroundStyle(focusMethodColor(point.focusMethod))
             .opacity(barOpacity(for: point.bucketStart))
             .cornerRadius(3)
         }
-        .chartXScale(domain: 0.0...13.0)
+        .chartXScale(domain: FocusStatisticsService.yearlyAxisDomain)
+        .chartYScale(domain: FocusStatisticsService.yearlyYAxisDomain(for: selectedSummary))
         .chartXAxis {
-            AxisMarks(values: Array(1...12).map(Double.init)) { value in
+            AxisMarks(values: FocusStatisticsService.yearlyAxisMonths) { value in
                 AxisTick()
-                AxisValueLabel {
+                AxisValueLabel(anchor: .top, collisionResolution: .disabled) {
                     if let month = value.as(Double.self) {
-                        Text("\(Int(month))月")
+                        Text("\(Int(month))")
+                            .font(.caption2)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
             }
@@ -494,6 +511,7 @@ struct StatisticsView: View {
         .frame(height: 48, alignment: .leading)
     }
 
+    // 全期間共通のPlus対象入口。現時点ではentitlementによるロックなし。
     private func detailEntryButton(for bucket: FocusStatisticsBucket) -> some View {
         Button("詳細を見る") {
             presentedDetailBucket = bucket

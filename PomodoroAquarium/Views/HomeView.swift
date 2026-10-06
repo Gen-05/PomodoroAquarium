@@ -1785,8 +1785,8 @@ struct HomeView: View {
             player.todayStudyMinutes = 0
             lastStudyDate = today
         }
-        _ = try? PreviousDayFocusDurationService.synchronizeMinutes(
-            for: player, before: now, calendar: calendar, in: modelContext
+        try? StudyHistoryService.synchronizeCurrentDayTotals(
+            for: player, at: now, calendar: calendar, in: modelContext
         )
     }
 

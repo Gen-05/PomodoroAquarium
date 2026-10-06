@@ -34,6 +34,7 @@ struct PersistedTimerSession: Codable, Equatable {
     var autoFlowBackgroundEnteredAt: Date? = nil
     var isTimerScreenVisible: Bool? = nil
     var awaitsAutomaticStudyStart: Bool? = nil
+    var sessionStartedAt: Date? = nil
 }
 
 /// 終了理由と有効時間を分離した、報酬計算とは独立した記録用結果。
@@ -45,8 +46,10 @@ struct FinalizedFocusSession: Codable, Equatable {
     let categoryID: String
     let focusMethod: FocusMethod
     var pomodoroFlowID: UUID? = nil
+    var sessionStartedAt: Date? = nil
 
     var durationMinutes: Int { validFocusSeconds / 60 }
+    var attributionDate: Date { sessionStartedAt ?? completedAt }
 }
 
 enum TimerSessionLaunchStatus: Equatable {
@@ -104,7 +107,8 @@ final class TimerSessionStore {
         pomodoroFlowID: UUID? = nil,
         autoFlowBackgroundEnteredAt: Date? = nil,
         isTimerScreenVisible: Bool? = nil,
-        awaitsAutomaticStudyStart: Bool? = nil
+        awaitsAutomaticStudyStart: Bool? = nil,
+        sessionStartedAt: Date? = nil
     ) -> PersistedTimerSession {
         PersistedTimerSession(
             sessionIsActive: true,
@@ -130,7 +134,8 @@ final class TimerSessionStore {
             pomodoroFlowID: pomodoroFlowID,
             autoFlowBackgroundEnteredAt: autoFlowBackgroundEnteredAt,
             isTimerScreenVisible: isTimerScreenVisible,
-            awaitsAutomaticStudyStart: awaitsAutomaticStudyStart
+            awaitsAutomaticStudyStart: awaitsAutomaticStudyStart,
+            sessionStartedAt: sessionStartedAt
         )
     }
 

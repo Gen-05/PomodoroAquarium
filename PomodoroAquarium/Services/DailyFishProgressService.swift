@@ -51,8 +51,6 @@ enum DailyFishProgressService {
         guard let record = try context.fetch(descriptor).first else {
             throw ProcessingError.missingSession
         }
-        resetProgressDay(for: player, on: date, calendar: calendar)
-
         // durationMinutesから魚を再計算しない。Tutorial/旧履歴も累積の対象外。
         guard let seconds = record.durationSeconds, seconds > 0,
               record.fishEarnedCount == nil else {
@@ -61,44 +59,31 @@ enum DailyFishProgressService {
             return Progress(newFishEarnedCount: 0, remainderSeconds: player.dailyFishProgressSeconds)
         }
 
-        let day = calendar.startOfDay(for: record.completedAt)
-        let nextDay = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
+        let processingDate = record.sessionStartedAt == nil ? date : record.attributionDate
+        resetProgressDay(for: player, on: processingDate, calendar: calendar)
+        let day = record.sessionDay(calendar: calendar)
         let sameDay = FetchDescriptor<FocusSessionRecord>(predicate: #Predicate {
-            $0.completedAt >= day && $0.completedAt < nextDay && $0.fishEarnedCount != nil
+            $0.fishEarnedCount != nil
         })
         // 処理済み記録を根拠にするため、復元順序や過去日の再送に依存しない。
-        // 日をまたいだsessionは既存履歴と同じcompletedAtの日へ所属する。
-        let previousRemainder = try context.fetch(sameDay).reduce(0) { remainder, processed in
+        let previousRemainder = try context.fetch(sameDay)
+            .filter { calendar.isDate($0.attributionDate, inSameDayAs: day) }
+            .reduce(0) { remainder, processed in
             progress(adding: processed.durationSeconds ?? 0, to: remainder).remainderSeconds
         }
         let result = progress(adding: seconds, to: previousRemainder)
         record.fishEarnedCount = result.newFishEarnedCount
-        if calendar.isDate(record.completedAt, inSameDayAs: date) {
+        if calendar.isDate(record.attributionDate, inSameDayAs: processingDate) {
             player.dailyFishProgressSeconds = result.remainderSeconds
         }
-        try refreshDailyEntitlements(for: player, on: date, calendar: calendar, in: context)
+        try refreshDailyEntitlements(for: player, on: processingDate, calendar: calendar, in: context)
         try context.save()
         return result
     }
 
     @discardableResult
     private static func resetProgressDay(for player: Player, on date: Date, calendar: Calendar) -> Bool {
-        let day = calendar.startOfDay(for: date)
-        var changed = false
-        if player.dailyFishProgressDate.map({ calendar.isDate($0, inSameDayAs: day) }) != true {
-            player.dailyFishProgressDate = day
-            player.dailyFishProgressSeconds = 0
-            changed = true
-        }
-        if player.dailyGrantedFishDate.map({ calendar.isDate($0, inSameDayAs: day) }) != true {
-            player.dailyGrantedFishDate = day
-            player.dailyEarnedFishCount = 0
-            player.dailyClaimedFishCount = 0
-            player.dailyFishLimit = DailyFishAcquisitionPolicy.basicLimit
-            player.pendingFishEarnedCount = 0
-            changed = true
-        }
-        return changed
+        DailyRewardStateStore.activateFishDay(for: player, on: date, calendar: calendar)
     }
 
     /// 保存済みsession IDを根拠に日次権利を再構築。旧Step 2の未付与分にも対応する。
@@ -108,10 +93,9 @@ enum DailyFishProgressService {
     ) throws {
         resetProgressDay(for: player, on: date, calendar: calendar)
         let day = calendar.startOfDay(for: date)
-        let nextDay = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
         let records = try context.fetch(FetchDescriptor<FocusSessionRecord>(predicate: #Predicate {
-            $0.completedAt >= day && $0.completedAt < nextDay && $0.fishEarnedCount != nil
-        }))
+            $0.fishEarnedCount != nil
+        })).filter { calendar.isDate($0.attributionDate, inSameDayAs: day) }
         let earned = records.reduce(0) { sum, record in
             min(DailyFishAcquisitionPolicy.maximumLimit,
                 sum + min(DailyFishAcquisitionPolicy.maximumLimit, max(0, record.fishEarnedCount ?? 0)))

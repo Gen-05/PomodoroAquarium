@@ -6,6 +6,7 @@ enum StudyHistoryService {
     static func recordValidFocusSession(
         _ session: FinalizedFocusSession,
         existingTodayMinutesBeforeCompletion: Int = 0,
+        for player: Player? = nil,
         calendar: Calendar = .current,
         in context: ModelContext
     ) throws {
@@ -26,7 +27,9 @@ enum StudyHistoryService {
             calendar: calendar,
             in: context,
             sessionID: session.id,
-            durationSeconds: session.validFocusSeconds
+            durationSeconds: session.validFocusSeconds,
+            sessionStartedAt: session.sessionStartedAt,
+            player: player
         )
     }
 
@@ -40,11 +43,13 @@ enum StudyHistoryService {
         calendar: Calendar = .current,
         in context: ModelContext,
         sessionID: UUID = UUID(),
-        durationSeconds: Int? = nil
+        durationSeconds: Int? = nil,
+        sessionStartedAt: Date? = nil,
+        player: Player? = nil
     ) throws {
         guard minutes > 0 || (durationSeconds ?? 0) > 0 else { return }
 
-        let day = calendar.startOfDay(for: date)
+        let day = calendar.startOfDay(for: sessionStartedAt ?? date)
         let nextDay = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
         let descriptor = FetchDescriptor<StudyDailyRecord>(
             predicate: #Predicate { $0.day >= day && $0.day < nextDay }
@@ -77,9 +82,36 @@ enum StudyHistoryService {
             durationMinutes: minutes,
             categoryID: FocusCategoryDefaults.resolvedCategoryID(categoryID),
             focusMethod: focusMethod,
-            durationSeconds: durationSeconds
+            durationSeconds: durationSeconds,
+            sessionStartedAt: sessionStartedAt
         ))
+        if let player {
+            let (total, overflowed) = player.totalStudyMinutes.addingReportingOverflow(max(0, minutes))
+            player.totalStudyMinutes = overflowed ? Int.max : total
+            try synchronizeCurrentDayTotals(for: player, calendar: calendar, in: context)
+        }
         try context.save()
+    }
+
+    /// Homeのカレンダー上の「今日/昨日」は現在日付。sessionの所属日とは独立して投影する。
+    static func synchronizeCurrentDayTotals(
+        for player: Player, at date: Date = Date(), calendar: Calendar = .current, in context: ModelContext
+    ) throws {
+        let records = try context.fetch(FetchDescriptor<FocusSessionRecord>())
+        player.todayStudyMinutes = focusMinutes(on: date, from: records, calendar: calendar)
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: date) ?? date
+        player.yesterdayStudyMinutes = focusMinutes(on: yesterday, from: records, calendar: calendar)
+    }
+
+    static func focusMinutes(
+        on date: Date, from records: [FocusSessionRecord], calendar: Calendar = .current
+    ) -> Int {
+        let seconds = records.filter { calendar.isDate($0.attributionDate, inSameDayAs: date) }
+            .reduce(0) { total, record in
+                let (next, overflowed) = total.addingReportingOverflow(record.validFocusSeconds)
+                return overflowed ? Int.max : next
+            }
+        return seconds / 60
     }
 
     static func minutes(

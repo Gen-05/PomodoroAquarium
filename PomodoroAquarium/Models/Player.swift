@@ -45,6 +45,8 @@ class Player {
     var dailyPointProgressDate: Date?
     var normalPointProgressSeconds = 0
     var reducedPointProgressUnits = 0
+    /// 開始日へ遅延確定するsession用の日別snapshot。過去日の枠を翌日へ移さない。
+    var dailyRewardStatesData: Data?
 
     /// 既存の永続受取数を再利用し、二つのclaimedカウンターを持たない。
     var dailyClaimedFishCount: Int {

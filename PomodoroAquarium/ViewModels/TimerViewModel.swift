@@ -86,6 +86,18 @@ final class TimerViewModel {
     private var validFocusElapsed: TimeInterval = 0
     private var validFocusRunStartedAt: Date?
     private var focusSessionID: UUID?
+    private(set) var sessionStartedAt: Date?
+    /// カレンダー表示とは分離し、実行/復元/未確定保存中の開始日を日次処理へ渡す。
+    func dailyRewardReferenceDate(at date: Date = Date()) -> Date {
+        if state != .idle, let sessionStartedAt {
+            return sessionStartedAt
+        }
+        if let saved = sessionStore.load(), saved.isStudyTime, let start = saved.sessionStartedAt {
+            return start
+        }
+        if let pending = sessionStore.pendingFocusSessions().first { return pending.attributionDate }
+        return date
+    }
     private(set) var lastValidFocusSeconds = 0
     private var configuredAutoStartNextSet = false
     private(set) var isAutomaticPomodoroFlow = false
@@ -352,6 +364,7 @@ final class TimerViewModel {
             if state == .idle {
                 validFocusElapsed = 0
                 focusSessionID = UUID()
+                sessionStartedAt = currentDate
                 lastValidFocusSeconds = 0
             }
             validFocusRunStartedAt = currentDate
@@ -424,6 +437,7 @@ final class TimerViewModel {
         validFocusElapsed = 0
         validFocusRunStartedAt = nil
         focusSessionID = nil
+        sessionStartedAt = nil
         timeRemaining = studyTime * 60
         endDate = nil
         hasHandledCurrentSessionCompletion = false
@@ -493,6 +507,7 @@ final class TimerViewModel {
         validFocusElapsed = 0
         validFocusRunStartedAt = nil
         focusSessionID = nil
+        sessionStartedAt = nil
         lastValidFocusSeconds = 0
         state = .idle
         phase = .study
@@ -720,6 +735,7 @@ final class TimerViewModel {
         validFocusRunStartedAt = session.isRunning && phase == .study
             ? (session.validFocusUpdatedAt ?? session.lastHeartbeatDate) : nil
         focusSessionID = session.focusSessionID ?? UUID()
+        sessionStartedAt = session.sessionStartedAt
         stopwatchElapsedSeconds = mode == .stopwatch ? savedElapsed : 0
         stopwatchElapsedAtRunStart = stopwatchElapsedSeconds
         stopwatchRunStartDate = nil
@@ -786,6 +802,7 @@ final class TimerViewModel {
         pomodoroFlowID = session.pomodoroFlowID
         selectedCategoryID = FocusCategoryDefaults.resolvedCategoryID(session.selectedCategoryID)
         focusSessionID = session.focusSessionID ?? UUID()
+        sessionStartedAt = session.sessionStartedAt
         // 不明な再起動後の時間は推測せず、最後に保存された有効時間だけを保持する。
         validFocusElapsed = max(0, session.validFocusElapsed ?? TimeInterval(
             session.elapsedStudySeconds ?? max(0, session.studyTime * 60 - session.timeRemaining)
@@ -851,7 +868,8 @@ final class TimerViewModel {
             pomodoroFlowID: pomodoroFlowID,
             autoFlowBackgroundEnteredAt: autoFlowBackgroundEnteredAt,
             isTimerScreenVisible: isTimerScreenVisible,
-            awaitsAutomaticStudyStart: awaitsAutomaticStudyStart
+            awaitsAutomaticStudyStart: awaitsAutomaticStudyStart,
+            sessionStartedAt: sessionStartedAt
         ))
     }
 
@@ -1056,7 +1074,8 @@ final class TimerViewModel {
             endReason: reason,
             categoryID: selectedCategoryID,
             focusMethod: mode.focusMethod,
-            pomodoroFlowID: pomodoroFlowID
+            pomodoroFlowID: pomodoroFlowID,
+            sessionStartedAt: sessionStartedAt
         ))
         deliverPendingFocusSessions()
     }

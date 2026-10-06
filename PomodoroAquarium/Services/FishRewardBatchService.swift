@@ -25,13 +25,14 @@ enum FishRewardBatchService {
     ) throws -> FishRewardBatch? {
         let descriptor = FetchDescriptor<FocusSessionRecord>(predicate: #Predicate { $0.id == sessionID })
         guard let record = try context.fetch(descriptor).first else { throw GrantError.missingSession }
-        try DailyFishProgressService.refreshDailyEntitlements(for: player, on: date, calendar: calendar, in: context)
         guard let count = record.fishEarnedCount, !record.hasGrantedFishReward else {
             try context.save()
             synchronizeDailyCount(for: player, on: date, calendar: calendar, defaults: defaults)
             return nil
         }
-        let grantNow = calendar.isDate(record.completedAt, inSameDayAs: date)
+        let rewardDate = record.sessionStartedAt == nil ? date : record.attributionDate
+        try DailyFishProgressService.refreshDailyEntitlements(for: player, on: rewardDate, calendar: calendar, in: context)
+        let grantNow = calendar.isDate(record.attributionDate, inSameDayAs: rewardDate)
             ? min(max(0, count), claimableCount(for: player)) : 0
         return try performClaim(
             count: grantNow, batchID: sessionID, record: record, to: player,
@@ -83,9 +84,14 @@ enum FishRewardBatchService {
         pomodoroFlowID: UUID? = nil
     ) throws -> FishRewardBatch? {
         // 呼び出し元の保存済み時間・進捗をrollbackの対象にしない。
-        let previousDayMinutes = try PreviousDayFocusDurationService.synchronizeMinutes(
-            for: player, before: date, calendar: calendar, in: context
+        let rarityDate = record?.sessionStartedAt ?? date
+        let previousDayMinutes = try PreviousDayFocusDurationService.minutes(
+            before: rarityDate, calendar: calendar, in: context
         )
+        // 過去日へ帰属するsessionの抽選入力で、Homeのカレンダー上の昨日を上書きしない。
+        if calendar.isDate(rarityDate, inSameDayAs: date) {
+            player.yesterdayStudyMinutes = previousDayMinutes
+        }
         try context.save()
         let probabilities = FishRewardService.rarityProbabilities(for: previousDayMinutes)
         // 抽選失敗で部分的な所持追加を残さない。抽選自体は各枠で独立。

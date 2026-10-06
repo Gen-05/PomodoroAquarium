@@ -786,11 +786,12 @@ struct TimerView: View {
         viewModel.onFocusSessionFinalized = { session in
             do {
                 // 過去日の復元結果に、今日の移行用累計を混ぜない。
-                let baseline = Calendar.current.isDateInToday(session.completedAt)
+                let baseline = Calendar.current.isDateInToday(session.attributionDate)
                     ? (player?.todayStudyMinutes ?? 0) : 0
                 try StudyHistoryService.recordValidFocusSession(
                     session,
                     existingTodayMinutesBeforeCompletion: baseline,
+                    for: player,
                     in: modelContext
                 )
                 guard let player else { return false }
@@ -878,8 +879,6 @@ struct TimerView: View {
 
             // ポイントは全終了理由共通のfinalized callbackで保存済み。ここでは表示のみ。
             let awardedStudyReward = lastFinalizedPointReward
-            player.todayStudyMinutes += completedStudyMinutes
-            player.totalStudyMinutes += completedStudyMinutes
 
             guard StudyCompletionReward.isEligibleForExistingRewards(
                 forStudyMinutes: completedStudyMinutes
@@ -895,6 +894,7 @@ struct TimerView: View {
 
             let streakUpdate = try? StudyStreakService.recordStudyCompletion(
                 for: player,
+                at: viewModel.sessionStartedAt ?? Date(),
                 in: modelContext
             )
 

@@ -49,12 +49,7 @@ enum DailyPointProgressService {
         for player: Player, on date: Date = Date(), calendar: Calendar = .current,
         in context: ModelContext
     ) throws -> Bool {
-        guard player.dailyPointProgressDate.map({ calendar.isDate($0, inSameDayAs: date) }) != true else {
-            return false
-        }
-        player.dailyPointProgressDate = calendar.startOfDay(for: date)
-        player.normalPointProgressSeconds = 0
-        player.reducedPointProgressUnits = 0
+        guard DailyRewardStateStore.activatePointDay(for: player, on: date, calendar: calendar) else { return false }
         try context.save()
         return true
     }
@@ -73,11 +68,11 @@ enum DailyPointProgressService {
             return 0
         }
 
-        let day = calendar.startOfDay(for: record.completedAt)
-        let nextDay = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
-        let records = try context.fetch(FetchDescriptor<FocusSessionRecord>(predicate: #Predicate {
-            $0.completedAt >= day && $0.completedAt < nextDay
-        })).filter { $0.id != sessionID }
+        let processingDate = record.sessionStartedAt == nil ? date : record.attributionDate
+        let day = record.sessionDay(calendar: calendar)
+        let records = try context.fetch(FetchDescriptor<FocusSessionRecord>()).filter {
+            $0.id != sessionID && calendar.isDate($0.attributionDate, inSameDayAs: day)
+        }
         var priorSeconds = 0
         var normalRemainder = 0
         var reducedRemainder = 0
@@ -99,12 +94,13 @@ enum DailyPointProgressService {
         let oldDay = player.dailyPointProgressDate
         let oldNormal = player.normalPointProgressSeconds
         let oldReduced = player.reducedPointProgressUnits
+        let oldStates = player.dailyRewardStatesData
         do {
             CurrencyService.creditWithoutSaving(result.awardedPoints, to: player)
             record.pointReward = result.awardedPoints
             record.normalPointSeconds = result.normalSeconds
-            if calendar.isDate(record.completedAt, inSameDayAs: date) {
-                player.dailyPointProgressDate = calendar.startOfDay(for: date)
+            if calendar.isDate(record.attributionDate, inSameDayAs: processingDate) {
+                DailyRewardStateStore.activatePointDay(for: player, on: processingDate, calendar: calendar)
                 player.normalPointProgressSeconds = result.normalRemainderSeconds
                 player.reducedPointProgressUnits = result.reducedRemainderUnits
             }
@@ -115,6 +111,7 @@ enum DailyPointProgressService {
             player.dailyPointProgressDate = oldDay
             player.normalPointProgressSeconds = oldNormal
             player.reducedPointProgressUnits = oldReduced
+            player.dailyRewardStatesData = oldStates
             record.pointReward = nil
             record.normalPointSeconds = nil
             throw error
