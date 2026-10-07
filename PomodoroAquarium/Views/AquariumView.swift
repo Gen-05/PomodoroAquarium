@@ -53,8 +53,9 @@ struct AquariumView: View {
         GeometryReader { geometry in
             ZStack {
                 AquariumBackground(theme: backgroundTheme)
-                BubbleLayer()
-                AquariumFloor()
+                if backgroundTheme.usesFallbackSandLayer {
+                    AquariumFloor()
+                }
                 selectionClearingLayer
                 decorationLayer(in: geometry.size)
                 fishLayer(in: geometry.size)

@@ -1666,11 +1666,9 @@ struct HomeView: View {
             }
         } label: {
             VStack(spacing: 7) {
-                LinearGradient(
-                    colors: theme.fallbackColors,
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+                Image(theme.imageName)
+                .resizable()
+                .scaledToFill()
                 .frame(width: 112, height: 78)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(alignment: .topTrailing) {

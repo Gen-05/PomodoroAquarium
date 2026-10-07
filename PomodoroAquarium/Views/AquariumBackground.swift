@@ -7,6 +7,7 @@ import SwiftUI
 import UIKit
 
 enum AquariumBackgroundTheme: String, CaseIterable, Identifiable {
+    // 保存IDは維持する。背景は色・光・水深の情景を担い、物体は装飾layerで扱う。
     case aquarium
     case deepSea
     case tropical
@@ -15,20 +16,48 @@ enum AquariumBackgroundTheme: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .aquarium: "通常"
-        case .deepSea: "深海"
-        case .tropical: "南国"
+        case .aquarium: "ベーシック海底"
+        case .deepSea: "深い海"
+        case .tropical: "サンゴ礁"
         }
+    }
+
+    /// v1ではベーシック海底だけに既存の砂地を残す。
+    var showsSand: Bool { self == .aquarium }
+
+    /// 00に砂が含まれるため、画像がないfallback時だけSwiftUIの砂を使う。
+    var usesFallbackSandLayer: Bool {
+        showsSand && UIImage(named: imageName) == nil
     }
 
     var imageName: String {
         switch self {
         case .aquarium:
-            "aquariumBackground"
+            "basic_ocean_00"
         case .deepSea:
-            "deepSeaBackground"
+            "deep_ocean_00"
         case .tropical:
-            "tropicalBackground"
+            "coral_ocean_00"
+        }
+    }
+
+    var lightFrameNames: [String] {
+        switch self {
+        case .aquarium:
+            [
+                "basic_ocean_01", "basic_ocean_02", "basic_ocean_03",
+                "basic_ocean_04", "basic_ocean_05"
+            ]
+        case .tropical:
+            [
+                "coral_ocean_01", "coral_ocean_02", "coral_ocean_03",
+                "coral_ocean_04", "coral_ocean_05"
+            ]
+        case .deepSea:
+            [
+                "deep_ocean_01", "deep_ocean_02", "deep_ocean_03",
+                "deep_ocean_04", "deep_ocean_05"
+            ]
         }
     }
 
@@ -57,19 +86,25 @@ struct AquariumBackground: View {
         self.theme = theme
     }
 
+    private var usesAnimatedOceanAssets: Bool {
+        !theme.lightFrameNames.isEmpty && UIImage(named: theme.imageName) != nil
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 backgroundContent(in: geometry.size)
 
-                // 画像の上にも水中らしい色と光を重ねる。
-                LinearGradient(
-                    colors: [.white.opacity(0.20), .cyan.opacity(0.05), .black.opacity(0.10)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                // 画像の光overlayと旧光表現を二重表示しない。旧光は画像がないfallback時だけ。
+                if !usesAnimatedOceanAssets {
+                    LinearGradient(
+                        colors: [.white.opacity(0.20), .cyan.opacity(0.05), .black.opacity(0.10)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
 
-                lightBeams
+                    lightBeams
+                }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
@@ -86,11 +121,20 @@ struct AquariumBackground: View {
     @ViewBuilder
     private func backgroundContent(in size: CGSize) -> some View {
         if let backgroundImage = UIImage(named: theme.imageName) {
-            Image(uiImage: backgroundImage)
-                .resizable()
-                .scaledToFill()
-                .frame(width: size.width, height: size.height)
-                .clipped()
+            if !theme.lightFrameNames.isEmpty {
+                OceanLightBackground(
+                    baseImage: backgroundImage,
+                    size: size,
+                    lightFrameNames: theme.lightFrameNames
+                )
+                .id(theme.id) // 背景だけの再生stateを切替時にリセット。魚には影響しない。
+            } else {
+                Image(uiImage: backgroundImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
+            }
         } else {
             LinearGradient(
                 colors: theme.fallbackColors,
@@ -129,6 +173,84 @@ struct AquariumBackground: View {
     }
 }
 
-#Preview {
-    AquariumBackground(theme: .aquarium)
+/// 固定背景と透過の光だけを重ねる。魚のsimulation・計測用Timerから独立。
+private struct OceanLightBackground: View {
+    let baseImage: UIImage
+    let size: CGSize
+    let lightFrameNames: [String]
+
+    // ベーシック海底・サンゴ礁・深い海で同じ再生・合成設定を使う。
+    private static let frameDuration = 0.75
+    private static let crossFadeDuration = 0.15
+    /// 光素材の強さは維持し、切替時だけ短くcross fadeする。
+    private static let lightOpacity = 1.0
+
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var lightFrameIndex = 0
+
+    private var animatesLight: Bool { scenePhase == .active && !reduceMotion }
+
+    var body: some View {
+        ZStack {
+            fullSizeImage(Image(uiImage: baseImage)) // 00は切替・fade・移動の対象にしない。
+
+            // 光layerだけをfadeする。00やAquariumのidentityは変更しない。
+            ZStack {
+                ForEach(lightFrameNames.indices, id: \.self) { index in
+                    fullSizeImage(Image(lightFrameNames[index]))
+                        .opacity(index == lightFrameIndex ? 1.0 : 0.0)
+                }
+            }
+            .compositingGroup()
+            .opacity(Self.lightOpacity)
+            // 固定背景に対して光だけをscreen合成し、明部を穏やかに強調する。
+            .blendMode(.screen)
+            .animation(.linear(duration: Self.crossFadeDuration), value: lightFrameIndex)
+        }
+        .frame(width: size.width, height: size.height)
+        .clipped()
+        .ignoresSafeArea()
+        .task(id: animatesLight) {
+            guard animatesLight else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(Self.frameDuration))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                lightFrameIndex = (lightFrameIndex + 1) % lightFrameNames.count
+            }
+        }
+    }
+
+    private func fullSizeImage(_ image: Image) -> some View {
+        image
+            .resizable()
+            .scaledToFill()
+            .frame(width: size.width, height: size.height)
+            .clipped()
+    }
+}
+
+#Preview("水・光背景") {
+    @Previewable @State var theme: AquariumBackgroundTheme = .aquarium
+
+    ZStack {
+        AquariumBackground(theme: theme)
+        VStack {
+            Picker("背景", selection: $theme) {
+                Text(AquariumBackgroundTheme.aquarium.displayName)
+                    .tag(AquariumBackgroundTheme.aquarium)
+                Text(AquariumBackgroundTheme.tropical.displayName)
+                    .tag(AquariumBackgroundTheme.tropical)
+                Text(AquariumBackgroundTheme.deepSea.displayName)
+                    .tag(AquariumBackgroundTheme.deepSea)
+            }
+            .pickerStyle(.segmented)
+            .padding()
+            Spacer()
+        }
+    }
 }

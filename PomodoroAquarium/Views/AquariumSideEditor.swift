@@ -750,11 +750,13 @@ struct AquariumSideEditor: View {
             selectBackground(theme)
         } label: {
             VStack(spacing: 5) {
-                LinearGradient(
-                    colors: theme.fallbackColors,
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+                GeometryReader { geometry in
+                    Image(theme.imageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                }
                 .frame(height: 52)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .overlay(alignment: .topTrailing) {
