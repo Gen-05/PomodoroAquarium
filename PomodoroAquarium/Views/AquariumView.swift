@@ -28,6 +28,7 @@ struct AquariumView: View {
     var selectionResetRequestID: UUID?
     var decorationRestoreRequestID: String?
     var onDecorationRestoreRequestHandled: () -> Void = {}
+    var decorationDragPreview: AquariumDecoration?
 
     @Environment(\.modelContext) private var modelContext
     @Query private var decorationPlacements: [AquariumDecorationPlacement]
@@ -88,9 +89,11 @@ struct AquariumView: View {
         .onChange(of: decorationRestoreRequestID) { _, decorationID in
             guard let decorationID,
                   let placement = decorationPlacements.first(where: {
-                      $0.decorationID == decorationID && !$0.isPlaced
+                      $0.decorationID == decorationID
                   }) else { return }
-            beginEditing(placement, at: placement.kind.restorationPosition)
+            beginEditing(placement, at: placement.isPlaced
+                ? CGPoint(x: placement.relativeX, y: placement.relativeY)
+                : placement.kind.restorationPosition)
             onDecorationRestoreRequestHandled()
         }
         .onChange(of: selectionResetRequestID) { _, requestID in
@@ -134,6 +137,7 @@ struct AquariumView: View {
 
         do {
             _ = try AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
+            _ = try AquariumDeveloperDecorations.seedIfNeeded(in: modelContext)
             guard !Task.isCancelled else { return }
 
             if let player,
@@ -169,6 +173,22 @@ struct AquariumView: View {
                     move: { moveDecoration(placement, to: $0) },
                     store: { storeDecoration(placement) }
                 )
+                .zIndex(AquariumDecorationDepthPresentation(
+                    kind: placement.kind, relativeY: position(for: placement).y
+                ).zIndex)
+            }
+            if let decorationDragPreview {
+                AquariumDecorationDragPreview(
+                    decoration: decorationDragPreview,
+                    relativeY: decorationDragPreview.relativeY
+                )
+                .position(
+                    x: decorationDragPreview.relativeX * size.width,
+                    y: decorationDragPreview.relativeY * size.height
+                )
+                .zIndex(AquariumDecorationDepthPresentation(
+                    kind: decorationDragPreview.kind, relativeY: decorationDragPreview.relativeY
+                ).zIndex)
             }
         }
         .allowsHitTesting(isEditing)
@@ -302,6 +322,12 @@ private struct EditableAquariumDecorationView: View {
         CGPoint(x: aquariumSize.width * position.x, y: aquariumSize.height * position.y)
     }
 
+    private var depth: AquariumDecorationDepthPresentation {
+        AquariumDecorationDepthPresentation(kind: decoration.kind, relativeY: position.y)
+    }
+
+    private var displayedScale: CGFloat { decoration.scale * depth.scale }
+
     private var controlsPosition: CGPoint {
         let offset: CGFloat = decoration.kind == .seaweed ? 92 : 70
         return CGPoint(
@@ -313,7 +339,8 @@ private struct EditableAquariumDecorationView: View {
     var body: some View {
         ZStack {
             AquariumDecorationView(decoration: decoration)
-                .scaleEffect(decoration.scale)
+                .scaleEffect(displayedScale)
+                .opacity(depth.opacity)
                 .overlay {
                     if isEditing {
                         RoundedRectangle(cornerRadius: 14)
@@ -327,6 +354,8 @@ private struct EditableAquariumDecorationView: View {
                 .accessibilityElement()
                 .accessibilityLabel(isSelected ? "選択中の水槽装飾" : "水槽装飾")
                 .accessibilityIdentifier("aquariumEditor.placedDecoration.\(placement.decorationID)")
+                // 地面設置素材だけ、画像の根元を配置座標へ合わせる。
+                .offset(y: decoration.kind.groundAnchorOffset(scale: displayedScale))
                 .position(absolutePosition)
                 .onTapGesture {
                     if isEditing { select() }
@@ -346,7 +375,8 @@ private struct EditableAquariumDecorationView: View {
                                 translation: value.translation,
                                 aquariumSize: aquariumSize,
                                 kind: decoration.kind,
-                                isEditing: true
+                                isEditing: true,
+                                scale: decoration.scale
                             ))
                         }
                         .onEnded { value in
@@ -360,7 +390,8 @@ private struct EditableAquariumDecorationView: View {
                                 translation: value.translation,
                                 aquariumSize: aquariumSize,
                                 kind: decoration.kind,
-                                isEditing: true
+                                isEditing: true,
+                                scale: decoration.scale
                             )
                             updatePreview(finalPosition)
                             move(finalPosition)
@@ -401,7 +432,9 @@ struct AquariumDecorationView: View {
 
     @ViewBuilder
     var body: some View {
-        if let imageName = decoration.kind.assetImageName,
+        if !decoration.kind.animationFrameNames.isEmpty {
+            AquariumDecorationFrameView(kind: decoration.kind, placementID: decoration.id)
+        } else if let imageName = decoration.kind.assetImageName,
            let image = UIImage(named: imageName) {
             Image(uiImage: image)
                 .resizable()
@@ -409,7 +442,7 @@ struct AquariumDecorationView: View {
                 .frame(width: 120, height: 120)
         } else {
             switch decoration.kind {
-            case .seaweed:
+            case .seaweed, .seaweedA, .seaweedB:
                 HStack(alignment: .bottom, spacing: -8) {
                     seaweedStem(height: 88, rotation: -8)
                     seaweedStem(height: 120, rotation: 3)

@@ -6,6 +6,13 @@ enum AquariumTabMode: Equatable {
     case editing
 }
 
+/// 選択が残る間はdrag終了後も編集用の集中表示を維持する。
+enum AquariumDecorationEditingPresentation {
+    static func isFocused(isEditing: Bool, isDecorationCategory: Bool, hasSelection: Bool) -> Bool {
+        isEditing && isDecorationCategory && hasSelection
+    }
+}
+
 @MainActor
 @Observable
 final class AquariumEditorNavigationCoordinator {

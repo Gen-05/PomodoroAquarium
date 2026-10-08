@@ -199,6 +199,14 @@ struct HomeView: View {
         aquariumEditorNavigation?.hasUnsavedChanges ?? false
     }
 
+    private var isDecorationOperationFocused: Bool {
+        AquariumDecorationEditingPresentation.isFocused(
+            isEditing: isAquariumEditorPresented,
+            isDecorationCategory: aquariumEditorCategory == .decoration,
+            hasSelection: isEditingDecoration
+        )
+    }
+
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
@@ -206,7 +214,8 @@ struct HomeView: View {
                 let aquariumWidth = AquariumSideEditorLayout.aquariumWidth(
                     for: geometry.size.width,
                     isEditing: isAquariumEditorPresented,
-                    isPanelExpanded: isEditorPanelExpanded
+                    // 装飾操作の開始/終了では座標系を変えず、右バーだけ重ねて隠す。
+                    isPanelExpanded: isEditorPanelExpanded && aquariumEditorCategory != .decoration
                 )
                 let aquariumSize = CGSize(width: aquariumWidth, height: geometry.size.height)
 
@@ -222,12 +231,16 @@ struct HomeView: View {
                         onFishSelected: selectAquariumFish,
                         onCanvasTapped: clearAquariumSelections,
                         onDecorationChanged: markAquariumEditorChanged,
-                        onDecorationEditingChanged: { isEditingDecoration in
-                            if isEditingDecoration {
+                        onDecorationEditingChanged: { isEditing in
+                            updateDecorationEditingState(isEditing: isEditing)
+                            if isEditing {
                                 selectedAquariumFishID = nil
                             }
                         },
-                        selectionResetRequestID: aquariumSelectionResetRequestID
+                        selectionResetRequestID: aquariumSelectionResetRequestID,
+                        decorationRestoreRequestID: decorationRestoreRequestID,
+                        onDecorationRestoreRequestHandled: { decorationRestoreRequestID = nil },
+                        decorationDragPreview: decorationPreview(in: aquariumSize)
                     )
                     .frame(width: aquariumWidth, height: geometry.size.height)
                     .contentShape(Rectangle())
@@ -305,10 +318,16 @@ struct HomeView: View {
                                 isCoreTutorialActive: coreTutorial?.isActive == true
                             )
                             .frame(height: geometry.size.height)
+                            // Gestureの発火元を破棄しない。drag終了までhit testingも維持する。
+                            .opacity(isDecorationOperationFocused ? 0 : 1)
+                            .allowsHitTesting(!isDecorationOperationFocused || decorationDragSession != nil)
+                            .accessibilityHidden(isDecorationOperationFocused)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                             .zIndex(30)
                         } else {
                             collapsedEditorHandle
+                                .opacity(isDecorationOperationFocused ? 0 : 1)
+                                .allowsHitTesting(!isDecorationOperationFocused)
                                 .transition(.move(edge: .trailing).combined(with: .opacity))
                                 .zIndex(30)
                         }
@@ -316,15 +335,6 @@ struct HomeView: View {
                         if let fishDragSession {
                             AquariumFishDragPreview(species: fishDragSession.species)
                                 .position(fishDragSession.location)
-                                .zIndex(50)
-                        }
-
-                        if let decorationDragSession,
-                           let placement = decorationPlacements.first(where: {
-                               $0.decorationID == decorationDragSession.decorationID
-                           }) {
-                            AquariumDecorationDragPreview(decoration: placement.decoration)
-                                .position(decorationDragSession.location)
                                 .zIndex(50)
                         }
 
@@ -346,6 +356,7 @@ struct HomeView: View {
                 }
                 .coordinateSpace(name: AquariumEditorCoordinateSpace.name)
                 .animation(.easeInOut(duration: 0.22), value: isEditorPanelExpanded)
+                .animation(.easeInOut(duration: 0.20), value: isDecorationOperationFocused)
                 .overlayPreferenceValue(CoreTutorialTargetPreferenceKey.self) { targets in
                     coreTutorialOverlay(
                         geometry: geometry,
@@ -369,6 +380,10 @@ struct HomeView: View {
                 )
             }
         }
+        .preference(
+            key: AquariumDecorationEditingPreferenceKey.self,
+            value: isDecorationOperationFocused && (mode != .aquariumEditor || isAquariumEditorActive)
+        )
         .onAppear {
             if mode == .home {
                 inspectPersistedTimerSession()
@@ -686,15 +701,15 @@ struct HomeView: View {
         at location: CGPoint,
         aquariumSize: CGSize
     ) -> Bool {
-        guard isAquariumEditorPresented,
-              AquariumSideEditorLayout.acceptsDrop(at: location, in: aquariumSize) else {
+        guard isAquariumEditorPresented else {
             return false
         }
 
         for item in items {
             switch item.kind {
             case .fish:
-                guard let player else { continue }
+                guard AquariumSideEditorLayout.acceptsDrop(at: location, in: aquariumSize),
+                      let player else { continue }
                 let preferredFishID = item.fishSpecies == .clownfish &&
                     coreTutorial?.step == .waitingForFishPlacement
                     ? coreTutorial?.tutorialFishID(in: player)
@@ -711,7 +726,9 @@ struct HomeView: View {
             case .decoration:
                 guard let placement = decorationPlacements.first(where: {
                     $0.decorationID == item.identifier
-                }) else { continue }
+                }), AquariumEditorDropCoordinator.acceptsDecorationDrop(
+                    at: location, in: aquariumSize, kind: placement.kind
+                ) else { continue }
                 do {
                     try AquariumEditorDropCoordinator.placeDecoration(
                         from: item,
@@ -756,6 +773,7 @@ struct HomeView: View {
 
     private func clearAquariumSelections() {
         selectedAquariumFishID = nil
+        updateDecorationEditingState(isEditing: false)
         aquariumSelectionResetRequestID = UUID()
     }
 
@@ -807,6 +825,25 @@ struct HomeView: View {
         fishDragSession = nil
     }
 
+    private func decorationPreview(in aquariumSize: CGSize) -> AquariumDecoration? {
+        guard let decorationDragSession,
+              let placement = decorationPlacements.first(where: {
+                  $0.decorationID == decorationDragSession.decorationID
+              }) else { return nil }
+        let root = AquariumDecorationEditor.dragPreviewPosition(
+            forDropLocation: decorationDragSession.location,
+            aquariumSize: aquariumSize,
+            kind: placement.kind,
+            scale: CGFloat(placement.scale)
+        )
+        return AquariumDecoration(
+            id: placement.decorationID, kind: placement.kind,
+            relativeX: root.x / max(aquariumSize.width, 1),
+            relativeY: root.y / max(aquariumSize.height, 1),
+            scale: CGFloat(placement.scale)
+        )
+    }
+
     private func updateDecorationDrag(decorationID: String, location: CGPoint) {
         guard isAquariumEditorPresented,
               aquariumEditorCategory == .decoration,
@@ -820,6 +857,7 @@ struct HomeView: View {
             decorationID: decorationID,
             location: location
         )
+        updateDecorationEditingState(isEditing: true)
     }
 
     private func finishDecorationDrag(
@@ -827,14 +865,19 @@ struct HomeView: View {
         at location: CGPoint,
         aquariumSize: CGSize
     ) {
-        defer { decorationDragSession = nil }
+        var didPlace = false
+        defer {
+            decorationDragSession = nil
+            if !didPlace { updateDecorationEditingState(isEditing: false) }
+        }
         guard isAquariumEditorPresented,
               aquariumEditorCategory == .decoration,
               decorationDragSession?.decorationID == decorationID,
-              AquariumSideEditorLayout.acceptsDrop(at: location, in: aquariumSize),
               let placement = decorationPlacements.first(where: {
                   $0.decorationID == decorationID && !$0.isPlaced
-              }) else { return }
+              }), AquariumEditorDropCoordinator.acceptsDecorationDrop(
+                  at: location, in: aquariumSize, kind: placement.kind
+              ) else { return }
 
         do {
             try AquariumEditorDropCoordinator.placeDecoration(
@@ -846,11 +889,15 @@ struct HomeView: View {
                 persistChanges: mode != .aquariumEditor
             )
             markAquariumEditorChanged()
+            didPlace = true
+            // 配置後も選択を保持し、空いている水槽のtapまでUIを戻さない。
+            decorationRestoreRequestID = placement.decorationID
         } catch {}
     }
 
     private func cancelDecorationDrag() {
         decorationDragSession = nil
+        updateDecorationEditingState(isEditing: false)
     }
 
     private func selectBackground(_ theme: AquariumBackgroundTheme) {
@@ -1108,6 +1155,7 @@ struct HomeView: View {
               let player else { return }
 
         _ = try? AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
+        _ = try? AquariumDeveloperDecorations.seedIfNeeded(in: modelContext)
         let currentPlacements = (try? modelContext.fetch(
             FetchDescriptor<AquariumDecorationPlacement>()
         )) ?? decorationPlacements

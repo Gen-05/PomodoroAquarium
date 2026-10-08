@@ -196,6 +196,7 @@ struct MainTabView: View {
     @State private var homeNavigationResetRequestID: UUID?
     @State private var areAquariumViewingControlsVisible = true
     @State private var isStudyFocusDisplayMode = false
+    @State private var isDecorationOperationFocused = false
     @State private var aquariumViewingControlsAutoHideTask: Task<Void, Never>?
     @State private var coreTutorial: CoreTutorialCoordinator
     @State private var showsCoreTutorialCompletion = false
@@ -234,7 +235,7 @@ struct MainTabView: View {
 #if DEBUG
         let timerNow = { TimerNavigationDiagnostics.now() }
 #else
-        let timerNow = Date.init
+        let timerNow: () -> Date = Date.init
 #endif
         _timerViewModel = State(initialValue: TimerViewModel(
             studyTime: studyMinutes,
@@ -384,6 +385,9 @@ struct MainTabView: View {
             }
             .onPreferenceChange(TimerFocusDisplayPreferenceKey.self) { isFocusDisplayMode in
                 isStudyFocusDisplayMode = isFocusDisplayMode
+            }
+            .onPreferenceChange(AquariumDecorationEditingPreferenceKey.self) { isFocused in
+                isDecorationOperationFocused = isFocused
             }
             .tint(.cyan)
             .onReceive(timer) { _ in
@@ -548,7 +552,7 @@ struct MainTabView: View {
     }
 
     private var shouldShowBottomTabBar: Bool {
-        !isStudyFocusDisplayMode && AquariumViewingControlsPolicy.shouldShowBottomTabBar(
+        !isDecorationOperationFocused && !isStudyFocusDisplayMode && AquariumViewingControlsPolicy.shouldShowBottomTabBar(
             selectedTab: tabSelectionState.selection,
             tabMode: aquariumEditorNavigation.tabMode,
             areControlsVisible: areAquariumViewingControlsVisible

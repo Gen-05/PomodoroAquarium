@@ -3,6 +3,14 @@ import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct AquariumDecorationEditingPreferenceKey: PreferenceKey {
+    static let defaultValue = false
+
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
+    }
+}
+
 enum AquariumEditorCategory: String, CaseIterable, Identifiable {
     case fish
     case decoration
@@ -349,6 +357,22 @@ struct AquariumEditorDragItem: Codable, Hashable, Transferable {
 
 @MainActor
 enum AquariumEditorDropCoordinator {
+    static func acceptsDecorationDrop(
+        at location: CGPoint,
+        in aquariumSize: CGSize,
+        kind: AquariumDecorationKind
+    ) -> Bool {
+        guard kind.groundAnchorY != nil else {
+            return AquariumSideEditorLayout.acceptsDrop(at: location, in: aquariumSize)
+        }
+        // 地面設置型は下部の海底全体を使う。魚・非対応の既存装飾のUI判定は変えない。
+        return aquariumSize.width > 0 &&
+            aquariumSize.height > AquariumSideEditorLayout.excludedDropTopHeight &&
+            location.x >= 0 && location.x <= aquariumSize.width &&
+            location.y >= AquariumSideEditorLayout.excludedDropTopHeight &&
+            location.y <= aquariumSize.height
+    }
+
     static func addFish(
         from item: AquariumEditorDragItem,
         preferredFishID: UUID? = nil,
@@ -405,7 +429,8 @@ enum AquariumEditorDropCoordinator {
         let position = AquariumDecorationEditor.relativePosition(
             forDropLocation: location,
             aquariumSize: aquariumSize,
-            kind: placement.kind
+            kind: placement.kind,
+            scale: CGFloat(placement.scale)
         )
         try AquariumDecorationService.confirmPlacement(
             placement,
@@ -703,6 +728,12 @@ struct AquariumSideEditor: View {
                 Text(item.kind.displayName)
                     .font(.caption2.weight(.semibold))
 
+                if let stars = item.kind.stars {
+                    Text("★\(stars)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
                 Text("\(item.placedCount) / \(item.ownedCount)")
                     .font(.caption2.monospacedDigit())
 
@@ -995,11 +1026,18 @@ private struct AquariumDecorationDragHandle: View {
 
 struct AquariumDecorationDragPreview: View {
     let decoration: AquariumDecoration
+    var relativeY: CGFloat? = nil
+
+    private var depth: AquariumDecorationDepthPresentation {
+        AquariumDecorationDepthPresentation(kind: decoration.kind, relativeY: relativeY ?? decoration.relativeY)
+    }
 
     var body: some View {
         AquariumDecorationView(decoration: decoration)
-            .scaleEffect(0.72)
+            .scaleEffect(0.72 * depth.scale)
+            .opacity(depth.opacity)
             .frame(width: 110, height: 110)
+            .offset(y: decoration.kind.groundAnchorOffset(scale: 0.72 * depth.scale))
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
