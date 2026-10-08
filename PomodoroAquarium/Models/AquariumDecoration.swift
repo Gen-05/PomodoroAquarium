@@ -12,6 +12,7 @@ enum AquariumDecorationKind: String, Codable, CaseIterable {
     case rock
     case seaweedA = "seaweed-a"
     case seaweedB = "seaweed-b"
+    case seaweedC = "seaweed_c"
 }
 
 enum AquariumDecorationType: String {
@@ -76,21 +77,21 @@ struct AquariumDecorationDepthPresentation {
 extension AquariumDecorationKind {
     var category: AquariumDecorationCategory {
         switch self {
-        case .seaweed, .seaweedA, .seaweedB: .plant
+        case .seaweed, .seaweedA, .seaweedB, .seaweedC: .plant
         case .rock: .rock
         }
     }
 
     var decorationType: AquariumDecorationType {
         switch self {
-        case .seaweed, .seaweedA, .seaweedB: .seaweed
+        case .seaweed, .seaweedA, .seaweedB, .seaweedC: .seaweed
         case .rock: .rock
         }
     }
 
     /// 装飾のstable IDはkindのrawValue。価格は将来用の定義のみで購入処理には未接続。
-    var stars: Int? { (self == .seaweedA || self == .seaweedB) ? 1 : nil }
-    var plannedPrice: Int? { (self == .seaweedA || self == .seaweedB) ? 30 : nil }
+    var stars: Int? { (self == .seaweedA || self == .seaweedB || self == .seaweedC) ? 1 : nil }
+    var plannedPrice: Int? { (self == .seaweedA || self == .seaweedB || self == .seaweedC) ? 30 : nil }
 
     var animationFrameNames: [String] {
         switch self {
@@ -100,14 +101,17 @@ extension AquariumDecorationKind {
         case .seaweedB:
             ["seaweed_b_01", "seaweed_b_02", "seaweed_b_03", "seaweed_b_04",
              "seaweed_b_05", "seaweed_b_06", "seaweed_b_07", "seaweed_b_08"]
+        case .seaweedC:
+            ["seaweed_c_01", "seaweed_c_02", "seaweed_c_03", "seaweed_c_04",
+             "seaweed_c_05", "seaweed_c_06", "seaweed_c_07", "seaweed_c_08"]
         case .seaweed, .rock:
             []
         }
     }
 
     /// frame間隔にはcross fade時間を含む。
-    var animationFrameDuration: TimeInterval { (self == .seaweedA || self == .seaweedB) ? 0.25 : 0.9 }
-    var animationCrossFadeDuration: TimeInterval { (self == .seaweedA || self == .seaweedB) ? 0.1 : 0 }
+    var animationFrameDuration: TimeInterval { (self == .seaweedA || self == .seaweedB || self == .seaweedC) ? 0.25 : 0.9 }
+    var animationCrossFadeDuration: TimeInterval { (self == .seaweedA || self == .seaweedB || self == .seaweedC) ? 0.1 : 0 }
 
     var displaySize: CGSize {
         // 新素材は512×768。比率を保ち、広がった葉も★1装飾として控えめな大きさにする。
@@ -115,6 +119,8 @@ extension AquariumDecorationKind {
         case .seaweedA: CGSize(width: 84, height: 126)
         // Bは512×1024。Aの約1.4倍の高さで、横幅は控えめに維持する。
         case .seaweedB: CGSize(width: 88, height: 176)
+        // Cは768×512。透過余白を除いた見た目はAの高さ約68%、幅約1.58倍。
+        case .seaweedC: CGSize(width: 126, height: 84)
         case .seaweed, .rock: CGSize(width: 120, height: 120)
         }
     }
@@ -125,6 +131,8 @@ extension AquariumDecorationKind {
         case .seaweedA: 0.965
         // Bの透過余白を除いた根元（約1001/1024）を地面へ合わせる。
         case .seaweedB: 0.978
+        // Cの根元は全frame共通で約489/512。
+        case .seaweedC: 0.955
         case .seaweed, .rock: nil
         }
     }
@@ -136,7 +144,12 @@ extension AquariumDecorationKind {
     /// 透過余白を除いた横方向の占有範囲（画像幅=0〜1）。配置時の安全marginに使う。
     var placementHorizontalContentBounds: ClosedRange<CGFloat> {
         // 透過余白を見込んだ既存の配置marginを維持する。
-        (self == .seaweedA || self == .seaweedB) ? 0.07...0.89 : 0...1
+        switch self {
+        case .seaweedA, .seaweedB: 0.07...0.89
+        // Cの全frameの占有範囲（x=41〜691/768）を余裕を持って包含。
+        case .seaweedC: 0.05...0.91
+        case .seaweed, .rock: 0...1
+        }
     }
 
     var assetImageName: String? {
@@ -149,12 +162,13 @@ extension AquariumDecorationKind {
         case .rock: "岩"
         case .seaweedA: "海藻A"
         case .seaweedB: "海藻B"
+        case .seaweedC: "海藻C"
         }
     }
 
     var storageIconName: String {
         switch self {
-        case .seaweed, .seaweedA, .seaweedB: "leaf.fill"
+        case .seaweed, .seaweedA, .seaweedB, .seaweedC: "leaf.fill"
         case .rock: "mountain.2.fill"
         }
     }
@@ -163,7 +177,7 @@ extension AquariumDecorationKind {
         switch self {
         case .seaweed: CGPoint(x: 0.5, y: 0.80)
         case .rock: CGPoint(x: 0.5, y: 0.84)
-        case .seaweedA, .seaweedB: CGPoint(x: 0.5, y: 0.92)
+        case .seaweedA, .seaweedB, .seaweedC: CGPoint(x: 0.5, y: 0.92)
         }
     }
 
@@ -174,7 +188,7 @@ extension AquariumDecorationKind {
             AquariumDecorationMovementBounds(x: 0.10...0.90, y: 0.68...0.90)
         case .rock:
             AquariumDecorationMovementBounds(x: 0.10...0.90, y: 0.72...0.92)
-        case .seaweedA, .seaweedB:
+        case .seaweedA, .seaweedB, .seaweedC:
             .commonGround
         }
     }

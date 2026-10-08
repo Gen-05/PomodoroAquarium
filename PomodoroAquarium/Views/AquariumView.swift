@@ -442,7 +442,7 @@ struct AquariumDecorationView: View {
                 .frame(width: 120, height: 120)
         } else {
             switch decoration.kind {
-            case .seaweed, .seaweedA, .seaweedB:
+            case .seaweed, .seaweedA, .seaweedB, .seaweedC:
                 HStack(alignment: .bottom, spacing: -8) {
                     seaweedStem(height: 88, rotation: -8)
                     seaweedStem(height: 120, rotation: 3)
