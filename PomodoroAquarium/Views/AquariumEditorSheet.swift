@@ -15,6 +15,9 @@ struct AquariumEditorSheet: View {
     let selectFish: (UUID) -> Void
     let close: () -> Void
     let selectBackground: (AquariumBackgroundTheme) -> Void
+    var storeAllFish: () -> Void = {}
+    var storeAllDecorations: () -> Void = {}
+    @State private var bulkStorageConfirmation: AquariumEditorBulkStorage?
     @State private var category: AquariumDecorationCategory?
     @State private var showsPlaced = false
 
@@ -62,6 +65,22 @@ struct AquariumEditorSheet: View {
         .background(Color(red: 0.78, green: 0.94, blue: 0.98).ignoresSafeArea())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("aquariumEditor.fullScreenLibrary")
+        .alert(bulkStorageConfirmation == .fish ? "魚を全部しまいますか？" : "装飾を全部しまいますか？",
+               isPresented: Binding(get: { bulkStorageConfirmation != nil }, set: { if !$0 { bulkStorageConfirmation = nil } }),
+               presenting: bulkStorageConfirmation) { target in
+            Button("キャンセル", role: .cancel) { bulkStorageConfirmation = nil }
+            Button("全部しまう") {
+                bulkStorageConfirmation = nil
+                if target == .fish { storeAllFish() }
+                else if target == .decorations { storeAllDecorations() }
+            }
+        } message: { target in
+            if target == .fish {
+                Text("水槽にいる魚\(player?.activeAquariumFish.count ?? 0)匹をすべてしまいます。\n所持している魚は失われません。")
+            } else {
+                Text("配置済みの装飾\(placements.filter(\.isPlaced).count)個をすべてしまいます。\n所持している装飾は失われません。")
+            }
+        }
     }
 
     private var fishContent: some View {
@@ -73,6 +92,11 @@ struct AquariumEditorSheet: View {
             if let player {
                 Text("水槽 \(player.activeAquariumFish.count) / \(AquariumDisplayLimits.maxFishCount)匹").font(.caption)
                 if showsActiveFish {
+                    bulkStorageButton(.fish, count: player.activeAquariumFish.count)
+                    if player.activeAquariumFish.isEmpty {
+                        Text("水槽に魚がいません").font(.subheadline).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("aquariumEditor.emptyFish")
+                    }
                     ForEach(AquariumFishEditorPresentation.ownedSpecies(from: player.activeAquariumFish), id: \.self) { species in
                         VStack(alignment: .leading) {
                             Text("\(species.name)・水槽 \(player.aquariumCount(for: species))匹").font(.subheadline.bold())
@@ -151,6 +175,11 @@ struct AquariumEditorSheet: View {
                 Text("配置済み").tag(true)
             }.pickerStyle(.segmented)
             if showsPlaced {
+                bulkStorageButton(.decorations, count: placements.filter(\.isPlaced).count)
+                if !placements.contains(where: { $0.isPlaced }) {
+                    Text("配置済みの装飾はありません").font(.subheadline).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("aquariumEditor.emptyDecorations")
+                }
                 ForEach(placements.filter { $0.isPlaced && (category == nil || $0.kind.category == category) }) { placement in
                     Button { selectPlacement(placement.decorationID) } label: {
                         HStack {
@@ -184,6 +213,17 @@ struct AquariumEditorSheet: View {
             }
         }
     }
+    private func bulkStorageButton(_ target: AquariumEditorBulkStorage, count: Int) -> some View {
+        Button { bulkStorageConfirmation = target } label: {
+            Label(target == .fish ? "魚を全部しまう" : "装飾を全部しまう", systemImage: "tray.and.arrow.down")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain).disabled(count == 0).opacity(count == 0 ? 0.4 : 1)
+        .accessibilityIdentifier(target == .fish ? "aquariumEditor.storeAllFish" : "aquariumEditor.storeAllDecorations")
+    }
+
     private func thumbnail(_ kind: AquariumDecorationKind) -> some View {
         AquariumDecorationView(decoration: AquariumDecoration(id: kind.rawValue, kind: kind, relativeX: 0.5, relativeY: 0.9, scale: 1), backgroundTheme: backgroundTheme)
             .scaleEffect(0.42).frame(width: 75, height: 65).allowsHitTesting(false)

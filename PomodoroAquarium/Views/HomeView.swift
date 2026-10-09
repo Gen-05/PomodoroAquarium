@@ -307,7 +307,9 @@ struct HomeView: View {
                                 addFish: addFishFromLibrary, storeFish: storeAquariumFish,
                                 selectFish: { id in selectAquariumFish(id); showsEditorLibrary = false },
                                 close: { showsEditorLibrary = false },
-                                selectBackground: { theme in selectBackground(theme); showsEditorLibrary = false })
+                                selectBackground: { theme in selectBackground(theme); showsEditorLibrary = false },
+                                storeAllFish: { storeAllAquariumItems(.fish) },
+                                storeAllDecorations: { storeAllAquariumItems(.decorations) })
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .opacity(fishDragSession == nil ? 1 : 0)
                             .zIndex(40)
@@ -1035,6 +1037,27 @@ struct HomeView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .zIndex(25)
         }
+    }
+
+    private func storeAllAquariumItems(_ target: AquariumEditorBulkStorage) {
+        guard isAquariumEditorPresented, showsEditorLibrary, let work = editorWorkingState else { return }
+        // Recheck the current working state when confirmation is accepted.
+        if target == .fish && work.player.activeAquariumFish.isEmpty { return }
+        let before = AquariumEditorDraft(player: work.player, placements: work.placements, background: displayedBackgroundTheme)
+        guard let after = target.applying(to: before) else { return }
+        work.apply(after)
+        if target == .fish {
+            for id in before.fishIDs {
+                fishAppearances[id] = nil
+                fishSpawnPositions[id] = nil
+            }
+            selectedAquariumFishID = nil
+        } else {
+            updateDecorationEditingState(isEditing: false)
+            aquariumSelectionResetRequestID = UUID()
+        }
+        // No per-item callback: the entire change is one history entry and one save.
+        markAquariumEditorChanged()
     }
 
     private func removeSelectedAquariumFish() {

@@ -1066,6 +1066,89 @@ final class PomodoroAquariumUITests: XCTestCase {
     }
 
     @MainActor
+    func testBulkStorageConfirmationUndoRedoAndRestart() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-core-tutorial-in-memory", "-fish-editor-ui-test", "-timerSessionState", "",
+                                "-hasCompletedOnboarding", "YES", "-hasCompletedCoreTutorial", "YES"]
+        app.launch()
+        if app.buttons["aquariumEditor.cancel"].waitForExistence(timeout: 2) {
+            app.buttons["aquariumEditor.cancel"].tap()
+            XCTAssertTrue(app.alerts["編集内容を破棄しますか？"].waitForExistence(timeout: 5))
+            app.alerts["編集内容を破棄しますか？"].buttons["変更を破棄"].tap()
+        } else { app.buttons["mainTab.aquarium"].tap() }
+        app.buttons["aquariumEditor.start"].tap()
+        XCTAssertTrue(app.alerts["水槽を編集しますか？"].waitForExistence(timeout: 5))
+        app.alerts["水槽を編集しますか？"].buttons["編集する"].tap()
+        for _ in 0..<2 {
+            app.buttons["aquariumEditor.category.fish"].tap()
+            let fish = app.buttons["aquariumEditor.dragFish.clownfish"]
+            XCTAssertTrue(fish.waitForExistence(timeout: 5)); fish.tap()
+        }
+        app.buttons["aquariumEditor.category.fish"].tap()
+        app.buttons["水槽にいる魚"].tap()
+        let fishRows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "aquariumEditor.selectFish."))
+        let fishIDs = Set(fishRows.allElementsBoundByIndex.map(\.identifier))
+        XCTAssertEqual(fishIDs.count, 2)
+        let fishBulk = app.buttons["aquariumEditor.storeAllFish"]
+        fishBulk.tap()
+        let fishAlert = app.alerts["魚を全部しまいますか？"]
+        XCTAssertTrue(fishAlert.waitForExistence(timeout: 5))
+        XCTAssertTrue(fishAlert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "2匹")).firstMatch.exists)
+        fishAlert.buttons["キャンセル"].tap()
+        XCTAssertEqual(fishRows.count, 2)
+        fishBulk.tap()
+        XCTAssertTrue(fishAlert.waitForExistence(timeout: 5))
+        fishAlert.buttons["全部しまう"].tap()
+        XCTAssertTrue(app.staticTexts["aquariumEditor.emptyFish"].waitForExistence(timeout: 5))
+        XCTAssertFalse(fishBulk.isEnabled)
+        app.buttons["aquariumEditor.closeLibrary"].tap()
+        app.buttons["aquariumEditor.undo"].tap()
+        app.buttons["aquariumEditor.category.fish"].tap()
+        XCTAssertEqual(Set(fishRows.allElementsBoundByIndex.map(\.identifier)), fishIDs)
+        app.buttons["aquariumEditor.closeLibrary"].tap()
+        app.buttons["aquariumEditor.redo"].tap()
+        app.buttons["aquariumEditor.category.fish"].tap()
+        XCTAssertTrue(app.staticTexts["aquariumEditor.emptyFish"].waitForExistence(timeout: 5))
+        app.buttons["aquariumEditor.closeLibrary"].tap()
+        app.buttons["aquariumEditor.category.decoration"].tap()
+        let decoration = app.buttons["aquariumEditor.add.seaweed-a"]
+        XCTAssertTrue(decoration.waitForExistence(timeout: 5)); decoration.tap()
+        app.buttons["aquariumEditor.category.decoration"].tap()
+        app.buttons["配置済み"].tap()
+        let placedRows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "aquariumEditor.selectPlaced."))
+        let placementIDs = Set(placedRows.allElementsBoundByIndex.map(\.identifier))
+        XCTAssertGreaterThan(placementIDs.count, 0)
+        let decorationBulk = app.buttons["aquariumEditor.storeAllDecorations"]
+        decorationBulk.tap()
+        let decorationAlert = app.alerts["装飾を全部しまいますか？"]
+        XCTAssertTrue(decorationAlert.waitForExistence(timeout: 5))
+        decorationAlert.buttons["キャンセル"].tap()
+        XCTAssertEqual(Set(placedRows.allElementsBoundByIndex.map(\.identifier)), placementIDs)
+        decorationBulk.tap()
+        XCTAssertTrue(decorationAlert.waitForExistence(timeout: 5))
+        decorationAlert.buttons["全部しまう"].tap()
+        XCTAssertTrue(app.staticTexts["aquariumEditor.emptyDecorations"].waitForExistence(timeout: 5))
+        XCTAssertFalse(decorationBulk.isEnabled)
+        keepScreenshot(app, name: "bulk-storage-empty-list")
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.buttons["aquariumEditor.undo"].waitForExistence(timeout: 5))
+        app.buttons["aquariumEditor.undo"].tap()
+        app.buttons["aquariumEditor.category.decoration"].tap()
+        app.buttons["配置済み"].tap()
+        XCTAssertEqual(Set(placedRows.allElementsBoundByIndex.map(\.identifier)), placementIDs)
+        app.buttons["aquariumEditor.closeLibrary"].tap()
+        app.buttons["aquariumEditor.redo"].tap()
+        app.buttons["aquariumEditor.category.decoration"].tap()
+        app.buttons["配置済み"].tap()
+        XCTAssertTrue(app.staticTexts["aquariumEditor.emptyDecorations"].waitForExistence(timeout: 5))
+        app.buttons["aquariumEditor.closeLibrary"].tap()
+        app.buttons["aquariumEditor.cancel"].tap()
+        XCTAssertTrue(app.alerts["編集内容を破棄しますか？"].waitForExistence(timeout: 5))
+        app.alerts["編集内容を破棄しますか？"].buttons["変更を破棄"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testAquariumHistoryButtonsPersistRedoAndClearOnCancel() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-core-tutorial-in-memory", "-timerSessionState", ""]
