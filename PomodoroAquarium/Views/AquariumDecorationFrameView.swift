@@ -96,14 +96,16 @@ struct AquariumDecorationFrameView: View {
 #if DEBUG
 /// 同じ海藻animationを3背景で比較。保存・Aquarium simulationは使用しない。
 struct AquariumSeaweedAnimationPreview: View {
+    var kind: AquariumDecorationKind = .seaweedA
     var body: some View {
         HStack(spacing: 2) {
             ForEach(AquariumBackgroundTheme.allCases, id: \.self) { theme in
                 GeometryReader { geometry in
                     ZStack {
                         AquariumBackground(theme: theme)
-                        AquariumDecorationFrameView(kind: .seaweedA)
-                            .offset(y: AquariumDecorationKind.seaweedA.groundAnchorOffset())
+                        AquariumDecorationFrameView(kind: kind)
+                            .modifier(AquariumSeaweedColorCorrection.correction(for: theme))
+                            .offset(y: kind.groundAnchorOffset())
                             .position(x: geometry.size.width / 2, y: geometry.size.height * 0.86)
                         VStack {
                             Text(theme.displayName)
@@ -121,7 +123,11 @@ struct AquariumSeaweedAnimationPreview: View {
     }
 }
 
-#Preview("海藻A・3背景") {
-    AquariumSeaweedAnimationPreview()
+#Preview("海藻A・B・C 色補正比較") {
+    VStack(spacing: 4) {
+        AquariumSeaweedAnimationPreview(kind: .seaweedA)
+        AquariumSeaweedAnimationPreview(kind: .seaweedB)
+        AquariumSeaweedAnimationPreview(kind: .seaweedC)
+    }
 }
 #endif

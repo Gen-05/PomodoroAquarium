@@ -1634,7 +1634,7 @@ struct HomeView: View {
             closeDecorationStorage()
         } label: {
             VStack(spacing: 8) {
-                AquariumDecorationView(decoration: placement.decoration)
+                AquariumDecorationView(decoration: placement.decoration, backgroundTheme: displayedBackgroundTheme)
                     .scaleEffect(0.5)
                     .frame(height: 72)
 

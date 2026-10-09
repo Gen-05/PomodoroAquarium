@@ -290,9 +290,15 @@ enum AquariumDecorationEditorPresentation {
     static func inventory(
         from placements: [AquariumDecorationPlacement]
     ) -> [AquariumDecorationInventoryItem] {
-        AquariumDecorationKind.allCases.compactMap { kind in
+        let hasSmallRocks = placements.contains { $0.kind.usesBackgroundVariants }
+        return AquariumDecorationKind.allCases.compactMap { kind in
             let ownedPlacements = placements.filter { $0.kind == kind }
             guard let firstOwnedPlacement = ownedPlacements.first else { return nil }
+            // 配置済みの初期仮岩だけを小岩所持時に省く。保存・収納済み旧岩の操作は維持。
+            if kind == .rock, hasSmallRocks,
+               ownedPlacements.allSatisfy({ $0.decorationID == "default-rock" && $0.isPlaced }) {
+                return nil
+            }
             let placedCount = ownedPlacements.count(where: \.isPlaced)
             let nextStoredPlacement = ownedPlacements.first { !$0.isPlaced }
 
@@ -718,6 +724,7 @@ struct AquariumSideEditor: View {
             VStack(spacing: 4) {
                 AquariumDecorationDragHandle(
                     placement: placement,
+                    backgroundTheme: selectedBackgroundTheme,
                     canDrag: item.canPlaceAnother,
                     updateDrag: updateDecorationDrag,
                     finishDrag: finishDecorationDrag,
@@ -984,6 +991,7 @@ private struct AquariumEditorScrollBar: View {
 
 private struct AquariumDecorationDragHandle: View {
     let placement: AquariumDecorationPlacement
+    let backgroundTheme: AquariumBackgroundTheme
     let canDrag: Bool
     let updateDrag: (String, CGPoint) -> Void
     let finishDrag: (String, CGPoint) -> Void
@@ -992,7 +1000,7 @@ private struct AquariumDecorationDragHandle: View {
     @State private var dragIntent: AquariumFishDragIntent?
 
     var body: some View {
-        AquariumDecorationView(decoration: placement.decoration)
+        AquariumDecorationView(decoration: placement.decoration, backgroundTheme: backgroundTheme)
             .scaleEffect(0.42)
             .padding(AquariumFishDragInteraction.hitAreaExpansion)
             .contentShape(Rectangle())
@@ -1026,6 +1034,7 @@ private struct AquariumDecorationDragHandle: View {
 
 struct AquariumDecorationDragPreview: View {
     let decoration: AquariumDecoration
+    var backgroundTheme: AquariumBackgroundTheme = .aquarium
     var relativeY: CGFloat? = nil
 
     private var depth: AquariumDecorationDepthPresentation {
@@ -1033,7 +1042,7 @@ struct AquariumDecorationDragPreview: View {
     }
 
     var body: some View {
-        AquariumDecorationView(decoration: decoration)
+        AquariumDecorationView(decoration: decoration, backgroundTheme: backgroundTheme)
             .scaleEffect(0.72 * depth.scale)
             .opacity(depth.opacity)
             .frame(width: 110, height: 110)

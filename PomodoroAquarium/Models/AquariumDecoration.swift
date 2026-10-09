@@ -13,6 +13,9 @@ enum AquariumDecorationKind: String, Codable, CaseIterable {
     case seaweedA = "seaweed-a"
     case seaweedB = "seaweed-b"
     case seaweedC = "seaweed_c"
+    case smallRockA = "small_rock_a"
+    case smallRockB = "small_rock_b"
+    case smallRockC = "small_rock_c"
 }
 
 enum AquariumDecorationType: String {
@@ -47,19 +50,34 @@ struct AquariumDecorationMovementBounds {
     static let commonGround = AquariumDecorationMovementBounds(x: 0.05...0.95, y: 0.72...0.96)
 }
 
+/// 装飾ZStack内の優先度。Y順序（0〜1）で種類間の順序は逆転しない。
+enum AquariumDecorationRenderLayer: Double {
+    case rock = 0
+    case vegetation = 2
+}
+
 /// 保存済みの位置から都度算出する、水中の距離感。個体のscaleは上書きしない。
 struct AquariumDecorationDepthPresentation {
     let depthProgress: CGFloat
     let scale: CGFloat
     let opacity: Double
-    let zIndex: Double
+    let layerPriority: Double
+    let depthOrder: Double
+    var zIndex: Double { layerPriority + depthOrder }
+
+    /// 操作中だけ装飾内の最前面へ。魚とのZStackの関係は変えない。
+    func renderZIndex(isDragging: Bool) -> Double {
+        (isDragging ? 4 : layerPriority) + depthOrder
+    }
 
     init(kind: AquariumDecorationKind, relativeY: CGFloat) {
+        layerPriority = kind.renderLayer.rawValue
+        let orderBounds: ClosedRange<CGFloat> = kind.groundAnchorY == nil ? 0...1 : kind.movementBounds.y
+        depthOrder = Double(min(max(relativeY, orderBounds.lowerBound), orderBounds.upperBound))
         guard kind.groundAnchorY != nil else {
             depthProgress = 0
             scale = 1
             opacity = 1
-            zIndex = 0
             return
         }
         let band = kind.movementBounds.y
@@ -69,29 +87,32 @@ struct AquariumDecorationDepthPresentation {
         depthProgress = depth
         scale = 1 - 0.24 * depth
         opacity = Double(1 - 0.20 * depth)
-        // 装飾レイヤー内だけの順序。魚とのレイヤー関係は変更しない。
-        zIndex = Double(y)
     }
 }
 
 extension AquariumDecorationKind {
+    /// 将来の中岩はrock、サンゴ等はvegetationを同じカテゴリ規則で利用できる。
+    var renderLayer: AquariumDecorationRenderLayer {
+        category == .rock ? .rock : .vegetation
+    }
+
     var category: AquariumDecorationCategory {
         switch self {
         case .seaweed, .seaweedA, .seaweedB, .seaweedC: .plant
-        case .rock: .rock
+        case .rock, .smallRockA, .smallRockB, .smallRockC: .rock
         }
     }
 
     var decorationType: AquariumDecorationType {
         switch self {
         case .seaweed, .seaweedA, .seaweedB, .seaweedC: .seaweed
-        case .rock: .rock
+        case .rock, .smallRockA, .smallRockB, .smallRockC: .rock
         }
     }
 
     /// 装飾のstable IDはkindのrawValue。価格は将来用の定義のみで購入処理には未接続。
-    var stars: Int? { (self == .seaweedA || self == .seaweedB || self == .seaweedC) ? 1 : nil }
-    var plannedPrice: Int? { (self == .seaweedA || self == .seaweedB || self == .seaweedC) ? 30 : nil }
+    var stars: Int? { (self == .seaweedA || self == .seaweedB || self == .seaweedC || usesBackgroundVariants) ? 1 : nil }
+    var plannedPrice: Int? { (self == .seaweedA || self == .seaweedB || self == .seaweedC || usesBackgroundVariants) ? 30 : nil }
 
     var animationFrameNames: [String] {
         switch self {
@@ -104,7 +125,7 @@ extension AquariumDecorationKind {
         case .seaweedC:
             ["seaweed_c_01", "seaweed_c_02", "seaweed_c_03", "seaweed_c_04",
              "seaweed_c_05", "seaweed_c_06", "seaweed_c_07", "seaweed_c_08"]
-        case .seaweed, .rock:
+        case .seaweed, .rock, .smallRockA, .smallRockB, .smallRockC:
             []
         }
     }
@@ -121,6 +142,10 @@ extension AquariumDecorationKind {
         case .seaweedB: CGSize(width: 88, height: 176)
         // Cは768×512。透過余白を除いた見た目はAの高さ約68%、幅約1.58倍。
         case .seaweedC: CGSize(width: 126, height: 84)
+        // 元画像はA=768×448、B=768×272、C=768×400。
+        case .smallRockA: CGSize(width: 96, height: 56)
+        case .smallRockB: CGSize(width: 112, height: CGFloat(112) * 272 / 768)
+        case .smallRockC: CGSize(width: 108, height: 56.25)
         case .seaweed, .rock: CGSize(width: 120, height: 120)
         }
     }
@@ -133,6 +158,9 @@ extension AquariumDecorationKind {
         case .seaweedB: 0.978
         // Cの根元は全frame共通で約489/512。
         case .seaweedC: 0.955
+        case .smallRockA: 0.995
+        case .smallRockB: 0.99
+        case .smallRockC: 0.993
         case .seaweed, .rock: nil
         }
     }
@@ -148,12 +176,34 @@ extension AquariumDecorationKind {
         case .seaweedA, .seaweedB: 0.07...0.89
         // Cの全frameの占有範囲（x=41〜691/768）を余裕を持って包含。
         case .seaweedC: 0.05...0.91
+        // 3背景共通のalpha占有範囲x=16〜751/768を包含。
+        case .smallRockA, .smallRockB, .smallRockC: 0.02...0.98
         case .seaweed, .rock: 0...1
         }
     }
 
+    var usesBackgroundVariants: Bool {
+        switch self {
+        case .smallRockA, .smallRockB, .smallRockC: true
+        default: false
+        }
+    }
+
+    /// Asset名は定義IDと現在の背景から都度計算し、Placementへ保存しない。
+    /// 中岩等も背景別素材を持つkindとして追加すれば同じ規則を利用できる。
+    func assetImageName(for backgroundTheme: AquariumBackgroundTheme) -> String? {
+        guard usesBackgroundVariants else { return animationFrameNames.first }
+        let suffix: String
+        switch backgroundTheme {
+        case .aquarium: suffix = "basic"
+        case .tropical: suffix = "coral"
+        case .deepSea: suffix = "deep"
+        }
+        return "\(rawValue)_\(suffix)"
+    }
+
     var assetImageName: String? {
-        animationFrameNames.first
+        assetImageName(for: .aquarium)
     }
 
     var displayName: String {
@@ -163,13 +213,16 @@ extension AquariumDecorationKind {
         case .seaweedA: "海藻A"
         case .seaweedB: "海藻B"
         case .seaweedC: "海藻C"
+        case .smallRockA: "小岩A"
+        case .smallRockB: "小岩B"
+        case .smallRockC: "小岩C"
         }
     }
 
     var storageIconName: String {
         switch self {
         case .seaweed, .seaweedA, .seaweedB, .seaweedC: "leaf.fill"
-        case .rock: "mountain.2.fill"
+        case .rock, .smallRockA, .smallRockB, .smallRockC: "mountain.2.fill"
         }
     }
 
@@ -177,7 +230,7 @@ extension AquariumDecorationKind {
         switch self {
         case .seaweed: CGPoint(x: 0.5, y: 0.80)
         case .rock: CGPoint(x: 0.5, y: 0.84)
-        case .seaweedA, .seaweedB, .seaweedC: CGPoint(x: 0.5, y: 0.92)
+        case .seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC: CGPoint(x: 0.5, y: 0.92)
         }
     }
 
@@ -188,7 +241,7 @@ extension AquariumDecorationKind {
             AquariumDecorationMovementBounds(x: 0.10...0.90, y: 0.68...0.90)
         case .rock:
             AquariumDecorationMovementBounds(x: 0.10...0.90, y: 0.72...0.92)
-        case .seaweedA, .seaweedB, .seaweedC:
+        case .seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC:
             .commonGround
         }
     }

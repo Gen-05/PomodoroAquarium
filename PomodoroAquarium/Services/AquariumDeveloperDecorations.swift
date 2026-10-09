@@ -9,7 +9,10 @@ enum AquariumDeveloperDecorations {
     static let developerOwnedDecorationIDs: [String] = [
         AquariumDecorationKind.seaweedA.rawValue,
         AquariumDecorationKind.seaweedB.rawValue,
-        AquariumDecorationKind.seaweedC.rawValue
+        AquariumDecorationKind.seaweedC.rawValue,
+        AquariumDecorationKind.smallRockA.rawValue,
+        AquariumDecorationKind.smallRockB.rawValue,
+        AquariumDecorationKind.smallRockC.rawValue
     ]
     static let ownedCountPerDecoration = 5
 #else

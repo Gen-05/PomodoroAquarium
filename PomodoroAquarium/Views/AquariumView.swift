@@ -33,6 +33,7 @@ struct AquariumView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var decorationPlacements: [AquariumDecorationPlacement]
     @State private var editingDecorationID: String?
+    @State private var draggingDecorationID: String?
     @State private var originalPosition: CGPoint?
     @State private var previewPosition: CGPoint?
     @State private var fishPositions: [UUID: CGPoint] = [:]
@@ -164,6 +165,7 @@ struct AquariumView: View {
             }) { placement in
                 EditableAquariumDecorationView(
                     placement: placement,
+                    backgroundTheme: backgroundTheme,
                     aquariumSize: size,
                     isEditing: isEditing,
                     isSelected: editingDecorationID == placement.decorationID,
@@ -171,15 +173,23 @@ struct AquariumView: View {
                     select: { beginEditing(placement) },
                     updatePreview: { previewPosition = $0 },
                     move: { moveDecoration(placement, to: $0) },
+                    setDragging: { isDragging in
+                        if isDragging {
+                            draggingDecorationID = placement.decorationID
+                        } else if draggingDecorationID == placement.decorationID {
+                            draggingDecorationID = nil
+                        }
+                    },
                     store: { storeDecoration(placement) }
                 )
                 .zIndex(AquariumDecorationDepthPresentation(
                     kind: placement.kind, relativeY: position(for: placement).y
-                ).zIndex)
+                ).renderZIndex(isDragging: isEditing && draggingDecorationID == placement.decorationID))
             }
             if let decorationDragPreview {
                 AquariumDecorationDragPreview(
                     decoration: decorationDragPreview,
+                    backgroundTheme: backgroundTheme,
                     relativeY: decorationDragPreview.relativeY
                 )
                 .position(
@@ -188,7 +198,7 @@ struct AquariumView: View {
                 )
                 .zIndex(AquariumDecorationDepthPresentation(
                     kind: decorationDragPreview.kind, relativeY: decorationDragPreview.relativeY
-                ).zIndex)
+                ).renderZIndex(isDragging: true))
             }
         }
         .allowsHitTesting(isEditing)
@@ -261,6 +271,7 @@ struct AquariumView: View {
     }
 
     private func finishDecorationEditing() {
+        draggingDecorationID = nil
         editingDecorationID = nil
         originalPosition = nil
         previewPosition = nil
@@ -282,6 +293,7 @@ struct AquariumView: View {
                     SwimmingFishView(
                         fishID: playerFish.id,
                         species: playerFish.species,
+                        backgroundTheme: backgroundTheme,
                         isFavorite: false,
                         aquariumSize: size,
                         updateDate: timeline.date,
@@ -303,6 +315,7 @@ struct AquariumView: View {
 
 private struct EditableAquariumDecorationView: View {
     let placement: AquariumDecorationPlacement
+    let backgroundTheme: AquariumBackgroundTheme
     let aquariumSize: CGSize
     let isEditing: Bool
     let isSelected: Bool
@@ -310,6 +323,7 @@ private struct EditableAquariumDecorationView: View {
     let select: () -> Void
     let updatePreview: (CGPoint) -> Void
     let move: (CGPoint) -> Void
+    let setDragging: (Bool) -> Void
     let store: () -> Void
 
     @State private var dragStartPosition: CGPoint?
@@ -338,7 +352,7 @@ private struct EditableAquariumDecorationView: View {
 
     var body: some View {
         ZStack {
-            AquariumDecorationView(decoration: decoration)
+            AquariumDecorationView(decoration: decoration, backgroundTheme: backgroundTheme)
                 .scaleEffect(displayedScale)
                 .opacity(depth.opacity)
                 .overlay {
@@ -354,6 +368,9 @@ private struct EditableAquariumDecorationView: View {
                 .accessibilityElement()
                 .accessibilityLabel(isSelected ? "選択中の水槽装飾" : "水槽装飾")
                 .accessibilityIdentifier("aquariumEditor.placedDecoration.\(placement.decorationID)")
+                .accessibilityAction(named: "装飾を選択") {
+                    if isEditing { select() }
+                }
                 // 地面設置素材だけ、画像の根元を配置座標へ合わせる。
                 .offset(y: decoration.kind.groundAnchorOffset(scale: displayedScale))
                 .position(absolutePosition)
@@ -367,6 +384,7 @@ private struct EditableAquariumDecorationView: View {
                             if dragStartPosition == nil {
                                 dragStartPosition = position
                                 select()
+                                setDragging(true)
                             }
                             guard let dragStartPosition else { return }
                             updatePreview(AquariumDecorationEditor.relativePosition(
@@ -380,6 +398,7 @@ private struct EditableAquariumDecorationView: View {
                             ))
                         }
                         .onEnded { value in
+                            defer { setDragging(false) }
                             guard isEditing, let dragStartPosition else {
                                 self.dragStartPosition = nil
                                 return
@@ -406,6 +425,7 @@ private struct EditableAquariumDecorationView: View {
             }
         }
         .frame(width: aquariumSize.width, height: aquariumSize.height)
+        .onDisappear { setDragging(false) }
     }
 }
 
@@ -429,17 +449,19 @@ private struct DecorationEditingControls: View {
 
 struct AquariumDecorationView: View {
     let decoration: AquariumDecoration
+    var backgroundTheme: AquariumBackgroundTheme = .aquarium
 
     @ViewBuilder
     var body: some View {
         if !decoration.kind.animationFrameNames.isEmpty {
             AquariumDecorationFrameView(kind: decoration.kind, placementID: decoration.id)
-        } else if let imageName = decoration.kind.assetImageName,
+                .modifier(AquariumSeaweedColorCorrection.correction(for: backgroundTheme))
+        } else if let imageName = decoration.kind.assetImageName(for: backgroundTheme),
            let image = UIImage(named: imageName) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 120, height: 120)
+                .frame(width: decoration.kind.displaySize.width, height: decoration.kind.displaySize.height)
         } else {
             switch decoration.kind {
             case .seaweed, .seaweedA, .seaweedB, .seaweedC:
@@ -456,7 +478,7 @@ struct AquariumDecorationView: View {
                     )
                 )
 
-            case .rock:
+            case .rock, .smallRockA, .smallRockB, .smallRockC:
                 ZStack(alignment: .bottom) {
                     Ellipse()
                         .fill(Color.black.opacity(0.18))
@@ -585,6 +607,7 @@ struct AquariumNeighborPositions: RandomAccessCollection {
 private struct SwimmingFishView: View {
     let fishID: UUID
     let species: FishSpecies
+    let backgroundTheme: AquariumBackgroundTheme
     let isFavorite: Bool
     let aquariumSize: CGSize
     let updateDate: Date
@@ -607,6 +630,7 @@ private struct SwimmingFishView: View {
     init(
         fishID: UUID,
         species: FishSpecies,
+        backgroundTheme: AquariumBackgroundTheme,
         isFavorite: Bool,
         aquariumSize: CGSize,
         updateDate: Date,
@@ -619,6 +643,7 @@ private struct SwimmingFishView: View {
     ) {
         self.fishID = fishID
         self.species = species
+        self.backgroundTheme = backgroundTheme
         self.isFavorite = isFavorite
         self.aquariumSize = aquariumSize
         self.updateDate = updateDate
@@ -664,6 +689,7 @@ private struct SwimmingFishView: View {
             }
 
             fishImage
+                .modifier(AquariumFishColorCorrection.correction(for: backgroundTheme, species: species))
                 // 分離された尾びれ素材がないため、1枚絵へ速度連動の微細な変形を加える。
                 .rotationEffect(.degrees(swimRotation + smallFishDirectionRotation))
                 .scaleEffect(x: 1, y: swimVerticalScale)
