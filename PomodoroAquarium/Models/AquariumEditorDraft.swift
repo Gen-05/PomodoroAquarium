@@ -11,6 +11,7 @@ struct AquariumEditorDraft: Codable, Equatable {
         var scale: Double
         var isPlaced: Bool
     }
+    var history: AquariumEditorHistory?
     var version = 1
     var fishIDs: [UUID]
     var placements: [Placement]
@@ -25,6 +26,28 @@ struct AquariumEditorDraft: Codable, Equatable {
         }
         self.background = background.rawValue
     }
+    var snapshot: Self {
+        var copy = self
+        copy.history = nil
+        copy.placements.sort { $0.id < $1.id }
+        return copy
+    }
+    var isValid: Bool {
+        version == 1 && AquariumBackgroundTheme(rawValue: background) != nil &&
+        Set(fishIDs).count == fishIDs.count && Set(placements.map(\.id)).count == placements.count &&
+        placements.allSatisfy { $0.x.isFinite && $0.y.isFinite && $0.scale.isFinite && $0.scale > 0 }
+    }
+    private enum CodingKeys: String, CodingKey { case version, fishIDs, placements, background, history }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        fishIDs = try values.decode([UUID].self, forKey: .fishIDs)
+        placements = try values.decode([Placement].self, forKey: .placements)
+        background = try values.decode(String.self, forKey: .background)
+        // Broken history must never prevent recovery of the current draft.
+        history = try? values.decodeIfPresent(AquariumEditorHistory.self, forKey: .history)
+    }
+
 }
 
 struct AquariumEditorDraftStore {
@@ -36,10 +59,7 @@ struct AquariumEditorDraftStore {
     func load() throws -> AquariumEditorDraft? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         let draft = try JSONDecoder().decode(AquariumEditorDraft.self, from: Data(contentsOf: url))
-        guard draft.version == 1, AquariumBackgroundTheme(rawValue: draft.background) != nil,
-              Set(draft.fishIDs).count == draft.fishIDs.count,
-              Set(draft.placements.map(\.id)).count == draft.placements.count,
-              draft.placements.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.scale.isFinite && $0.scale > 0 }) else {
+        guard draft.isValid else {
             throw CocoaError(.fileReadCorruptFile)
         }
         return draft
@@ -71,6 +91,19 @@ final class AquariumEditorWorkingState {
                 scale: state?.scale ?? original.scale, isPlaced: state?.isPlaced ?? original.isPlaced)
         }
     }
+    func apply(_ draft: AquariumEditorDraft) {
+        let ownedIDs = Set(player.ownedFish.map(\.id))
+        player.activeAquariumFishIDs = draft.fishIDs.filter { ownedIDs.contains($0) }
+        let byID = Dictionary(uniqueKeysWithValues: draft.placements.map { ($0.id, $0) })
+        for placement in placements {
+            guard let state = byID[placement.decorationID], state.kind == placement.kindRawValue else { continue }
+            placement.relativeX = state.x
+            placement.relativeY = state.y
+            placement.scale = state.scale
+            placement.isPlaced = state.isPlaced
+        }
+    }
+
 }
 
 /// A single commit boundary; a future history stack can operate on draft values above it.

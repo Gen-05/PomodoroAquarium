@@ -118,6 +118,7 @@ struct HomeView: View {
     
     @Query private var players: [Player]
     @Query private var officialDecorationPlacements: [AquariumDecorationPlacement]
+    @State private var editorHistory: AquariumEditorHistory?
     @State private var editorWorkingState: AquariumEditorWorkingState?
     @State private var editorPersistenceError: String?
     @State private var showsEditorCancelConfirmation = false
@@ -794,8 +795,26 @@ struct HomeView: View {
             }
             .buttonStyle(.plain).foregroundStyle(.white)
             .padding(.horizontal, 16).padding(.top, 8)
+            HStack(spacing: 0) {
+                historyButton(isRedo: false)
+                historyButton(isRedo: true)
+            }
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(.top, 4)
             Spacer()
         }.zIndex(30)
+    }
+
+    private func historyButton(isRedo: Bool) -> some View {
+        let enabled = isRedo ? editorHistory?.canRedo == true : editorHistory?.canUndo == true
+        return Button { applyAquariumHistory(isRedo: isRedo) } label: {
+            Image(systemName: isRedo ? "arrow.uturn.forward" : "arrow.uturn.backward")
+                .frame(width: 44, height: 44)
+                .foregroundStyle(.white.opacity(enabled ? 1 : 0.3))
+        }
+        .buttonStyle(.plain).disabled(!enabled)
+        .accessibilityLabel(isRedo ? "やり直す" : "元に戻す")
+        .accessibilityIdentifier(isRedo ? "aquariumEditor.redo" : "aquariumEditor.undo")
     }
 
     private func editorCategoryButton(_ category: AquariumEditorCategory, title: String, symbol: String) -> some View {
@@ -1223,6 +1242,9 @@ struct HomeView: View {
 
     private func markAquariumEditorChanged() {
         guard mode == .aquariumEditor else { return }
+        guard let work = editorWorkingState else { return }
+        let draft = AquariumEditorDraft(player: work.player, placements: work.placements, background: displayedBackgroundTheme)
+        guard editorHistory?.record(draft) == true else { return }
         aquariumEditorNavigation?.markChanged()
         persistAquariumEditorDraft()
     }
@@ -1245,6 +1267,7 @@ struct HomeView: View {
         catch { editorPersistenceError = "一時保存できませんでした。\(error.localizedDescription)"; return }
         editorWorkingState = AquariumEditorWorkingState(official: player, placements: currentPlacements, draft: initial)
         draftBackgroundTheme = savedBackgroundTheme
+        editorHistory = AquariumEditorHistory(initial: initial)
         aquariumEditorCategory = .fish
         clearAquariumSelections()
         fishDragSession = nil
@@ -1261,11 +1284,28 @@ struct HomeView: View {
         )
     }
 
+    private func applyAquariumHistory(isRedo: Bool) {
+        guard let work = editorWorkingState else { return }
+        let draft = isRedo ? editorHistory?.redo() : editorHistory?.undo()
+        guard let draft else { return }
+        let previousIDs = Set(work.player.activeAquariumFishIDs)
+        work.apply(draft)
+        draftBackgroundTheme = AquariumBackgroundTheme(rawValue: draft.background)
+        clearAquariumSelections()
+        let changedIDs = previousIDs.symmetricDifference(Set(work.player.activeAquariumFishIDs))
+        for id in changedIDs { fishAppearances[id] = nil }
+        // Only restored fish lose their initial spawn hint; other swimmers keep their state.
+        fishSpawnPositions = fishSpawnPositions.filter { work.player.activeAquariumFishIDs.contains($0.key) }
+        aquariumEditorNavigation?.markChanged()
+        persistAquariumEditorDraft()
+    }
+
     private func persistAquariumEditorDraft() {
         guard let work = editorWorkingState else { return }
         do {
-            try AquariumEditorDraftStore.standard.save(AquariumEditorDraft(player: work.player,
-                placements: work.placements, background: displayedBackgroundTheme))
+            var draft = AquariumEditorDraft(player: work.player, placements: work.placements, background: displayedBackgroundTheme)
+            draft.history = editorHistory
+            try AquariumEditorDraftStore.standard.save(draft)
         } catch { editorPersistenceError = "一時保存できませんでした。\(error.localizedDescription)" }
     }
 
@@ -1273,9 +1313,15 @@ struct HomeView: View {
         guard mode == .aquariumEditor, allowsEditorDraftRestoration, editorWorkingState == nil, let official = players.first else { return }
         do {
             guard let draft = try AquariumEditorDraftStore.standard.load() else { return }
+            _ = try AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
+            _ = try AquariumDeveloperDecorations.seedIfNeeded(in: modelContext)
             let currentPlacements = try modelContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-            editorWorkingState = AquariumEditorWorkingState(official: official, placements: currentPlacements, draft: draft)
+            let work = AquariumEditorWorkingState(official: official, placements: currentPlacements, draft: draft)
+            editorWorkingState = work
             draftBackgroundTheme = AquariumBackgroundTheme(rawValue: draft.background)
+            let current = AquariumEditorDraft(player: work.player,
+                placements: work.placements, background: displayedBackgroundTheme)
+            editorHistory = draft.history.flatMap { $0.isValid(for: current) ? $0 : nil } ?? AquariumEditorHistory(initial: current)
             aquariumEditorNavigation?.beginSession()
             aquariumEditorNavigation?.markChanged()
             showsEditorLibrary = false
@@ -1334,6 +1380,7 @@ struct HomeView: View {
 
     private func resetAquariumEditorSession() {
         editorWorkingState = nil
+        editorHistory = nil
         draftBackgroundTheme = nil
         clearAquariumSelections()
         fishDragSession = nil

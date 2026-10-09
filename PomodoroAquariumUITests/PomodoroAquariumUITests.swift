@@ -1066,6 +1066,63 @@ final class PomodoroAquariumUITests: XCTestCase {
     }
 
     @MainActor
+    func testAquariumHistoryButtonsPersistRedoAndClearOnCancel() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-core-tutorial-in-memory", "-timerSessionState", ""]
+        app.launchArguments += ["-hasCompletedOnboarding", "YES", "-hasCompletedCoreTutorial", "YES"]
+        app.launch()
+        if app.buttons["aquariumEditor.cancel"].waitForExistence(timeout: 2) {
+            app.buttons["aquariumEditor.cancel"].tap()
+            XCTAssertTrue(app.alerts["編集内容を破棄しますか？"].waitForExistence(timeout: 5))
+            app.alerts["編集内容を破棄しますか？"].buttons["変更を破棄"].tap()
+        } else {
+            app.buttons["mainTab.aquarium"].tap()
+        }
+        app.buttons["aquariumEditor.start"].tap()
+        XCTAssertTrue(app.alerts["水槽を編集しますか？"].waitForExistence(timeout: 5))
+        app.alerts["水槽を編集しますか？"].buttons["編集する"].tap()
+        let undo = app.buttons["aquariumEditor.undo"]
+        let redo = app.buttons["aquariumEditor.redo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertFalse(undo.isEnabled)
+        XCTAssertFalse(redo.isEnabled)
+        app.buttons["aquariumEditor.category.decoration"].tap()
+        let seaweed = app.buttons["aquariumEditor.add.seaweed-a"]
+        XCTAssertTrue(seaweed.waitForExistence(timeout: 5))
+        seaweed.tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.openNudge"].waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.isEnabled)
+        undo.tap()
+        XCTAssertFalse(undo.isEnabled)
+        XCTAssertTrue(redo.isEnabled)
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(redo.waitForExistence(timeout: 5))
+        XCTAssertTrue(redo.isEnabled)
+        XCTAssertFalse(undo.isEnabled)
+        redo.tap()
+        XCTAssertTrue(undo.isEnabled)
+        undo.tap()
+        app.buttons["aquariumEditor.category.background"].tap()
+        app.buttons["深い海"].tap()
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertFalse(redo.isEnabled)
+        keepScreenshot(app, name: "aquarium-history-controls")
+        app.buttons["aquariumEditor.cancel"].tap()
+        XCTAssertTrue(app.alerts["編集内容を破棄しますか？"].waitForExistence(timeout: 5))
+        app.alerts["編集内容を破棄しますか？"].buttons["変更を破棄"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
+        app.buttons["aquariumEditor.start"].tap()
+        XCTAssertTrue(app.alerts["水槽を編集しますか？"].waitForExistence(timeout: 5))
+        app.alerts["水槽を編集しますか？"].buttons["編集する"].tap()
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertFalse(undo.isEnabled)
+        XCTAssertFalse(redo.isEnabled)
+        app.buttons["aquariumEditor.done"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testAquariumDraftRestartsAndCancelsWithoutOpeningLibrary() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-core-tutorial-in-memory", "-timerSessionState", ""]
