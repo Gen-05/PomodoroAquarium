@@ -302,6 +302,7 @@ struct HomeView: View {
                             AquariumEditorSheet(placements: decorationPlacements, player: player,
                                 backgroundTheme: displayedBackgroundTheme, editorCategory: aquariumEditorCategory,
                                 selectedFishID: selectedAquariumFishID, showsActiveFish: $showsActiveFishLibrary,
+                                category: $selectedDecorationCategory,
                                 addDecoration: addDecorationFromSheet,
                                 selectPlacement: { id in showsEditorLibrary = false; decorationRestoreRequestID = id },
                                 addFish: addFishFromLibrary, storeFish: storeAquariumFish,
@@ -1292,6 +1293,7 @@ struct HomeView: View {
         draftBackgroundTheme = savedBackgroundTheme
         editorHistory = AquariumEditorHistory(initial: initial)
         aquariumEditorCategory = .fish
+        selectedDecorationCategory = nil
         clearAquariumSelections()
         fishDragSession = nil
         decorationDragSession = nil
@@ -1402,6 +1404,7 @@ struct HomeView: View {
     }
 
     private func resetAquariumEditorSession() {
+        selectedDecorationCategory = nil
         editorWorkingState = nil
         editorHistory = nil
         draftBackgroundTheme = nil

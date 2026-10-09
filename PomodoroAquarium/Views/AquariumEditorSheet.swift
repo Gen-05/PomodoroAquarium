@@ -8,6 +8,7 @@ struct AquariumEditorSheet: View {
     let editorCategory: AquariumEditorCategory
     let selectedFishID: UUID?
     @Binding var showsActiveFish: Bool
+    @Binding var category: AquariumDecorationCategory?
     let addDecoration: (String) -> Void
     let selectPlacement: (String) -> Void
     let addFish: (FishSpecies) -> Void
@@ -18,7 +19,6 @@ struct AquariumEditorSheet: View {
     var storeAllFish: () -> Void = {}
     var storeAllDecorations: () -> Void = {}
     @State private var bulkStorageConfirmation: AquariumEditorBulkStorage?
-    @State private var category: AquariumDecorationCategory?
     @State private var showsPlaced = false
 
     private var inventory: [AquariumDecorationInventoryItem] {
