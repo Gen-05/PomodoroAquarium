@@ -16,6 +16,9 @@ enum AquariumDecorationKind: String, Codable, CaseIterable {
     case smallRockA = "small_rock_a"
     case smallRockB = "small_rock_b"
     case smallRockC = "small_rock_c"
+    case mediumRockA = "medium_rock_a"
+    case mediumRockB = "medium_rock_b"
+    case mediumRockC = "medium_rock_c"
 }
 
 enum AquariumDecorationType: String {
@@ -99,20 +102,30 @@ extension AquariumDecorationKind {
     var category: AquariumDecorationCategory {
         switch self {
         case .seaweed, .seaweedA, .seaweedB, .seaweedC: .plant
-        case .rock, .smallRockA, .smallRockB, .smallRockC: .rock
+        case .rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC: .rock
         }
     }
 
     var decorationType: AquariumDecorationType {
         switch self {
         case .seaweed, .seaweedA, .seaweedB, .seaweedC: .seaweed
-        case .rock, .smallRockA, .smallRockB, .smallRockC: .rock
+        case .rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC: .rock
         }
     }
 
     /// 装飾のstable IDはkindのrawValue。価格は将来用の定義のみで購入処理には未接続。
-    var stars: Int? { (self == .seaweedA || self == .seaweedB || self == .seaweedC || usesBackgroundVariants) ? 1 : nil }
-    var plannedPrice: Int? { (self == .seaweedA || self == .seaweedB || self == .seaweedC || usesBackgroundVariants) ? 30 : nil }
+    var stars: Int? {
+        switch self {
+        case .mediumRockA, .mediumRockB, .mediumRockC: 2
+        default: (self == .seaweedA || self == .seaweedB || self == .seaweedC || usesBackgroundVariants) ? 1 : nil
+        }
+    }
+    var plannedPrice: Int? {
+        switch self {
+        case .mediumRockA, .mediumRockB, .mediumRockC: 80
+        default: (self == .seaweedA || self == .seaweedB || self == .seaweedC || usesBackgroundVariants) ? 30 : nil
+        }
+    }
 
     var animationFrameNames: [String] {
         switch self {
@@ -125,7 +138,7 @@ extension AquariumDecorationKind {
         case .seaweedC:
             ["seaweed_c_01", "seaweed_c_02", "seaweed_c_03", "seaweed_c_04",
              "seaweed_c_05", "seaweed_c_06", "seaweed_c_07", "seaweed_c_08"]
-        case .seaweed, .rock, .smallRockA, .smallRockB, .smallRockC:
+        case .seaweed, .rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC:
             []
         }
     }
@@ -146,6 +159,10 @@ extension AquariumDecorationKind {
         case .smallRockA: CGSize(width: 96, height: 56)
         case .smallRockB: CGSize(width: 112, height: CGFloat(112) * 272 / 768)
         case .smallRockC: CGSize(width: 108, height: 56.25)
+        // 中岩の素材比率を維持し、Cの縦長シルエットを残す。
+        case .mediumRockA: CGSize(width: 176, height: 77)
+        case .mediumRockB: CGSize(width: 168, height: 94.5)
+        case .mediumRockC: CGSize(width: 120, height: 145)
         case .seaweed, .rock: CGSize(width: 120, height: 120)
         }
     }
@@ -161,6 +178,10 @@ extension AquariumDecorationKind {
         case .smallRockA: 0.995
         case .smallRockB: 0.99
         case .smallRockC: 0.993
+        // 3背景共通のalpha底面に根元を合わせる。
+        case .mediumRockA: 0.991
+        case .mediumRockB: 0.993
+        case .mediumRockC: 0.995
         case .seaweed, .rock: nil
         }
     }
@@ -178,13 +199,16 @@ extension AquariumDecorationKind {
         case .seaweedC: 0.05...0.91
         // 3背景共通のalpha占有範囲x=16〜751/768を包含。
         case .smallRockA, .smallRockB, .smallRockC: 0.02...0.98
+        // A/Bはx=17〜1006/1024、Cはx=17〜750/768を余裕を持って包含。
+        case .mediumRockA, .mediumRockB: 0.015...0.985
+        case .mediumRockC: 0.02...0.98
         case .seaweed, .rock: 0...1
         }
     }
 
     var usesBackgroundVariants: Bool {
         switch self {
-        case .smallRockA, .smallRockB, .smallRockC: true
+        case .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC: true
         default: false
         }
     }
@@ -216,13 +240,16 @@ extension AquariumDecorationKind {
         case .smallRockA: "小岩A"
         case .smallRockB: "小岩B"
         case .smallRockC: "小岩C"
+        case .mediumRockA: "中岩A"
+        case .mediumRockB: "中岩B"
+        case .mediumRockC: "中岩C"
         }
     }
 
     var storageIconName: String {
         switch self {
         case .seaweed, .seaweedA, .seaweedB, .seaweedC: "leaf.fill"
-        case .rock, .smallRockA, .smallRockB, .smallRockC: "mountain.2.fill"
+        case .rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC: "mountain.2.fill"
         }
     }
 
@@ -230,7 +257,7 @@ extension AquariumDecorationKind {
         switch self {
         case .seaweed: CGPoint(x: 0.5, y: 0.80)
         case .rock: CGPoint(x: 0.5, y: 0.84)
-        case .seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC: CGPoint(x: 0.5, y: 0.92)
+        case .seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC: CGPoint(x: 0.5, y: 0.92)
         }
     }
 
@@ -241,7 +268,7 @@ extension AquariumDecorationKind {
             AquariumDecorationMovementBounds(x: 0.10...0.90, y: 0.68...0.90)
         case .rock:
             AquariumDecorationMovementBounds(x: 0.10...0.90, y: 0.72...0.92)
-        case .seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC:
+        case .seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC:
             .commonGround
         }
     }

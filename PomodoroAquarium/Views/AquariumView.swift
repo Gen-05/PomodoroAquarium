@@ -478,7 +478,7 @@ struct AquariumDecorationView: View {
                     )
                 )
 
-            case .rock, .smallRockA, .smallRockB, .smallRockC:
+            case .rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC:
                 ZStack(alignment: .bottom) {
                     Ellipse()
                         .fill(Color.black.opacity(0.18))
