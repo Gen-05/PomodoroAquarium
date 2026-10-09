@@ -16,6 +16,10 @@ private struct AquariumFishSelectionRevision: Equatable {
 struct AquariumView: View {
     let player: Player?
     var backgroundTheme: AquariumBackgroundTheme = .aquarium
+    var fishSpawnPositions: [UUID: CGPoint] = [:]
+    var fishAppearances: [UUID: AquariumFishAppearance] = [:]
+    var onFishPositionsChanged: ([UUID: CGPoint]) -> Void = { _ in }
+    var onCanvasGeometryChanged: (CGRect) -> Void = { _ in }
     var isSimulationPaused = false
     var isEditing = false
     var defersDecorationPersistence = false
@@ -31,9 +35,14 @@ struct AquariumView: View {
     var decorationDragPreview: AquariumDecoration?
 
     @Environment(\.modelContext) private var modelContext
-    @Query private var decorationPlacements: [AquariumDecorationPlacement]
+    @Query private var officialDecorationPlacements: [AquariumDecorationPlacement]
+    var editingPlacements: [AquariumDecorationPlacement]?
+    private var decorationPlacements: [AquariumDecorationPlacement] { editingPlacements ?? officialDecorationPlacements }
     @State private var editingDecorationID: String?
+    @State private var showsDecorationNudge = false
     @State private var draggingDecorationID: String?
+    @State private var canvasDragStart: CGPoint?
+    @State private var canvasGestureStarted = false
     @State private var originalPosition: CGPoint?
     @State private var previewPosition: CGPoint?
     @State private var fishPositions: [UUID: CGPoint] = [:]
@@ -60,10 +69,14 @@ struct AquariumView: View {
                 }
                 selectionClearingLayer
                 decorationLayer(in: geometry.size)
+                if isEditing { decorationInteractionLayer(in: geometry.size) }
                 fishLayer(in: geometry.size)
+                if isEditing { decorationOperationMenu(in: geometry.size) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
+            .onAppear { onCanvasGeometryChanged(geometry.frame(in: .named(AquariumEditorCoordinateSpace.name))) }
+            .onChange(of: geometry.size) { _, _ in onCanvasGeometryChanged(geometry.frame(in: .named(AquariumEditorCoordinateSpace.name))) }
         }
         .ignoresSafeArea()
         .onAppear {
@@ -101,6 +114,9 @@ struct AquariumView: View {
             guard requestID != nil else { return }
             cancelDecorationEditing()
         }
+        .onChange(of: fishPositions) { _, positions in
+            if isEditing || isFishSelectionEnabled { onFishPositionsChanged(positions) }
+        }
     }
 
     @ViewBuilder
@@ -135,6 +151,7 @@ struct AquariumView: View {
         // SwiftDataのQuery observer構築中に同期saveしないよう、次のMainActorターンで初期化する。
         await Task.yield()
         guard !Task.isCancelled else { return }
+        if editingPlacements != nil { updateDisplayedFish(); return }
 
         do {
             _ = try AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
@@ -163,25 +180,12 @@ struct AquariumView: View {
             ForEach(decorationPlacements.filter {
                 $0.isPlaced || $0.decorationID == editingDecorationID
             }) { placement in
-                EditableAquariumDecorationView(
-                    placement: placement,
-                    backgroundTheme: backgroundTheme,
-                    aquariumSize: size,
-                    isEditing: isEditing,
+                AquariumPlacedDecorationView(
+                    placement: placement, backgroundTheme: backgroundTheme, aquariumSize: size,
                     isSelected: editingDecorationID == placement.decorationID,
-                    position: position(for: placement),
-                    select: { beginEditing(placement) },
-                    updatePreview: { previewPosition = $0 },
-                    move: { moveDecoration(placement, to: $0) },
-                    setDragging: { isDragging in
-                        if isDragging {
-                            draggingDecorationID = placement.decorationID
-                        } else if draggingDecorationID == placement.decorationID {
-                            draggingDecorationID = nil
-                        }
-                    },
-                    store: { storeDecoration(placement) }
+                    position: position(for: placement)
                 )
+                .allowsHitTesting(false)
                 .zIndex(AquariumDecorationDepthPresentation(
                     kind: placement.kind, relativeY: position(for: placement).y
                 ).renderZIndex(isDragging: isEditing && draggingDecorationID == placement.decorationID))
@@ -202,6 +206,105 @@ struct AquariumView: View {
             }
         }
         .allowsHitTesting(isEditing)
+    }
+
+    private func decoration(at point: CGPoint, in size: CGSize) -> AquariumDecorationPlacement? {
+        let candidates = decorationPlacements.filter { $0.isPlaced }.map { placement in
+            let root = position(for: placement)
+            return AquariumDecoration(id: placement.decorationID, kind: placement.kind,
+                relativeX: root.x, relativeY: root.y, scale: CGFloat(placement.scale))
+        }
+        let id = AquariumDecorationHitTesting.selectedID(at: point, decorations: candidates,
+            aquariumSize: size, theme: backgroundTheme)
+        return decorationPlacements.first { $0.decorationID == id }
+
+    }
+
+    private func decorationInteractionLayer(in size: CGSize) -> some View {
+        Color.clear.contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if !canvasGestureStarted {
+                        canvasGestureStarted = true
+                        if let placement = decoration(at: value.startLocation, in: size) {
+                            beginEditing(placement)
+                            canvasDragStart = position(for: placement)
+                        } else {
+                            cancelDecorationEditing()
+                            onCanvasTapped()
+                        }
+                    }
+                    guard let start = canvasDragStart, let id = editingDecorationID,
+                          let placement = decorationPlacements.first(where: { $0.decorationID == id }),
+                          hypot(value.translation.width, value.translation.height) >= 6 else { return }
+                    draggingDecorationID = id
+                    previewPosition = AquariumDecorationEditor.relativePosition(
+                        originalX: start.x, originalY: start.y, translation: value.translation,
+                        aquariumSize: size, kind: placement.kind, isEditing: true, scale: CGFloat(placement.scale))
+                }
+                .onEnded { _ in
+                    if draggingDecorationID != nil, let id = editingDecorationID,
+                       let position = previewPosition,
+                       let placement = decorationPlacements.first(where: { $0.decorationID == id }) {
+                        moveDecoration(placement, to: position)
+                    }
+                    canvasDragStart = nil
+                    canvasGestureStarted = false
+                    draggingDecorationID = nil
+                })
+            .accessibilityLabel("水槽の装飾キャンバス")
+            .accessibilityIdentifier("aquariumEditor.decorationCanvas")
+    }
+
+    @ViewBuilder
+    private func decorationOperationMenu(in size: CGSize) -> some View {
+        if draggingDecorationID == nil, let id = editingDecorationID,
+           let placement = decorationPlacements.first(where: { $0.decorationID == id }) {
+            VStack {
+                Spacer()
+                HStack(spacing: 4) {
+                    if showsDecorationNudge {
+                        nudgeButton("arrow.left", label: "左へ", delta: CGSize(width: -8, height: 0), placement: placement, size: size)
+                        nudgeButton("arrow.up", label: "奥へ", delta: CGSize(width: 0, height: -8), placement: placement, size: size)
+                        nudgeButton("arrow.down", label: "手前へ", delta: CGSize(width: 0, height: 8), placement: placement, size: size)
+                        nudgeButton("arrow.right", label: "右へ", delta: CGSize(width: 8, height: 0), placement: placement, size: size)
+                        Button { showsDecorationNudge = false } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                            .accessibilityLabel("微調整を閉じる")
+                            .accessibilityIdentifier("aquariumEditor.closeNudge")
+                    } else {
+                        Button { showsDecorationNudge = true } label: {
+                            Label("微調整", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+                                .font(.caption.bold()).frame(minWidth: 88, minHeight: 44)
+                        }
+                        .accessibilityIdentifier("aquariumEditor.openNudge")
+                        Button { storeDecoration(placement) } label: {
+                            Label("水槽からしまう", systemImage: "tray.and.arrow.down")
+                                .font(.caption.bold()).frame(minWidth: 132, minHeight: 44)
+                        }
+                            .accessibilityLabel("水槽からしまう")
+                            .accessibilityIdentifier("aquariumEditor.removeSelectedDecoration")
+                    }
+                }
+                .padding(8)
+                .foregroundStyle(.white)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                .buttonStyle(.plain)
+                .frame(width: 260, height: 60)
+                .padding(.bottom, 35)
+            }
+        }
+    }
+
+    private func nudgeButton(_ icon: String, label: String, delta: CGSize,
+                             placement: AquariumDecorationPlacement, size: CGSize) -> some View {
+        Button {
+            let root = position(for: placement)
+            let moved = AquariumDecorationEditor.relativePosition(originalX: root.x, originalY: root.y,
+                translation: delta, aquariumSize: size, kind: placement.kind, isEditing: true, scale: CGFloat(placement.scale))
+            moveDecoration(placement, to: moved)
+        } label: { Image(systemName: icon).frame(width: 44, height: 44) }
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("aquariumEditor.nudge.\(icon)")
     }
 
     private func position(for placement: AquariumDecorationPlacement) -> CGPoint {
@@ -225,6 +328,7 @@ struct AquariumView: View {
         guard isEditing else { return }
         let position = CGPoint(x: placement.relativeX, y: placement.relativeY)
         let wasEditing = editingDecorationID != nil
+        if editingDecorationID != placement.decorationID { showsDecorationNudge = false }
         editingDecorationID = placement.decorationID
         originalPosition = position
         previewPosition = initialPreviewPosition
@@ -271,6 +375,7 @@ struct AquariumView: View {
     }
 
     private func finishDecorationEditing() {
+        showsDecorationNudge = false
         draggingDecorationID = nil
         editingDecorationID = nil
         originalPosition = nil
@@ -292,6 +397,8 @@ struct AquariumView: View {
                 ForEach(displayedFish) { playerFish in
                     SwimmingFishView(
                         fishID: playerFish.id,
+                        initialPosition: fishSpawnPositions[playerFish.id],
+                        appearance: fishAppearances[playerFish.id],
                         species: playerFish.species,
                         backgroundTheme: backgroundTheme,
                         isFavorite: false,
@@ -313,137 +420,25 @@ struct AquariumView: View {
 
 }
 
-private struct EditableAquariumDecorationView: View {
+private struct AquariumPlacedDecorationView: View {
     let placement: AquariumDecorationPlacement
     let backgroundTheme: AquariumBackgroundTheme
     let aquariumSize: CGSize
-    let isEditing: Bool
     let isSelected: Bool
     let position: CGPoint
-    let select: () -> Void
-    let updatePreview: (CGPoint) -> Void
-    let move: (CGPoint) -> Void
-    let setDragging: (Bool) -> Void
-    let store: () -> Void
-
-    @State private var dragStartPosition: CGPoint?
-
-    private var decoration: AquariumDecoration {
-        placement.decoration
-    }
-
-    private var absolutePosition: CGPoint {
-        CGPoint(x: aquariumSize.width * position.x, y: aquariumSize.height * position.y)
-    }
-
-    private var depth: AquariumDecorationDepthPresentation {
-        AquariumDecorationDepthPresentation(kind: decoration.kind, relativeY: position.y)
-    }
-
-    private var displayedScale: CGFloat { decoration.scale * depth.scale }
-
-    private var controlsPosition: CGPoint {
-        let offset: CGFloat = decoration.kind == .seaweed ? 92 : 70
-        return CGPoint(
-            x: min(max(absolutePosition.x, 105), max(105, aquariumSize.width - 105)),
-            y: min(max(absolutePosition.y + offset, 44), max(44, aquariumSize.height - 44))
-        )
-    }
 
     var body: some View {
-        ZStack {
-            AquariumDecorationView(decoration: decoration, backgroundTheme: backgroundTheme)
-                .scaleEffect(displayedScale)
-                .opacity(depth.opacity)
-                .overlay {
-                    if isEditing {
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(
-                                .white.opacity(isSelected ? 0.95 : 0.45),
-                                style: StrokeStyle(lineWidth: 2, dash: isSelected ? [] : [6])
-                            )
-                            .padding(-8)
-                    }
-                }
-                .accessibilityElement()
-                .accessibilityLabel(isSelected ? "選択中の水槽装飾" : "水槽装飾")
-                .accessibilityIdentifier("aquariumEditor.placedDecoration.\(placement.decorationID)")
-                .accessibilityAction(named: "装飾を選択") {
-                    if isEditing { select() }
-                }
-                // 地面設置素材だけ、画像の根元を配置座標へ合わせる。
-                .offset(y: decoration.kind.groundAnchorOffset(scale: displayedScale))
-                .position(absolutePosition)
-                .onTapGesture {
-                    if isEditing { select() }
-                }
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: AquariumFishDragInteraction.minimumDistance)
-                        .onChanged { value in
-                            guard isEditing else { return }
-                            if dragStartPosition == nil {
-                                dragStartPosition = position
-                                select()
-                                setDragging(true)
-                            }
-                            guard let dragStartPosition else { return }
-                            updatePreview(AquariumDecorationEditor.relativePosition(
-                                originalX: dragStartPosition.x,
-                                originalY: dragStartPosition.y,
-                                translation: value.translation,
-                                aquariumSize: aquariumSize,
-                                kind: decoration.kind,
-                                isEditing: true,
-                                scale: decoration.scale
-                            ))
-                        }
-                        .onEnded { value in
-                            defer { setDragging(false) }
-                            guard isEditing, let dragStartPosition else {
-                                self.dragStartPosition = nil
-                                return
-                            }
-                            let finalPosition = AquariumDecorationEditor.relativePosition(
-                                originalX: dragStartPosition.x,
-                                originalY: dragStartPosition.y,
-                                translation: value.translation,
-                                aquariumSize: aquariumSize,
-                                kind: decoration.kind,
-                                isEditing: true,
-                                scale: decoration.scale
-                            )
-                            updatePreview(finalPosition)
-                            move(finalPosition)
-                            self.dragStartPosition = nil
-                        }
-                )
-
-            if isSelected {
-                DecorationEditingControls(store: store)
-                    .position(controlsPosition)
-                    .transition(.scale.combined(with: .opacity))
-            }
-        }
-        .frame(width: aquariumSize.width, height: aquariumSize.height)
-        .onDisappear { setDragging(false) }
-    }
-}
-
-private struct DecorationEditingControls: View {
-    let store: () -> Void
-
-    var body: some View {
-        Button(action: store) {
-            Label("水槽から戻す", systemImage: "arrow.uturn.backward.circle.fill")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 11)
-                .background(.red.opacity(0.82), in: Capsule())
-                .overlay(Capsule().stroke(.white.opacity(0.35)))
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("aquariumEditor.removeSelectedDecoration")
+        let decoration = placement.decoration
+        let depth = AquariumDecorationDepthPresentation(kind: decoration.kind, relativeY: position.y)
+        let scale = decoration.scale * depth.scale
+        AquariumDecorationView(decoration: decoration, backgroundTheme: backgroundTheme)
+            .modifier(AquariumSelectionGlow(isSelected: isSelected))
+            .scaleEffect(scale)
+            .opacity(depth.opacity)
+            .offset(y: decoration.kind.groundAnchorOffset(scale: scale))
+            .position(x: aquariumSize.width * position.x, y: aquariumSize.height * position.y)
+            .accessibilityLabel(decoration.kind.displayName)
+            .accessibilityIdentifier("aquariumEditor.placedDecoration.\(placement.decorationID)")
     }
 }
 
@@ -462,8 +457,11 @@ struct AquariumDecorationView: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: decoration.kind.displaySize.width, height: decoration.kind.displaySize.height)
+                .modifier(AquariumCoralColorCorrection.correction(for: backgroundTheme, kind: decoration.kind))
         } else {
             switch decoration.kind {
+            case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple:
+                EmptyView()
             case .seaweed, .seaweedA, .seaweedB, .seaweedC:
                 HStack(alignment: .bottom, spacing: -8) {
                     seaweedStem(height: 88, rotation: -8)
@@ -508,10 +506,39 @@ struct AquariumDecorationView: View {
 }
 
 enum AquariumFishSizing {
+    // 3ae83d8の正常な水槽サイズを復元。一覧・drag previewのサイズとは独立。
     static let baseSize: CGFloat = 78
-
     static func displaySize(for species: FishSpecies, isFavorite _: Bool) -> CGFloat {
         baseSize * species.displayScale
+    }
+}
+
+/// アニメーション中の画像alphaに沿う発光層。元画像はそのまま前面に保持する。
+struct AquariumSelectionGlow: ViewModifier {
+    let isSelected: Bool
+    var edgeOpacity: Double = 1
+    var outlineWidth: CGFloat = 0.8
+    func body(content: Content) -> some View {
+        content
+            .background {
+                if isSelected {
+                    ZStack {
+                        ForEach(0..<4, id: \.self) { index in
+                            let offsets = [CGSize(width: -outlineWidth, height: 0), CGSize(width: outlineWidth, height: 0),
+                                           CGSize(width: 0, height: -outlineWidth), CGSize(width: 0, height: outlineWidth)]
+                            content.brightness(1).colorMultiply(Color(red: 0.65, green: 1, blue: 1))
+                                .offset(offsets[index])
+                        }
+                    }
+                        .blur(radius: 0.25)
+                        .shadow(color: .white, radius: 1)
+                        .shadow(color: .cyan, radius: 2)
+                        .opacity(edgeOpacity).allowsHitTesting(false)
+                }
+            }
+            .compositingGroup()
+            .shadow(color: isSelected ? .white : .clear, radius: 1)
+            .shadow(color: isSelected ? .cyan : .clear, radius: 4)
     }
 }
 
@@ -607,6 +634,7 @@ struct AquariumNeighborPositions: RandomAccessCollection {
 private struct SwimmingFishView: View {
     let fishID: UUID
     let species: FishSpecies
+    let appearance: AquariumFishAppearance?
     let backgroundTheme: AquariumBackgroundTheme
     let isFavorite: Bool
     let aquariumSize: CGSize
@@ -629,6 +657,8 @@ private struct SwimmingFishView: View {
 
     init(
         fishID: UUID,
+        initialPosition: CGPoint? = nil,
+        appearance: AquariumFishAppearance? = nil,
         species: FishSpecies,
         backgroundTheme: AquariumBackgroundTheme,
         isFavorite: Bool,
@@ -642,6 +672,7 @@ private struct SwimmingFishView: View {
         select: @escaping () -> Void
     ) {
         self.fishID = fishID
+        self.appearance = appearance
         self.species = species
         self.backgroundTheme = backgroundTheme
         self.isFavorite = isFavorite
@@ -657,7 +688,7 @@ private struct SwimmingFishView: View {
         self.spriteTempoMultiplier = AquariumFishMotion.spriteTempoMultiplier(for: fishID)
 
         let profile = AquariumFishMotion.movementProfile(for: species)
-        let initialMotion = AquariumFishMotion.initialState(
+        var initialMotion = AquariumFishMotion.initialState(
             for: fishID,
             profile: profile,
             speedVariationProfile: AquariumFishMotion.speedVariationProfile(for: species),
@@ -666,6 +697,7 @@ private struct SwimmingFishView: View {
                 fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite)
             )
         )
+        if let initialPosition { initialMotion.position = initialPosition }
         self._motion = State(initialValue: initialMotion)
         self._spriteDirectionTransition = State(
             initialValue: FishSpriteDirectionTransition(direction: initialMotion.facingDirection)
@@ -677,32 +709,30 @@ private struct SwimmingFishView: View {
 
     var body: some View {
         ZStack {
-            if isSelected {
-                Circle()
-                    .fill(.cyan.opacity(0.12))
-                    .overlay {
-                        Circle()
-                            .stroke(.white.opacity(0.9), lineWidth: 2)
-                    }
-                    .frame(width: fishSize + 14, height: fishSize + 14)
-                    .allowsHitTesting(false)
+            if let appearance, appearance.progress(at: updateDate) < 1 {
+                AquariumFishAppearanceRing(progress: appearance.progress(at: updateDate))
             }
-
             fishImage
                 .modifier(AquariumFishColorCorrection.correction(for: backgroundTheme, species: species))
-                // 分離された尾びれ素材がないため、1枚絵へ速度連動の微細な変形を加える。
-                .rotationEffect(.degrees(swimRotation + smallFishDirectionRotation))
-                .scaleEffect(x: 1, y: swimVerticalScale)
-                .offset(y: swimVerticalOffset)
-                .opacity(motion.depthOpacity)
+                .modifier(AquariumSelectionGlow(isSelected: isSelected && isSelectionEnabled,
+                    edgeOpacity: species.displayScale < 1 ? 1 : 0.95,
+                    outlineWidth: species.displayScale < 1 ? 1 : species.displayScale < 2 ? 0.8 : 0.65))
+                .scaleEffect(0.8 + 0.2 * appearanceProgress)
+                .opacity(Double(appearance == nil ? 1 : 0.15 + 0.85 * appearanceProgress))
         }
             .frame(width: selectionHitTargetSize, height: selectionHitTargetSize)
-            .contentShape(Rectangle())
+            .contentShape(isSelectionEnabled ? AquariumFishHitTesting.path(
+                image: fishSprite.interactionImage, canvasSize: selectionHitTargetSize,
+                fishSize: fishSize, horizontalScale: fishSprite.resolvedHorizontalScale) : Path())
             .onTapGesture {
                 guard isSelectionEnabled else { return }
                 select()
             }
             .allowsHitTesting(isSelectionEnabled)
+            .rotationEffect(.degrees(swimRotation + smallFishDirectionRotation))
+            .scaleEffect(x: 1, y: swimVerticalScale)
+            .offset(y: swimVerticalOffset)
+            .opacity(motion.depthOpacity)
             .position(
                 x: aquariumSize.width * motion.position.x,
                 y: aquariumSize.height * motion.position.y
@@ -724,12 +754,13 @@ private struct SwimmingFishView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(fishAccessibilityLabel)
             .accessibilityIdentifier("aquarium.fish.\(fishID.uuidString)")
+            .accessibilityValue(isSelectionEnabled && isSelected ? "選択中" : "")
     }
 
     private func updateMotion(at date: Date) {
         guard let deltaTime = simulationTiming.nextDeltaTime(
             at: date,
-            isPaused: isSimulationPaused
+            isPaused: isSimulationPaused || (appearance?.progress(at: date) ?? 1) < 1
         ) else { return }
         elapsedTime += min(max(deltaTime, 0), AquariumFishMotion.maximumDeltaTime)
         if var wingCycle, let wingProfile {
@@ -765,7 +796,11 @@ private struct SwimmingFishView: View {
         }
     }
 
-    private var fishImage: some View {
+    private var appearanceProgress: CGFloat {
+        appearance?.fishProgress(at: updateDate) ?? 1
+    }
+
+    private var fishSprite: FishImageView {
         FishImageView(
             species: species,
             facingDirection: motion.facingDirection,
@@ -776,7 +811,10 @@ private struct SwimmingFishView: View {
             animationPhase: species == .manta || species == .seahorse ? 0 : spriteAnimationPhase,
             fixedAnimationFrameIndex: fixedSpriteFrameIndex
         )
-        .frame(width: fishSize, height: fishSize)
+    }
+
+    private var fishImage: some View {
+        fishSprite.frame(width: fishSize, height: fishSize)
     }
 
     private var fishSize: CGFloat {

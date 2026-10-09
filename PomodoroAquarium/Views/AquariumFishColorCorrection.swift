@@ -7,11 +7,22 @@ struct AquariumFishColorCorrection: ViewModifier {
     let red: Double
     let green: Double
     let blue: Double
+    var contrast: Double = 1
 
     static func correction(for theme: AquariumBackgroundTheme, species: FishSpecies) -> Self {
         switch theme {
-        case .aquarium, .tropical:
-            Self(saturation: 1, brightness: 0, red: 1, green: 1, blue: 1)
+        case .aquarium:
+            switch BasicWaterLightResponse(species: species) {
+            case .standard:
+                Self(saturation: 0.88, brightness: -0.015, red: 0.97, green: 0.99, blue: 1, contrast: 0.96)
+            case .vividWarm:
+                Self(saturation: 0.84, brightness: -0.015, red: 0.97, green: 0.99, blue: 1, contrast: 0.96)
+            case .translucent:
+                Self(saturation: 0.92, brightness: -0.005, red: 0.98, green: 0.995, blue: 1, contrast: 0.98)
+            }
+        case .tropical:
+            // 浅瀬の明るさを保ち、控えめな青緑の反射光を加える。
+            Self(saturation: 0.94, brightness: 0.008, red: 0.96, green: 1, blue: 1)
         case .deepSea:
             // 半透明のクラゲは補正を半分にし、淡い輪郭とハイライトを残す。
             if species == .jellyfish {
@@ -24,13 +35,31 @@ struct AquariumFishColorCorrection: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if saturation == 1 && brightness == 0 && red == 1 && green == 1 && blue == 1 {
+        if saturation == 1 && brightness == 0 && red == 1 && green == 1 && blue == 1 && contrast == 1 {
             content
         } else {
-            content
+            contrastAdjusted(content)
                 .saturation(saturation)
                 .colorMultiply(Color(red: red, green: green, blue: blue))
                 .brightness(brightness)
+        }
+    }
+
+    @ViewBuilder
+    private func contrastAdjusted(_ content: Content) -> some View {
+        // 他背景では既存の描画経路を維持し、contrastを重ね掛けしない。
+        if contrast == 1 { content } else { content.contrast(contrast) }
+    }
+}
+
+/// 表示専用の分類。魚モデル・保存データへの項目追加は不要。
+private enum BasicWaterLightResponse {
+    case standard, vividWarm, translucent
+    init(species: FishSpecies) {
+        switch species {
+        case .clownfish, .seahorse: self = .vividWarm
+        case .jellyfish: self = .translucent
+        default: self = .standard
         }
     }
 }

@@ -6,6 +6,67 @@ import UIKit
 
 @MainActor
 struct AquariumDeveloperDecorationTests {
+    @Test(arguments: [AquariumDecorationKind.coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple])
+    func coralDefinitionsAssetsAndPersistence(kind: AquariumDecorationKind) throws {
+        let isBranch = kind.rawValue.hasPrefix("coral_a_")
+        let isThorn = kind.rawValue.hasPrefix("coral_c_")
+        let colorNames = ["pink": "ピンク", "orange": "オレンジ", "purple": "パープル"]
+        let color = String(kind.rawValue.split(separator: "_").last!)
+        #expect(kind.displayName == "\(isThorn ? "トゲ" : (isBranch ? "枝" : "丸"))サンゴ（\(colorNames[color]!)）")
+        #expect(kind.stars == 2 && kind.plannedPrice == 130)
+        #expect(kind.decorationType == .coral && kind.category == .coral)
+        #expect(kind.renderLayer == .vegetation)
+        #expect(kind.animationFrameNames.isEmpty && kind.animationCrossFadeDuration == 0)
+        let image = try #require(UIImage(named: kind.rawValue))
+        #expect(image.size == CGSize(width: 1024, height: isThorn ? 1088 : (isBranch ? 1024 : 512)))
+        #expect(abs(kind.displaySize.width / kind.displaySize.height - (isThorn ? 1024.0 / 1088 : (isBranch ? 1 : 2))) < 0.000_001)
+        let container = try makeContainer()
+        let context = container.mainContext
+        let first = try AquariumDecorationService.addPlacement(kind: kind, at: CGPoint(x: 0.4, y: 0.90), isPlaced: true, in: context)
+        let second = try AquariumDecorationService.addPlacement(kind: kind, at: CGPoint(x: 0.6, y: 0.85), isPlaced: true, in: context)
+        #expect(first.decorationID != second.decorationID)
+        for theme in AquariumBackgroundTheme.allCases {
+            #expect(kind.assetImageName(for: theme) == kind.rawValue)
+            let correction = AquariumCoralColorCorrection.correction(for: theme, kind: kind)
+            #expect(correction.saturation == (theme == .deepSea ? 0.94 : (theme == .tropical ? 0.92 : 1)))
+            #expect(correction.brightness == (theme == .deepSea ? -0.025 : (theme == .tropical ? -0.02 : 0)))
+            #expect(correction.red == (theme == .deepSea ? 0.90 : (theme == .tropical ? 0.97 : 1)))
+            #expect(correction.green == (theme == .deepSea ? 0.96 : 1))
+            #expect(correction.blue == 1)
+            #expect(correction.contrast == (theme == .tropical ? 0.96 : 1))
+        }
+        let saved = try ModelContext(container).fetch(FetchDescriptor<AquariumDecorationPlacement>())
+        #expect(saved.count == 2 && saved.allSatisfy { $0.kind == kind && $0.isPlaced })
+        #expect(saved.first { $0.decorationID == first.decorationID }?.relativeX == 0.4)
+        #expect(saved.first { $0.decorationID == second.decorationID }?.relativeY == 0.85)
+    }
+
+    @Test func coralSizesKeepThornHeightAndReducedRoundCoral() {
+        for kind in [AquariumDecorationKind.coralCPink, .coralCOrange, .coralCPurple] {
+            #expect(kind.displaySize == CGSize(width: 124.8, height: 132.6))
+            #expect(kind.groundAnchorOffset() < 0)
+            #expect(kind.displaySize.height > AquariumDecorationKind.coralAPink.displaySize.height)
+            for y in [CGFloat(0.72), CGFloat(0.90), CGFloat(0.96)] {
+                let depth = AquariumDecorationDepthPresentation(kind: kind, relativeY: y)
+                #expect(kind.displaySize.height * depth.scale > AquariumDecorationKind.coralAPink.displaySize.height * depth.scale)
+                #expect(abs(kind.groundAnchorOffset(scale: depth.scale) + (kind.groundAnchorY! - 0.5) * kind.displaySize.height * depth.scale) < 0.000_001)
+            }
+            #expect(kind.displaySize.height > AquariumDecorationKind.coralBPink.displaySize.height * 1.4)
+        }
+        for kind in [AquariumDecorationKind.coralBPink, .coralBOrange, .coralBPurple] {
+            #expect(kind.displaySize == CGSize(width: 140.8, height: 70.4))
+        }
+        #expect(AquariumDecorationKind.coralAPink.displaySize == CGSize(width: 100, height: 100))
+    }
+
+    @Test func coralCorrectionDoesNotAffectExistingDecorations() {
+        for kind in AquariumDecorationKind.allCases where kind.decorationType != .coral {
+            let correction = AquariumCoralColorCorrection.correction(for: .deepSea, kind: kind)
+            #expect(correction.saturation == 1 && correction.brightness == 0)
+            #expect(correction.red == 1 && correction.green == 1 && correction.blue == 1)
+        }
+    }
+
     @Test func seaweedADefinitionAndAssets() {
         let kind = AquariumDecorationKind.seaweedA
         #expect(kind.rawValue == "seaweed-a")
@@ -198,7 +259,7 @@ struct AquariumDeveloperDecorationTests {
 
     @Test func decorationLayerPriorityPrecedesYAndDraggingTemporarilyOverridesIt() {
         let rocks: [AquariumDecorationKind] = [.rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC]
-        let plants: [AquariumDecorationKind] = [.seaweed, .seaweedA, .seaweedB, .seaweedC]
+        let plants: [AquariumDecorationKind] = [.seaweed, .seaweedA, .seaweedB, .seaweedC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple]
         for rock in rocks {
             #expect(rock.renderLayer == .rock)
             let back = AquariumDecorationDepthPresentation(kind: rock, relativeY: 0.72)
@@ -260,12 +321,12 @@ struct AquariumDeveloperDecorationTests {
         #expect(!(try AquariumDeveloperDecorations.seedIfNeeded(in: context)))
         let placementContext = ModelContext(container)
         let placements = try placementContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-        #expect(placements.count == 45)
-        #expect(Set(placements.map(\.decorationID)).count == 45)
-        #expect(Set(placements.map(\.definitionID)) == ["seaweed-a", "seaweed-b", "seaweed_c", "small_rock_a", "small_rock_b", "small_rock_c", "medium_rock_a", "medium_rock_b", "medium_rock_c"])
+        #expect(placements.count == 90)
+        #expect(Set(placements.map(\.decorationID)).count == 90)
+        #expect(Set(placements.map(\.definitionID)) == ["seaweed-a", "seaweed-b", "seaweed_c", "small_rock_a", "small_rock_b", "small_rock_c", "medium_rock_a", "medium_rock_b", "medium_rock_c", "coral_a_pink", "coral_a_orange", "coral_a_purple", "coral_b_pink", "coral_b_orange", "coral_b_purple", "coral_c_pink", "coral_c_orange", "coral_c_purple"])
         #expect(placements.allSatisfy { !$0.isPlaced })
         let inventory = AquariumDecorationEditorPresentation.inventory(from: placements)
-        #expect(inventory.map(\.kind) == [.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC])
+        #expect(inventory.map(\.kind) == [.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple])
         #expect(inventory.allSatisfy { $0.ownedCount == 5 && $0.canPlaceAnother })
         for (index, placement) in placements.enumerated() {
             try AquariumEditorDropCoordinator.placeDecoration(
@@ -278,10 +339,10 @@ struct AquariumDeveloperDecorationTests {
         }
         let reloadContext = ModelContext(container)
         let reloaded = try reloadContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-        #expect(reloaded.count == 45)
+        #expect(reloaded.count == 90)
         #expect(reloaded.allSatisfy { $0.isPlaced })
         let placedInventory = AquariumDecorationEditorPresentation.inventory(from: reloaded)
-        #expect(placedInventory.count == 9)
+        #expect(placedInventory.count == 18)
         #expect(placedInventory.allSatisfy { $0.placedCount == 5 && !$0.canPlaceAnother })
         #expect(!(try AquariumDeveloperDecorations.seedIfNeeded(in: context)))
 #else
@@ -302,7 +363,7 @@ struct AquariumDeveloperDecorationTests {
         #expect(!placements.contains { $0.kind.stars != nil })
     }
 
-    @Test(arguments: [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC])
+    @Test(arguments: [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple])
     func seaweedDropIsGroundedAndUsesExistingPlacementPersistence(kind: AquariumDecorationKind) throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -319,7 +380,7 @@ struct AquariumDeveloperDecorationTests {
         ).first)
         #expect(reloaded.isPlaced)
         #expect(reloaded.relativeX == 0.5)
-        #expect(reloaded.relativeY == 0.72)
+        #expect(reloaded.relativeY == 0.66)
         #expect(reloaded.kind == kind)
         #expect(reloaded.kind.groundAnchorY == kind.groundAnchorY)
         let dragged = AquariumDecorationEditor.relativePosition(
@@ -329,7 +390,7 @@ struct AquariumDeveloperDecorationTests {
             kind: kind, isEditing: true
         )
         #expect(dragged.x == 0.6)
-        #expect(dragged.y == 0.72)
+        #expect(dragged.y == 0.66)
     }
 
     @Test func upgradingDevelopmentOwnershipPreservesThePreviouslyPlacedItem() throws {
@@ -347,11 +408,11 @@ struct AquariumDeveloperDecorationTests {
         #expect(original.relativeY == 0.92)
         #expect(original.scale == 1.1)
         #expect(original.isPlaced)
-        #expect(try context.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 45)
+        #expect(try context.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 90)
 #endif
     }
 
-    @Test(arguments: [CGFloat(240), CGFloat(393), CGFloat(800)], [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC])
+    @Test(arguments: [CGFloat(240), CGFloat(393), CGFloat(800)], [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple])
     func groundBoundsUseWideHorizontalRangeAndScaledContentMargins(width: CGFloat, kind: AquariumDecorationKind) {
         let size = CGSize(width: width, height: 852)
         for scale in [CGFloat(1), CGFloat(1.5)] {
@@ -364,20 +425,19 @@ struct AquariumDeveloperDecorationTests {
                 forDropLocation: CGPoint(x: 10000, y: 10000),
                 aquariumSize: size, kind: kind, scale: scale
             )
-            #expect(left.x == bounds.x.lowerBound)
-            #expect(right.x == bounds.x.upperBound)
-            #expect(left.y == 0.72)
-            #expect(right.y == 0.96)
+            #expect(left.x == AquariumDecorationEditor.placementBounds(for: kind, aquariumSize: size, scale: scale, relativeY: left.y).x.lowerBound)
+            #expect(right.x == AquariumDecorationEditor.placementBounds(for: kind, aquariumSize: size, scale: scale, relativeY: right.y).x.upperBound)
+            #expect(left.y == 0.66)
+            #expect(right.y == bounds.y.upperBound)
             let content = kind.placementHorizontalContentBounds
-            let leftContentWidth = kind.displaySize.width * scale * (0.5 - content.lowerBound)
-            let rightContentWidth = kind.displaySize.width * scale * (content.upperBound - 0.5)
             let rootY = kind.groundAnchorY ?? 1
-            // 拡大後の実幅が小さい画面を超えた場合は、左右へ均等に分配する。
-            let overflow = max(0, (leftContentWidth + rightContentWidth - width) / 2)
-            #expect(left.x * width - leftContentWidth >= -overflow - 0.000_001)
-            #expect(right.x * width + rightContentWidth <= width + overflow + 0.000_001)
-            if overflow > 0 {
-                #expect(left.x == 0.5 && right.x == 0.5)
+            for position in [left, right] {
+                let depth = AquariumDecorationDepthPresentation(kind: kind, relativeY: position.y)
+                let displayWidth = kind.displaySize.width * scale * depth.scale
+                let contentLeft = position.x * width + (content.lowerBound - 0.5) * displayWidth
+                let contentRight = position.x * width + (content.upperBound - 0.5) * displayWidth
+                let visible = max(0, min(width, contentRight) - max(0, contentLeft))
+                #expect(visible + 0.000_001 >= min((contentRight - contentLeft) * 0.25, width))
             }
             #expect(left.y * size.height - kind.displaySize.height * scale * rootY >= 0)
             #expect(right.y * size.height + kind.displaySize.height * scale * (1 - rootY) <= size.height)
@@ -387,8 +447,8 @@ struct AquariumDeveloperDecorationTests {
             #expect(bounds.x.lowerBound < 0.10)
             #expect(bounds.x.upperBound > 0.90)
         } else if width == 800 && (kind == .seaweedA || kind == .seaweedB) {
-            #expect(bounds.x.lowerBound == 0.05)
-            #expect(bounds.x.upperBound == 0.95)
+            #expect(bounds.x.lowerBound < 0)
+            #expect(bounds.x.upperBound > 1)
         }
         let back = AquariumDecorationEditor.relativePosition(
             forDropLocation: CGPoint(x: width / 2, y: size.height * 0.82),
@@ -401,6 +461,24 @@ struct AquariumDeveloperDecorationTests {
         )
         #expect(abs(back.y - 0.82) < 0.000_001)
         #expect(abs(front.y - 0.94) < 0.000_001)
+    }
+
+    @Test func overflowCoordinatesAndOldPositionsSurviveRestoreAndCanDragBack() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let size = CGSize(width: 393, height: 852)
+        for kind in AquariumDecorationKind.allCases where kind.groundAnchorY != nil {
+            let position = AquariumDecorationEditor.relativePosition(forDropLocation: CGPoint(x: -1000, y: 700), aquariumSize: size, kind: kind)
+            #expect(position.x < 0)
+            let placement = try AquariumDecorationService.addPlacement(kind: kind, at: position, isPlaced: true, in: context)
+            let restored = try #require(ModelContext(container).fetch(FetchDescriptor<AquariumDecorationPlacement>()).first { $0.decorationID == placement.decorationID })
+            #expect(restored.relativeX == Double(position.x) && restored.relativeY == Double(position.y))
+            let centered = AquariumDecorationEditor.relativePosition(originalX: position.x, originalY: position.y, translation: CGSize(width: (0.5 - position.x) * size.width, height: 0), aquariumSize: size, kind: kind, isEditing: true)
+            #expect(abs(centered.x - 0.5) < 0.000_001)
+        }
+        let old = try AquariumDecorationService.addPlacement(kind: .seaweedA, at: CGPoint(x: 0.14, y: 0.82), isPlaced: true, in: context)
+        let restored = try #require(ModelContext(container).fetch(FetchDescriptor<AquariumDecorationPlacement>()).first { $0.decorationID == old.decorationID })
+        #expect(restored.relativeX == 0.14 && restored.relativeY == 0.82)
     }
 
     private func makeContainer() throws -> ModelContainer {
@@ -423,16 +501,16 @@ struct AquariumDeveloperDecorationTests {
         let center = AquariumDecorationEditor.dragPreviewPosition(
             forDropLocation: CGPoint(x: 196.5, y: 300), aquariumSize: size, kind: .seaweedA
         )
-        #expect(center.y == size.height * 0.72)
+        #expect(center.y == size.height * 0.66)
         #expect(AquariumDecorationKind.seaweedA.groundAnchorOffset() < 0)
     }
 
-    @Test(arguments: [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC])
+    @Test(arguments: [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple])
     func groundDepthInterpolatesSizeOpacityAndOrderingWithoutChangingStoredScale(kind: AquariumDecorationKind) throws {
         #expect(kind.movementBounds.y.lowerBound < 0.78)
-        let back = AquariumDecorationDepthPresentation(kind: kind, relativeY: 0.72)
-        let middle = AquariumDecorationDepthPresentation(kind: kind, relativeY: 0.84)
-        let front = AquariumDecorationDepthPresentation(kind: kind, relativeY: 0.96)
+        let back = AquariumDecorationDepthPresentation(kind: kind, relativeY: 0.66)
+        let middle = AquariumDecorationDepthPresentation(kind: kind, relativeY: (0.66 + 0.995) / 2)
+        let front = AquariumDecorationDepthPresentation(kind: kind, relativeY: 0.995)
         #expect(back.depthProgress == 1)
         #expect(front.depthProgress == 0)
         #expect(abs(middle.depthProgress - 0.5) < 0.000_001)
@@ -447,7 +525,7 @@ struct AquariumDeveloperDecorationTests {
         #expect(legacy.scale == 1 && legacy.opacity == 1)
         let container = try makeContainer()
         let placement = try AquariumDecorationService.addPlacement(kind: kind, scale: 1.1, in: container.mainContext)
-        try AquariumDecorationService.confirmPlacement(placement, at: CGPoint(x: 0.5, y: 0.72), in: container.mainContext)
+        try AquariumDecorationService.confirmPlacement(placement, at: CGPoint(x: 0.5, y: 0.66), in: container.mainContext)
         let restoredContext = ModelContext(container)
         let restored = try #require(restoredContext.fetch(FetchDescriptor<AquariumDecorationPlacement>()).first)
         #expect(restored.scale == 1.1)

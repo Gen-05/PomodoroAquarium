@@ -107,7 +107,7 @@ enum AquariumFishDragInteraction {
 
 enum AquariumFishDragPresentation {
     static let minimumPreviewSize: CGFloat = 44
-    static let maximumPreviewSize: CGFloat = 180
+    static let maximumPreviewSize: CGFloat = 300
 
     static func previewSize(for species: FishSpecies) -> CGFloat {
         min(

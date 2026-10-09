@@ -162,7 +162,7 @@ enum CoreTutorialConversationScript {
     ]
 
     static let fishPlacement: [CoreTutorialConversationPage] = [
-        .message("クマノミを水槽へスライドしてみましょう。")
+        .message("クマノミをタップして、水槽へ追加してみましょう。")
     ]
 
     static let aquariumSave: [CoreTutorialConversationPage] = [

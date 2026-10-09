@@ -593,19 +593,13 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(editAlert.waitForExistence(timeout: 3))
         editAlert.buttons["編集する"].tap()
 
-        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.ghostHand"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["aquariumEditor.category.fish"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.fish.pufferfish"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.fish.seahorse"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.fish.manta"].exists)
-        let clownfishHandle = app.images
-            .matching(identifier: "aquariumEditor.fish.clownfish")
-            .matching(NSPredicate(format: "label == %@", "クマノミ"))
-            .firstMatch
-        XCTAssertTrue(clownfishHandle.waitForExistence(timeout: 5))
-        let destination = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-            .withOffset(CGVector(dx: 100, dy: clownfishHandle.frame.midY))
-        clownfishHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.2, thenDragTo: destination)
+        let tutorialFish = app.descendants(matching: .any)["aquariumEditor.dragFish.clownfish"]
+        XCTAssertTrue(tutorialFish.waitForExistence(timeout: 5))
+        tutorialFish.tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.savePrompt"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["coreTutorial.ghostHand"].exists)
@@ -715,17 +709,11 @@ final class PomodoroAquariumUITests: XCTestCase {
         let editAlert = app.alerts["水槽を編集しますか？"]
         XCTAssertTrue(editAlert.waitForExistence(timeout: 3))
         editAlert.buttons["編集する"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.ghostHand"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["aquariumEditor.category.fish"].waitForExistence(timeout: 5))
 
-        let clownfishHandle = app.images
-            .matching(identifier: "aquariumEditor.fish.clownfish")
-            .matching(NSPredicate(format: "label == %@", "クマノミ"))
-            .firstMatch
-        XCTAssertTrue(clownfishHandle.waitForExistence(timeout: 5))
-        let destination = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-            .withOffset(CGVector(dx: 100, dy: clownfishHandle.frame.midY))
-        clownfishHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.2, thenDragTo: destination)
+        let tutorialFish = app.descendants(matching: .any)["aquariumEditor.dragFish.clownfish"]
+        XCTAssertTrue(tutorialFish.waitForExistence(timeout: 5))
+        tutorialFish.tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.savePrompt"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["coreTutorial.ghostHand"].exists)
@@ -991,107 +979,211 @@ final class PomodoroAquariumUITests: XCTestCase {
     }
 
     @MainActor
-    func testAquariumSideEditorKeepsTheAquariumVisibleAndSwitchesCategories() throws {
+    func testFishEditorDragDirectSelectionAndIndividualStorage() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-core-tutorial-in-memory", "-fish-editor-ui-test", "-timerSessionState", ""]
         launchReturningUser(app)
-
-        XCTAssertFalse(app.buttons["水槽編集"].exists)
-        XCTAssertFalse(app.buttons["設定"].exists)
         app.buttons["mainTab.aquarium"].tap()
-
-        let tutorial = app.descendants(matching: .any)["aquariumEditor.tutorial"]
-        let panel = app.descendants(matching: .any)["aquariumEditor.panel"]
-        let editButton = app.buttons["aquariumEditor.start"]
-        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
-        XCTAssertFalse(panel.exists)
-        XCTAssertFalse(app.buttons["aquariumEditor.done"].exists)
-        XCTAssertFalse(app.buttons["aquariumEditor.help"].exists)
-        XCTAssertFalse(tutorial.exists)
-
-        editButton.tap()
-        let editAlert = app.alerts["水槽を編集しますか？"]
-        XCTAssertTrue(editAlert.waitForExistence(timeout: 2))
-        editAlert.buttons["キャンセル"].tap()
-        XCTAssertTrue(editButton.waitForExistence(timeout: 2))
-        XCTAssertFalse(panel.exists)
-
-        editButton.tap()
-        XCTAssertTrue(editAlert.waitForExistence(timeout: 2))
-        editAlert.buttons["編集する"].tap()
-
-        if tutorial.waitForExistence(timeout: 1) {
-            app.buttons["aquariumEditor.tutorial.dismiss"].tap()
-            XCTAssertTrue(tutorial.waitForNonExistence(timeout: 2))
-        }
-
-        XCTAssertTrue(panel.waitForExistence(timeout: 5))
-        XCTAssertLessThan(panel.frame.width, app.frame.width / 2)
-        XCTAssertGreaterThan(app.frame.width - panel.frame.width, app.frame.width / 2)
-        XCTAssertGreaterThan(panel.frame.minX, app.frame.midX)
-        XCTAssertTrue(app.staticTexts["水槽の魚"].exists)
-        XCTAssertEqual(
-            app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "戻す")).count,
-            0
-        )
-
-        let helpButton = app.buttons["aquariumEditor.help"]
-        XCTAssertTrue(helpButton.exists)
-        helpButton.tap()
-        XCTAssertTrue(tutorial.waitForExistence(timeout: 2))
-        app.buttons["aquariumEditor.tutorial.dismiss"].tap()
-        XCTAssertTrue(tutorial.waitForNonExistence(timeout: 2))
-        helpButton.tap()
-        XCTAssertTrue(tutorial.waitForExistence(timeout: 2))
-        app.buttons["aquariumEditor.tutorial.dismiss"].tap()
-
-        app.buttons["aquariumEditor.collapsePanel"].tap()
-        XCTAssertTrue(panel.waitForNonExistence(timeout: 2))
-        let expandPanel = app.buttons["aquariumEditor.expandPanel"]
-        XCTAssertTrue(expandPanel.waitForExistence(timeout: 2))
-        XCTAssertLessThan(expandPanel.frame.width, app.frame.width * 0.15)
-        XCTAssertGreaterThanOrEqual(expandPanel.frame.height, 70)
-        XCTAssertLessThanOrEqual(expandPanel.frame.height, 110)
-        XCTAssertLessThanOrEqual(abs(expandPanel.frame.maxX - app.frame.maxX), 2)
-        XCTAssertFalse(app.buttons["aquariumEditor.help"].exists)
-        expandPanel.tap()
-        XCTAssertTrue(panel.waitForExistence(timeout: 2))
-
-        app.buttons["aquariumEditor.category.decoration"].tap()
-        XCTAssertTrue(app.staticTexts["水槽へドラッグ"].waitForExistence(timeout: 5))
-        let placedRock = app.descendants(matching: .any)[
-            "aquariumEditor.placedDecoration.default-rock"
-        ]
-        let removeDecorationButton = app.buttons["aquariumEditor.removeSelectedDecoration"]
-        let emptyCanvas = app.descendants(matching: .any)["aquariumEditor.emptyCanvas"]
-        XCTAssertTrue(placedRock.waitForExistence(timeout: 5))
-        XCTAssertTrue(emptyCanvas.exists)
-        placedRock.tap()
-        XCTAssertTrue(removeDecorationButton.waitForExistence(timeout: 2))
-        emptyCanvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)).tap()
-        XCTAssertTrue(removeDecorationButton.waitForNonExistence(timeout: 2))
-
-        app.buttons["aquariumEditor.category.background"].tap()
-        let deepSeaBackground = app.buttons["aquariumEditor.background.deepSea"]
-        XCTAssertTrue(deepSeaBackground.waitForExistence(timeout: 5))
-        deepSeaBackground.tap()
-        XCTAssertEqual(deepSeaBackground.value as? String, "選択中")
-
+        app.buttons["aquariumEditor.start"].tap()
+        app.alerts["水槽を編集しますか？"].buttons["編集する"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.fullScreenLibrary"].exists)
         app.buttons["aquariumEditor.category.fish"].tap()
-        XCTAssertTrue(app.staticTexts["水槽の魚"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["水槽編集を終了"].exists)
-
-        app.buttons["aquariumEditor.done"].tap()
-        let saveConfirmation = app.sheets.firstMatch
-        if saveConfirmation.waitForExistence(timeout: 1) {
-            saveConfirmation.buttons["変更を破棄"].tap()
+        let library = app.descendants(matching: .any)["aquariumEditor.fullScreenLibrary"]
+        XCTAssertTrue(library.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(library.frame.height, app.frame.height * 0.8)
+        app.buttons["aquariumEditor.closeLibrary"].tap()
+        app.buttons["aquariumEditor.category.fish"].tap()
+        let card = app.buttons["aquariumEditor.dragFish.clownfish"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["水槽 0 / 5"].firstMatch.exists)
+        keepScreenshot(app, name: "fish-editor-inventory")
+        card.tap()
+        keepScreenshot(app, name: "fish-editor-new-fish-appearance")
+        XCTAssertFalse(library.exists)
+        app.buttons["aquariumEditor.category.background"].tap()
+        keepScreenshot(app, name: "editor-full-screen-background-library")
+        app.buttons["aquariumEditor.closeLibrary"].tap()
+        let fish = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "aquarium.fish.")).firstMatch
+        XCTAssertTrue(fish.waitForExistence(timeout: 5))
+        fish.tap()
+        XCTAssertEqual(fish.value as? String, "選択中")
+        let directStore = app.buttons["aquariumEditor.removeSelectedFish"]
+        XCTAssertTrue(directStore.waitForExistence(timeout: 5))
+        keepScreenshot(app, name: "fish-editor-selected-swimming-fish")
+        directStore.tap()
+        XCTAssertTrue(directStore.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(fish.waitForNonExistence(timeout: 5))
+        for _ in 0..<2 {
+            app.buttons["aquariumEditor.category.fish"].tap()
+            app.buttons["追加する"].tap()
+            card.tap()
         }
-        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
-        XCTAssertTrue(panel.waitForNonExistence(timeout: 2))
-        XCTAssertFalse(app.buttons["aquariumEditor.done"].exists)
-        XCTAssertFalse(app.buttons["aquariumEditor.help"].exists)
+        let swimming = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "aquarium.fish."))
+        XCTAssertEqual(swimming.count, 2)
+        app.buttons["aquariumEditor.category.fish"].tap()
+        app.buttons["水槽にいる魚"].tap()
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "aquariumEditor.selectFish."))
+        XCTAssertEqual(rows.count, 2)
+        let firstID = rows.element(boundBy: 0).identifier.replacingOccurrences(of: "aquariumEditor.selectFish.", with: "")
+        let secondID = rows.element(boundBy: 1).identifier.replacingOccurrences(of: "aquariumEditor.selectFish.", with: "")
+        rows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5)).tap()
+        XCTAssertFalse(library.exists)
+        XCTAssertEqual(app.descendants(matching: .any)["aquarium.fish." + firstID].value as? String, "選択中")
+        app.buttons["aquariumEditor.category.fish"].tap()
+        rows.element(boundBy: 1).coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5)).tap()
+        XCTAssertEqual(app.descendants(matching: .any)["aquarium.fish." + firstID].value as? String, "")
+        XCTAssertEqual(app.descendants(matching: .any)["aquarium.fish." + secondID].value as? String, "選択中")
+        XCTAssertFalse(app.buttons["魚一覧に戻る"].exists)
+        XCTAssertTrue(directStore.exists)
+        keepScreenshot(app, name: "fish-editor-list-selection-glow")
+        directStore.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["aquarium.fish." + secondID].waitForNonExistence(timeout: 5))
+        XCTAssertEqual(swimming.count, 1)
+        XCTAssertEqual(app.descendants(matching: .any)["aquarium.fish." + firstID].value as? String, "")
+        app.buttons["aquariumEditor.category.fish"].tap()
+        app.buttons["aquariumEditor.storeFish." + firstID].tap()
+        XCTAssertEqual(swimming.count, 0)
+        app.buttons["追加する"].tap()
+        XCTAssertTrue(app.staticTexts["水槽 0 / 5"].firstMatch.exists)
+        app.buttons["aquariumEditor.closeLibrary"].tap()
+        for species in ["manta", "whaleShark"] {
+            app.buttons["aquariumEditor.category.fish"].tap()
+            app.buttons["追加する"].tap()
+            let largeCard = app.buttons["aquariumEditor.dragFish." + species]
+            if !largeCard.isHittable { app.swipeUp() }
+            XCTAssertTrue(largeCard.isHittable)
+            largeCard.tap()
+            Thread.sleep(forTimeInterval: 1.1) // 出現演出終了後の輪郭幅を撮影する。
+            app.buttons["aquariumEditor.category.fish"].tap()
+            app.buttons["水槽にいる魚"].tap()
+            rows.firstMatch.tap()
+            keepScreenshot(app, name: "fish-editor-selected-" + species)
+            directStore.tap()
+        }
+        app.buttons["aquariumEditor.done"].tap()
+        app.buttons["保存する"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
+    }
 
-        app.buttons["mainTab.shop"].tap()
-        XCTAssertTrue(app.navigationBars["ショップ"].waitForExistence(timeout: 5))
+    @MainActor
+    func testAquariumDraftRestartsAndCancelsWithoutOpeningLibrary() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-core-tutorial-in-memory", "-timerSessionState", ""]
+        launchReturningUser(app)
+        app.buttons["mainTab.aquarium"].tap()
+        // Clear a draft left by an interrupted simulator test.
+        if app.buttons["aquariumEditor.cancel"].waitForExistence(timeout: 2) {
+            app.buttons["aquariumEditor.cancel"].tap()
+            app.alerts["編集内容を破棄しますか？"].buttons["変更を破棄"].tap()
+        }
+        XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
+        app.buttons["aquariumEditor.start"].tap()
+        XCTAssertTrue(app.alerts["水槽を編集しますか？"].waitForExistence(timeout: 5))
+        app.alerts["水槽を編集しますか？"].buttons["編集する"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.category.background"].waitForExistence(timeout: 5))
+        app.buttons["aquariumEditor.category.background"].tap()
+        app.buttons["深い海"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.cancel"].waitForExistence(timeout: 5))
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.buttons["aquariumEditor.done"].waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.buttons["aquariumEditor.done"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.fullScreenLibrary"].exists)
+        keepScreenshot(app, name: "aquarium-draft-restored")
+        app.buttons["aquariumEditor.cancel"].tap()
+        let dialog = app.alerts["編集内容を破棄しますか？"]
+        XCTAssertTrue(dialog.waitForExistence(timeout: 3))
+        dialog.buttons["編集を続ける"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.done"].exists)
+        app.buttons["aquariumEditor.cancel"].tap()
+        app.alerts["編集内容を破棄しますか？"].buttons["変更を破棄"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
+        app.terminate()
+        launchReturningUser(app)
+        app.buttons["mainTab.aquarium"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["aquariumEditor.done"].exists)
+        app.buttons["aquariumEditor.start"].tap()
+        XCTAssertTrue(app.alerts["水槽を編集しますか？"].waitForExistence(timeout: 5))
+        app.alerts["水槽を編集しますか？"].buttons["編集する"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.done"].waitForExistence(timeout: 5))
+        app.buttons["aquariumEditor.done"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
+        app.terminate()
+        launchReturningUser(app)
+    }
+
+    @MainActor
+    func testAquariumFullCanvasAddsSelectsMovesAndStoresDecoration() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-core-tutorial-in-memory", "-timerSessionState", ""]
+        launchReturningUser(app)
+        app.buttons["mainTab.aquarium"].tap()
+        app.buttons["aquariumEditor.start"].tap()
+        let alert = app.alerts["水槽を編集しますか？"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 3))
+        alert.buttons["編集する"].tap()
+        let library = app.buttons["aquariumEditor.category.decoration"]
+        XCTAssertTrue(library.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.panel"].exists)
+        XCTAssertFalse(app.buttons["mainTab.home"].isHittable)
+        keepScreenshot(app, name: "editor-full-canvas")
+        library.tap()
+        keepScreenshot(app, name: "editor-full-screen-decoration-library")
+        app.buttons["サンゴ"].tap()
+        app.swipeUp()
+        let coral = app.buttons["aquariumEditor.add.coral_c_pink"]
+        XCTAssertTrue(coral.waitForExistence(timeout: 5))
+        coral.tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.openNudge"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["aquariumEditor.nudge.arrow.up"].exists)
+        keepScreenshot(app, name: "editor-compact-selection-menu")
+        app.buttons["aquariumEditor.openNudge"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.nudge.arrow.up"].waitForExistence(timeout: 5))
+        XCTAssertFalse(coral.exists)
+        let fixedFrame = app.buttons["aquariumEditor.nudge.arrow.up"].frame
+        for direction in ["up", "down", "left", "right"] {
+            for _ in 0..<12 {
+                app.buttons["aquariumEditor.nudge.arrow." + direction].tap()
+                let current = app.buttons["aquariumEditor.nudge.arrow.up"].frame
+                XCTAssertEqual(current.minY, fixedFrame.minY, accuracy: 0.5)
+                XCTAssertEqual(current.minX, fixedFrame.minX, accuracy: 0.5)
+            }
+        }
+        keepScreenshot(app, name: "editor-selected-coral")
+        app.buttons["aquariumEditor.closeNudge"].tap()
+        XCTAssertFalse(app.buttons["aquariumEditor.nudge.arrow.up"].exists)
+        XCTAssertTrue(app.buttons["aquariumEditor.openNudge"].exists)
+        let canvas = app.descendants(matching: .any)["aquariumEditor.decorationCanvas"]
+        XCTAssertTrue(canvas.exists)
+        let newDecoration = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "aquariumEditor.placedDecoration.developer-owned-coral_c_pink")).firstMatch
+        let start = newDecoration.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.78))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertTrue(app.buttons["aquariumEditor.openNudge"].waitForExistence(timeout: 3))
+        keepScreenshot(app, name: "editor-dragged-coral")
+        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.42)).tap()
+        XCTAssertFalse(app.buttons["aquariumEditor.nudge.arrow.up"].exists)
+        XCTAssertFalse(app.buttons["mainTab.home"].isHittable)
+        library.tap()
+        app.buttons["配置済み"].tap()
+        let saved = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "aquariumEditor.selectPlaced.developer-owned-coral_c_pink")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 5))
+        saved.tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.removeSelectedDecoration"].waitForExistence(timeout: 5))
+        app.buttons["aquariumEditor.removeSelectedDecoration"].tap()
+        XCTAssertFalse(app.buttons["aquariumEditor.nudge.arrow.up"].exists)
+        app.buttons["aquariumEditor.category.background"].tap()
+        XCTAssertTrue(app.buttons["サンゴ礁"].waitForExistence(timeout: 5))
+        app.buttons["サンゴ礁"].tap()
+        app.buttons["aquariumEditor.done"].tap()
+        let save = app.buttons["保存する"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        save.tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["mainTab.home"].isHittable)
     }
 
     @MainActor
@@ -1143,16 +1235,17 @@ final class PomodoroAquariumUITests: XCTestCase {
         }
 
         let panel = app.descendants(matching: .any)["aquariumEditor.panel"]
-        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        XCTAssertFalse(panel.exists)
+        XCTAssertTrue(app.buttons["aquariumEditor.category.fish"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["aquariumEditor.done"].exists)
-        XCTAssertTrue(app.buttons["aquariumEditor.help"].exists)
-        XCTAssertTrue(homeTab.exists)
+        XCTAssertFalse(app.buttons["aquariumEditor.help"].exists)
+        XCTAssertFalse(homeTab.isHittable)
 
         Thread.sleep(forTimeInterval: 10.5)
-        XCTAssertTrue(panel.exists)
+        XCTAssertFalse(panel.exists)
         XCTAssertTrue(app.buttons["aquariumEditor.done"].exists)
-        XCTAssertTrue(app.buttons["aquariumEditor.help"].exists)
-        XCTAssertTrue(homeTab.exists)
+        XCTAssertFalse(app.buttons["aquariumEditor.help"].exists)
+        XCTAssertFalse(homeTab.isHittable)
 
         app.buttons["aquariumEditor.done"].tap()
         XCTAssertTrue(editButton.waitForExistence(timeout: 2))

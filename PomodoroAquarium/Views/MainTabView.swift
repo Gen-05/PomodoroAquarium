@@ -186,6 +186,20 @@ struct MainTabSelectionState {
     }
 }
 
+enum AquariumEditorLaunchPolicy {
+    static func canRestore(mode: CoreTutorialMode, defaults: UserDefaults) -> Bool {
+        mode == .production && defaults.bool(forKey: OnboardingStore.storageKey) &&
+            defaults.bool(forKey: CoreTutorialStorageKey.hasCompleted)
+    }
+
+    static func initialTab(mode: CoreTutorialMode, defaults: UserDefaults,
+                           store: AquariumEditorDraftStore = .standard) -> MainAppTab {
+        guard canRestore(mode: mode, defaults: defaults),
+              (try? store.load()) != nil else { return .home }
+        return .aquarium
+    }
+}
+
 struct MainTabView: View {
     @Query private var players: [Player]
     @Environment(\.scenePhase) private var scenePhase
@@ -219,6 +233,13 @@ struct MainTabView: View {
         notificationService: TimerNotificationScheduling? = nil,
         onCoreTutorialPreviewFinished: @escaping () -> Void = {}
     ) {
+        let initialTab = AquariumEditorLaunchPolicy.initialTab(mode: coreTutorialMode, defaults: defaults)
+        var initialSelection = MainTabSelectionState()
+        initialSelection.select(initialTab, whileStudyLocked: false)
+        _tabSelectionState = State(initialValue: initialSelection)
+        let initialEditorNavigation = AquariumEditorNavigationCoordinator()
+        if initialTab == .aquarium { initialEditorNavigation.beginSession() }
+        _aquariumEditorNavigation = State(initialValue: initialEditorNavigation)
         TimerConfigurationStorage.migrateLegacyValuesIfNeeded(in: defaults)
         let resolvedSessionStore = timerSessionStore ?? (
             coreTutorialMode == .production
@@ -305,6 +326,7 @@ struct MainTabView: View {
                     HomeView(
                         timerViewModel: timerViewModel,
                         mode: .aquariumEditor,
+                        allowsEditorDraftRestoration: AquariumEditorLaunchPolicy.canRestore(mode: coreTutorialMode, defaults: appDefaults),
                         isAquariumSimulationPaused: MainTabAquariumActivityPolicy
                             .isSimulationPaused(
                                 for: .aquarium,
@@ -651,21 +673,6 @@ struct MainTabView: View {
             }
         }
 
-        if MainTabNavigationPolicy.requiresAquariumSaveConfirmation(
-            from: tabSelectionState.selection,
-            to: requestedTab,
-            whileStudyLocked: isStudyLocked,
-            hasUnsavedAquariumChanges: aquariumEditorNavigation.hasUnsavedChanges
-        ) {
-            aquariumEditorNavigation.requestConfirmation(beforeSelecting: requestedTab)
-            return false
-        }
-
-        if tabSelectionState.selection == .aquarium,
-           requestedTab != .aquarium,
-           aquariumEditorNavigation.tabMode == .editing {
-            aquariumEditorNavigation.finishSession()
-        }
         let previousTab = tabSelectionState.selection
         aquariumEditorNavigation.continueEditing()
         let didSelect = tabSelectionState.select(requestedTab, whileStudyLocked: false)

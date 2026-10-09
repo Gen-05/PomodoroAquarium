@@ -80,8 +80,7 @@ struct AquariumDecorationEditorState: Equatable {
     }
 }
 
-/// 水槽編集開始時の正式状態。編集中は既存モデルをプレビューとして使い、
-/// 破棄時にこの値へ戻すことで描画ロジックを二重化しない。
+/// 正式保存時の値コピー。編集モデルとの参照共有を避け、保存失敗時の復旧にも使う。
 struct AquariumEditorSessionSnapshot: Equatable {
     let activeFishIDs: [UUID]
     let decorations: [AquariumDecorationEditorState]

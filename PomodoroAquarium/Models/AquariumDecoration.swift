@@ -19,9 +19,19 @@ enum AquariumDecorationKind: String, Codable, CaseIterable {
     case mediumRockA = "medium_rock_a"
     case mediumRockB = "medium_rock_b"
     case mediumRockC = "medium_rock_c"
+    case coralAPink = "coral_a_pink"
+    case coralAOrange = "coral_a_orange"
+    case coralAPurple = "coral_a_purple"
+    case coralBPink = "coral_b_pink"
+    case coralBOrange = "coral_b_orange"
+    case coralBPurple = "coral_b_purple"
+    case coralCPink = "coral_c_pink"
+    case coralCOrange = "coral_c_orange"
+    case coralCPurple = "coral_c_purple"
 }
 
 enum AquariumDecorationType: String {
+    case coral
     case seaweed
     case rock
 }
@@ -50,7 +60,7 @@ struct AquariumDecorationMovementBounds {
 
     /// 3背景共通の海底帯。将来は背景ごとの帯を配置helperへ渡せる。
     // TODO: ★3沈没船はこの帯に含めず、更に奥の遠景レイヤーで左/中央/右の3固定位置を予定。
-    static let commonGround = AquariumDecorationMovementBounds(x: 0.05...0.95, y: 0.72...0.96)
+    static let commonGround = AquariumDecorationMovementBounds(x: -1...2, y: 0.66...0.995)
 }
 
 /// 装飾ZStack内の優先度。Y順序（0〜1）で種類間の順序は逆転しない。
@@ -101,6 +111,7 @@ extension AquariumDecorationKind {
 
     var category: AquariumDecorationCategory {
         switch self {
+        case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple: .coral
         case .seaweed, .seaweedA, .seaweedB, .seaweedC: .plant
         case .rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC: .rock
         }
@@ -108,6 +119,7 @@ extension AquariumDecorationKind {
 
     var decorationType: AquariumDecorationType {
         switch self {
+        case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple: .coral
         case .seaweed, .seaweedA, .seaweedB, .seaweedC: .seaweed
         case .rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC: .rock
         }
@@ -116,12 +128,14 @@ extension AquariumDecorationKind {
     /// 装飾のstable IDはkindのrawValue。価格は将来用の定義のみで購入処理には未接続。
     var stars: Int? {
         switch self {
+        case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple: 2
         case .mediumRockA, .mediumRockB, .mediumRockC: 2
         default: (self == .seaweedA || self == .seaweedB || self == .seaweedC || usesBackgroundVariants) ? 1 : nil
         }
     }
     var plannedPrice: Int? {
         switch self {
+        case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple: 130
         case .mediumRockA, .mediumRockB, .mediumRockC: 80
         default: (self == .seaweedA || self == .seaweedB || self == .seaweedC || usesBackgroundVariants) ? 30 : nil
         }
@@ -129,6 +143,7 @@ extension AquariumDecorationKind {
 
     var animationFrameNames: [String] {
         switch self {
+        case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple: []
         case .seaweedA:
             ["seaweed_a_01", "seaweed_a_02", "seaweed_a_03", "seaweed_a_04",
              "seaweed_a_05", "seaweed_a_06", "seaweed_a_07", "seaweed_a_08"]
@@ -150,6 +165,9 @@ extension AquariumDecorationKind {
     var displaySize: CGSize {
         // 新素材は512×768。比率を保ち、広がった葉も★1装飾として控えめな大きさにする。
         switch self {
+        case .coralCPink, .coralCOrange, .coralCPurple: CGSize(width: 124.8, height: 132.6)
+        case .coralAPink, .coralAOrange, .coralAPurple: CGSize(width: 100, height: 100)
+        case .coralBPink, .coralBOrange, .coralBPurple: CGSize(width: 140.8, height: 70.4)
         case .seaweedA: CGSize(width: 84, height: 126)
         // Bは512×1024。Aの約1.4倍の高さで、横幅は控えめに維持する。
         case .seaweedB: CGSize(width: 88, height: 176)
@@ -170,6 +188,9 @@ extension AquariumDecorationKind {
     /// 画像内の根元。配置座標を根元として描画するためのアンカー（上端=0、下端=1）。
     var groundAnchorY: CGFloat? {
         switch self {
+        case .coralCPink, .coralCOrange, .coralCPurple: 0.995
+        case .coralAPink, .coralAOrange, .coralAPurple: 0.995
+        case .coralBPink, .coralBOrange, .coralBPurple: 0.992
         case .seaweedA: 0.965
         // Bの透過余白を除いた根元（約1001/1024）を地面へ合わせる。
         case .seaweedB: 0.978
@@ -194,6 +215,7 @@ extension AquariumDecorationKind {
     var placementHorizontalContentBounds: ClosedRange<CGFloat> {
         // 透過余白を見込んだ既存の配置marginを維持する。
         switch self {
+        case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple: 0.015...0.985
         case .seaweedA, .seaweedB: 0.07...0.89
         // Cの全frameの占有範囲（x=41〜691/768）を余裕を持って包含。
         case .seaweedC: 0.05...0.91
@@ -216,6 +238,7 @@ extension AquariumDecorationKind {
     /// Asset名は定義IDと現在の背景から都度計算し、Placementへ保存しない。
     /// 中岩等も背景別素材を持つkindとして追加すれば同じ規則を利用できる。
     func assetImageName(for backgroundTheme: AquariumBackgroundTheme) -> String? {
+        if decorationType == .coral { return rawValue }
         guard usesBackgroundVariants else { return animationFrameNames.first }
         let suffix: String
         switch backgroundTheme {
@@ -232,6 +255,15 @@ extension AquariumDecorationKind {
 
     var displayName: String {
         switch self {
+        case .coralAPink: "枝サンゴ（ピンク）"
+        case .coralAOrange: "枝サンゴ（オレンジ）"
+        case .coralAPurple: "枝サンゴ（パープル）"
+        case .coralBPink: "丸サンゴ（ピンク）"
+        case .coralBOrange: "丸サンゴ（オレンジ）"
+        case .coralBPurple: "丸サンゴ（パープル）"
+        case .coralCPink: "トゲサンゴ（ピンク）"
+        case .coralCOrange: "トゲサンゴ（オレンジ）"
+        case .coralCPurple: "トゲサンゴ（パープル）"
         case .seaweed: "水草"
         case .rock: "岩"
         case .seaweedA: "海藻A"
@@ -248,6 +280,7 @@ extension AquariumDecorationKind {
 
     var storageIconName: String {
         switch self {
+        case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple: "tree.fill"
         case .seaweed, .seaweedA, .seaweedB, .seaweedC: "leaf.fill"
         case .rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC: "mountain.2.fill"
         }
@@ -255,6 +288,7 @@ extension AquariumDecorationKind {
 
     var restorationPosition: CGPoint {
         switch self {
+        case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple: CGPoint(x: 0.5, y: 0.92)
         case .seaweed: CGPoint(x: 0.5, y: 0.80)
         case .rock: CGPoint(x: 0.5, y: 0.84)
         case .seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC: CGPoint(x: 0.5, y: 0.92)
@@ -264,6 +298,7 @@ extension AquariumDecorationKind {
     /// 種類ごとの配置可能範囲。将来の浮遊装飾はここで別の範囲を指定できる。
     var movementBounds: AquariumDecorationMovementBounds {
         switch self {
+        case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple: .commonGround
         case .seaweed:
             AquariumDecorationMovementBounds(x: 0.10...0.90, y: 0.68...0.90)
         case .rock:
@@ -278,7 +313,7 @@ struct AquariumDecoration: Identifiable, Codable {
     let id: String
     let kind: AquariumDecorationKind
 
-    /// 画面サイズに依存しない0〜1の相対座標。
+    /// 画面サイズに依存しない相対座標。左右の一部はみ出しは0未満・1超も保存する。
     let relativeX: CGFloat
     let relativeY: CGFloat
     let scale: CGFloat

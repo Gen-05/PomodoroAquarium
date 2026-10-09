@@ -76,7 +76,7 @@ struct FishImageView: View {
         .accessibilityLabel(species.name)
     }
 
-    private var resolvedHorizontalScale: CGFloat {
+    var resolvedHorizontalScale: CGFloat {
         guard species.usesHorizontalSwimmingFlip else { return 1 }
         switch spritePose {
         case .sideToDiagonalUp15(let isLeftFacing),
@@ -85,6 +85,10 @@ struct FishImageView: View {
         case .facing, nil:
             return facingHorizontalScale
         }
+    }
+
+    var interactionImage: UIImage? {
+        spriteImage ?? species.imageName.flatMap { UIImage(named: $0) }
     }
 
     private var spriteImage: UIImage? {

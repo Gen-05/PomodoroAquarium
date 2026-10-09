@@ -2859,7 +2859,7 @@ struct PomodoroAquariumTests {
         #expect(FishSpecies.manta.displayScale == 2.25)
     }
 
-    @Test func favoriteFishUsesTheSameAquariumSizeAsNormalFish() {
+    @Test @MainActor func favoriteFishUsesTheSameAquariumSizeAsNormalFish() {
         for species in FishSpecies.allCases {
             let normalSize = AquariumFishSizing.displaySize(for: species, isFavorite: false)
             let favoriteSize = AquariumFishSizing.displaySize(for: species, isFavorite: true)

@@ -394,7 +394,7 @@ struct AquariumSideEditorTests {
             AquariumFishDragPresentation.previewSize(for: .pufferfish) -
                 AquariumFishSizing.displaySize(for: .pufferfish, isFavorite: false)
         ) < 0.000_001)
-        #expect(AquariumFishDragPresentation.previewSize(for: .whaleShark) == 180)
+        #expect(AquariumFishDragPresentation.previewSize(for: .whaleShark) == min(AquariumFishSizing.displaySize(for: .whaleShark, isFavorite: false), 300))
 
         for species in FishSpecies.allCases {
             #expect(AquariumFishDragPresentation.frameDuration(for: species) > 0)
