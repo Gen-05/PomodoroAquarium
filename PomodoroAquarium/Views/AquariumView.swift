@@ -176,19 +176,34 @@ struct AquariumView: View {
 
     // AquariumDecorationを画面上の座標へ変換して描画する装飾レイヤー。
     private func decorationLayer(in size: CGSize) -> some View {
+        let instances = decorationPlacements.filter { placement in
+            guard placement.isPlaced, placement.kind == .treasureChest else { return false }
+            let root = position(for: placement)
+            let depth = AquariumDecorationDepthPresentation(kind: placement.kind, relativeY: root.y)
+            let side = placement.kind.displaySize.width * CGFloat(placement.scale) * depth.scale
+            let rect = CGRect(x: root.x * size.width - side / 2,
+                y: root.y * size.height - (placement.kind.groundAnchorY(facingDirection: placement.facingDirection) ?? 0.5) * side,
+                width: side, height: side)
+            return rect.intersects(CGRect(origin: .zero, size: size))
+        }.sorted { $0.relativeY == $1.relativeY ? $0.decorationID < $1.decorationID : $0.relativeY > $1.relativeY }
+        .map { AquariumTreasureChestEffects.Instance(id: $0.decorationID, direction: $0.facingDirection) }
+        return AquariumTreasureChestAnimationLayer(instances: instances, isSimulationPaused: isSimulationPaused) { frames in
+            decorationContent(in: size, treasureFrames: frames)
+        }
+    }
+
+    private func decorationContent(in size: CGSize, treasureFrames: [String: AquariumTreasureChestEffects.Frame]) -> some View {
         ZStack {
-            ForEach(decorationPlacements.filter {
+            ForEach(Array(decorationPlacements.filter {
                 $0.isPlaced || $0.decorationID == editingDecorationID
-            }) { placement in
+            }.sorted { AquariumDecorationStacking.isBehind($0.decoration, $1.decoration) }.enumerated()), id: \.element.decorationID) { index, placement in
                 AquariumPlacedDecorationView(
                     placement: placement, backgroundTheme: backgroundTheme, aquariumSize: size,
                     isSelected: editingDecorationID == placement.decorationID,
-                    position: position(for: placement)
+                    position: position(for: placement), treasureFrame: treasureFrames[placement.decorationID] ?? .empty
                 )
                 .allowsHitTesting(false)
-                .zIndex(AquariumDecorationDepthPresentation(
-                    kind: placement.kind, relativeY: position(for: placement).y
-                ).renderZIndex(isDragging: isEditing && draggingDecorationID == placement.decorationID))
+                .zIndex(Double(index))
             }
             if let decorationDragPreview {
                 AquariumDecorationDragPreview(
@@ -200,9 +215,9 @@ struct AquariumView: View {
                     x: decorationDragPreview.relativeX * size.width,
                     y: decorationDragPreview.relativeY * size.height
                 )
-                .zIndex(AquariumDecorationDepthPresentation(
-                    kind: decorationDragPreview.kind, relativeY: decorationDragPreview.relativeY
-                ).renderZIndex(isDragging: true))
+                .zIndex(Double(decorationPlacements.filter {
+                    $0.isPlaced && AquariumDecorationStacking.group($0.decoration) <= AquariumDecorationStacking.group(decorationDragPreview)
+                }.count) - 0.5)
             }
         }
         .allowsHitTesting(isEditing)
@@ -212,7 +227,9 @@ struct AquariumView: View {
         let candidates = decorationPlacements.filter { $0.isPlaced }.map { placement in
             let root = position(for: placement)
             return AquariumDecoration(id: placement.decorationID, kind: placement.kind,
-                relativeX: root.x, relativeY: root.y, scale: CGFloat(placement.scale))
+                relativeX: root.x, relativeY: root.y, scale: CGFloat(placement.scale), facingDirection: placement.facingDirection,
+                zOrder: placement.zOrder, rockIsForeground: placement.rockIsForeground,
+                isStackingOrderInitialized: placement.isStackingOrderInitialized)
         }
         let id = AquariumDecorationHitTesting.selectedID(at: point, decorations: candidates,
             aquariumSize: size, theme: backgroundTheme)
@@ -274,12 +291,31 @@ struct AquariumView: View {
                     } else {
                         Button { showsDecorationNudge = true } label: {
                             Label("微調整", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
-                                .font(.caption.bold()).frame(minWidth: 88, minHeight: 44)
+                                .labelStyle(.titleOnly).font(.caption.bold()).frame(width: 64, height: 44)
                         }
                         .accessibilityIdentifier("aquariumEditor.openNudge")
+                        Menu {
+                            ForEach(AquariumDecorationStacking.Action.allCases, id: \.self) { action in
+                                Button(action.title) { changeStacking(placement, action: action) }
+                                    .disabled(!AquariumDecorationStacking.canMove(placement, action: action, among: decorationPlacements))
+                                    .accessibilityIdentifier("aquariumEditor.stacking.\(action.rawValue)")
+                            }
+                        } label: {
+                            Text("重なり順").font(.caption.bold()).frame(width: 72, height: 44)
+                        }
+                        .accessibilityIdentifier("aquariumEditor.stackingMenu")
+                        if placement.kind.supportsFacingDirection {
+                            Button { changeFacing(placement) } label: {
+                                Label("向き", systemImage: "arrow.left.arrow.right")
+                                    .labelStyle(.iconOnly).font(.caption.bold()).frame(width: 44, height: 44)
+                            }
+                            .accessibilityLabel("向きを変える")
+                            .accessibilityValue(placement.facingDirection == .right ? "右側面" : "左側面")
+                            .accessibilityIdentifier("aquariumEditor.changeTreasureChestDirection")
+                        }
                         Button { storeDecoration(placement) } label: {
                             Label("水槽からしまう", systemImage: "tray.and.arrow.down")
-                                .font(.caption.bold()).frame(minWidth: 132, minHeight: 44)
+                                .labelStyle(.titleOnly).font(.caption.bold()).frame(minHeight: 44)
                         }
                             .accessibilityLabel("水槽からしまう")
                             .accessibilityIdentifier("aquariumEditor.removeSelectedDecoration")
@@ -289,7 +325,7 @@ struct AquariumView: View {
                 .foregroundStyle(.white)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
                 .buttonStyle(.plain)
-                .frame(width: 260, height: 60)
+                .frame(width: min(size.width - 24, !showsDecorationNudge ? 330 : 260), height: 60)
                 .padding(.bottom, 35)
             }
         }
@@ -341,6 +377,20 @@ struct AquariumView: View {
         guard editingDecorationID != nil else { return }
         previewPosition = originalPosition
         finishDecorationEditing()
+    }
+
+    private func changeStacking(_ placement: AquariumDecorationPlacement, action: AquariumDecorationStacking.Action) {
+        guard isEditing, AquariumDecorationStacking.move(placement, action: action, among: decorationPlacements) else { return }
+        if !defersDecorationPersistence { try? modelContext.save() }
+        onDecorationChanged()
+    }
+
+    private func changeFacing(_ placement: AquariumDecorationPlacement) {
+        guard isEditing else { return }
+        do {
+            if try AquariumDecorationService.toggleFacing(placement, in: modelContext,
+                persistChanges: !defersDecorationPersistence) { onDecorationChanged() }
+        } catch {}
     }
 
     private func storeDecoration(_ placement: AquariumDecorationPlacement) {
@@ -426,19 +476,29 @@ private struct AquariumPlacedDecorationView: View {
     let aquariumSize: CGSize
     let isSelected: Bool
     let position: CGPoint
+    var treasureFrame: AquariumTreasureChestEffects.Frame = .empty
 
     var body: some View {
         let decoration = placement.decoration
         let depth = AquariumDecorationDepthPresentation(kind: decoration.kind, relativeY: position.y)
         let scale = decoration.scale * depth.scale
-        AquariumDecorationView(decoration: decoration, backgroundTheme: backgroundTheme)
-            .modifier(AquariumSelectionGlow(isSelected: isSelected))
-            .scaleEffect(scale)
-            .opacity(depth.opacity)
-            .offset(y: decoration.kind.groundAnchorOffset(scale: scale))
-            .position(x: aquariumSize.width * position.x, y: aquariumSize.height * position.y)
-            .accessibilityLabel(decoration.kind.displayName)
-            .accessibilityIdentifier("aquariumEditor.placedDecoration.\(placement.decorationID)")
+        Group {
+            if decoration.kind == .treasureChest {
+                AquariumTreasureChestView(direction: decoration.facingDirection, frame: treasureFrame,
+                    backgroundTheme: backgroundTheme, isSelected: isSelected, bodyOpacity: depth.opacity)
+                    .scaleEffect(scale)
+            } else {
+                AquariumDecorationView(decoration: decoration, backgroundTheme: backgroundTheme)
+                    .modifier(AquariumSelectionGlow(isSelected: isSelected))
+                    .scaleEffect(scale)
+                    .opacity(depth.opacity)
+            }
+        }
+        .offset(y: decoration.kind.groundAnchorOffset(scale: scale, facingDirection: decoration.facingDirection))
+        .position(x: aquariumSize.width * position.x, y: aquariumSize.height * position.y)
+        .accessibilityLabel(decoration.kind.displayName)
+        .accessibilityValue(decoration.kind.supportsFacingDirection ? (decoration.facingDirection == .right ? "右側面" : "左側面") : "")
+        .accessibilityIdentifier("aquariumEditor.placedDecoration.\(placement.decorationID)")
     }
 }
 
@@ -451,7 +511,7 @@ struct AquariumDecorationView: View {
         if !decoration.kind.animationFrameNames.isEmpty {
             AquariumDecorationFrameView(kind: decoration.kind, placementID: decoration.id)
                 .modifier(AquariumSeaweedColorCorrection.correction(for: backgroundTheme))
-        } else if let imageName = decoration.kind.assetImageName(for: backgroundTheme),
+        } else if let imageName = decoration.kind.assetImageName(for: backgroundTheme, facingDirection: decoration.facingDirection),
            let image = UIImage(named: imageName) {
             Image(uiImage: image)
                 .resizable()
@@ -460,6 +520,7 @@ struct AquariumDecorationView: View {
                 .modifier(AquariumCoralColorCorrection.correction(for: backgroundTheme, kind: decoration.kind))
         } else {
             switch decoration.kind {
+            case .treasureChest: EmptyView()
             case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple:
                 EmptyView()
             case .seaweed, .seaweedA, .seaweedB, .seaweedC:

@@ -10,6 +10,29 @@ struct AquariumEditorDraft: Codable, Equatable {
         var y: Double
         var scale: Double
         var isPlaced: Bool
+        var facingDirection: AquariumDecorationFacingDirection = .right
+        var zOrder: Int = 0
+        var rockIsForeground: Bool = false
+        var isStackingOrderInitialized: Bool = false
+
+        init(id: String, kind: String, x: Double, y: Double, scale: Double, isPlaced: Bool,
+             facingDirection: AquariumDecorationFacingDirection = .right, zOrder: Int = 0, rockIsForeground: Bool = false, isStackingOrderInitialized: Bool = false) {
+            self.id = id; self.kind = kind; self.x = x; self.y = y; self.scale = scale
+            self.isPlaced = isPlaced; self.facingDirection = facingDirection
+            self.zOrder = zOrder; self.rockIsForeground = rockIsForeground
+            self.isStackingOrderInitialized = isStackingOrderInitialized
+        }
+        private enum CodingKeys: String, CodingKey { case id, kind, x, y, scale, isPlaced, facingDirection, zOrder, rockIsForeground, isStackingOrderInitialized }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id); kind = try c.decode(String.self, forKey: .kind)
+            x = try c.decode(Double.self, forKey: .x); y = try c.decode(Double.self, forKey: .y)
+            scale = try c.decode(Double.self, forKey: .scale); isPlaced = try c.decode(Bool.self, forKey: .isPlaced)
+            facingDirection = try c.decodeIfPresent(AquariumDecorationFacingDirection.self, forKey: .facingDirection) ?? .right
+            zOrder = try c.decodeIfPresent(Int.self, forKey: .zOrder) ?? 0
+            rockIsForeground = try c.decodeIfPresent(Bool.self, forKey: .rockIsForeground) ?? false
+            isStackingOrderInitialized = try c.decodeIfPresent(Bool.self, forKey: .isStackingOrderInitialized) ?? false
+        }
     }
     var history: AquariumEditorHistory?
     var version = 1
@@ -22,10 +45,29 @@ struct AquariumEditorDraft: Codable, Equatable {
         fishIDs = player.activeAquariumFishIDs
         self.placements = placements.map {
             Placement(id: $0.decorationID, kind: $0.kindRawValue, x: $0.relativeX,
-                      y: $0.relativeY, scale: $0.scale, isPlaced: $0.isPlaced)
+                      y: $0.relativeY, scale: $0.scale, isPlaced: $0.isPlaced, facingDirection: $0.facingDirection, zOrder: $0.zOrder, rockIsForeground: $0.rockIsForeground, isStackingOrderInitialized: $0.isStackingOrderInitialized)
         }
         self.background = background.rawValue
+        normalizeLegacyStacking()
     }
+    /// 旧データは従来の見た目順に一度だけ番号を補完。過去の履歴も同じ規則で読み込む。
+    private mutating func normalizeLegacyStacking() {
+        guard placements.contains(where: { $0.isPlaced && !$0.isStackingOrderInitialized }) else { return }
+        let ordered = placements.indices.filter { placements[$0].isPlaced }.sorted { a, b in
+            func decoration(_ index: Int) -> AquariumDecoration {
+                let p = placements[index]
+                return AquariumDecoration(id: p.id, kind: AquariumDecorationKind(rawValue: p.kind) ?? .rock,
+                    relativeX: p.x, relativeY: p.y, scale: p.scale, zOrder: p.zOrder,
+                    rockIsForeground: p.rockIsForeground, isStackingOrderInitialized: p.isStackingOrderInitialized)
+            }
+            return AquariumDecorationStacking.isBehind(decoration(a), decoration(b))
+        }
+        for (rank, index) in ordered.enumerated() {
+            placements[index].zOrder = rank + 1
+            placements[index].isStackingOrderInitialized = true
+        }
+    }
+
     var snapshot: Self {
         var copy = self
         copy.history = nil
@@ -46,6 +88,7 @@ struct AquariumEditorDraft: Codable, Equatable {
         background = try values.decode(String.self, forKey: .background)
         // Broken history must never prevent recovery of the current draft.
         history = try? values.decodeIfPresent(AquariumEditorHistory.self, forKey: .history)
+        normalizeLegacyStacking()
     }
 
 }
@@ -88,7 +131,10 @@ final class AquariumEditorWorkingState {
             let state = states[original.decorationID]
             return AquariumDecorationPlacement(decorationID: original.decorationID, kind: original.kind,
                 relativeX: state?.x ?? original.relativeX, relativeY: state?.y ?? original.relativeY,
-                scale: state?.scale ?? original.scale, isPlaced: state?.isPlaced ?? original.isPlaced)
+                scale: state?.scale ?? original.scale, isPlaced: state?.isPlaced ?? original.isPlaced,
+                facingDirection: state?.facingDirection ?? original.facingDirection,
+                zOrder: state?.zOrder ?? original.zOrder, rockIsForeground: state?.rockIsForeground ?? original.rockIsForeground,
+                isStackingOrderInitialized: state?.isStackingOrderInitialized ?? original.isStackingOrderInitialized)
         }
     }
     func apply(_ draft: AquariumEditorDraft) {
@@ -101,6 +147,10 @@ final class AquariumEditorWorkingState {
             placement.relativeY = state.y
             placement.scale = state.scale
             placement.isPlaced = state.isPlaced
+            placement.facingDirection = state.facingDirection
+            placement.zOrder = state.zOrder
+            placement.rockIsForeground = state.rockIsForeground
+            placement.isStackingOrderInitialized = state.isStackingOrderInitialized
         }
     }
 

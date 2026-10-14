@@ -61,6 +61,10 @@ struct AquariumDecorationEditorState: Equatable {
     let relativeY: Double
     let scale: Double
     let isPlaced: Bool
+    let facingDirection: AquariumDecorationFacingDirection
+    let zOrder: Int
+    let rockIsForeground: Bool
+    let isStackingOrderInitialized: Bool
 
     @MainActor
     init(_ placement: AquariumDecorationPlacement) {
@@ -69,6 +73,10 @@ struct AquariumDecorationEditorState: Equatable {
         relativeY = placement.relativeY
         scale = placement.scale
         isPlaced = placement.isPlaced
+        facingDirection = placement.facingDirection
+        zOrder = placement.zOrder
+        rockIsForeground = placement.rockIsForeground
+        isStackingOrderInitialized = placement.isStackingOrderInitialized
     }
 
     @MainActor
@@ -77,6 +85,10 @@ struct AquariumDecorationEditorState: Equatable {
         placement.relativeY = relativeY
         placement.scale = scale
         placement.isPlaced = isPlaced
+        placement.facingDirection = facingDirection
+        placement.zOrder = zOrder
+        placement.rockIsForeground = rockIsForeground
+        placement.isStackingOrderInitialized = isStackingOrderInitialized
     }
 }
 

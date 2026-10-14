@@ -62,6 +62,18 @@ enum AquariumDecorationService {
         return placement
     }
 
+    /// ID・所持数・位置を変えない向き変更。編集時は既存draftへまとめて保存する。
+    @discardableResult
+    static func toggleFacing(_ placement: AquariumDecorationPlacement, in context: ModelContext,
+                             persistChanges: Bool = true) throws -> Bool {
+        guard placement.kind.supportsFacingDirection else { return false }
+        let previous = placement.facingDirectionRawValue
+        placement.facingDirection = placement.facingDirection.opposite
+        do { if persistChanges { try context.save() } }
+        catch { placement.facingDirectionRawValue = previous; throw error }
+        return true
+    }
+
     static func storedPlacements(
         from placements: [AquariumDecorationPlacement],
         category: AquariumDecorationCategory? = nil

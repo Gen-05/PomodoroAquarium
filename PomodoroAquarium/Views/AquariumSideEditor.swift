@@ -1046,7 +1046,7 @@ struct AquariumDecorationDragPreview: View {
             .scaleEffect(0.72 * depth.scale)
             .opacity(depth.opacity)
             .frame(width: 110, height: 110)
-            .offset(y: decoration.kind.groundAnchorOffset(scale: 0.72 * depth.scale))
+            .offset(y: decoration.kind.groundAnchorOffset(scale: 0.72 * depth.scale, facingDirection: decoration.facingDirection))
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }

@@ -321,12 +321,12 @@ struct AquariumDeveloperDecorationTests {
         #expect(!(try AquariumDeveloperDecorations.seedIfNeeded(in: context)))
         let placementContext = ModelContext(container)
         let placements = try placementContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-        #expect(placements.count == 90)
-        #expect(Set(placements.map(\.decorationID)).count == 90)
-        #expect(Set(placements.map(\.definitionID)) == ["seaweed-a", "seaweed-b", "seaweed_c", "small_rock_a", "small_rock_b", "small_rock_c", "medium_rock_a", "medium_rock_b", "medium_rock_c", "coral_a_pink", "coral_a_orange", "coral_a_purple", "coral_b_pink", "coral_b_orange", "coral_b_purple", "coral_c_pink", "coral_c_orange", "coral_c_purple"])
+        #expect(placements.count == 95)
+        #expect(Set(placements.map(\.decorationID)).count == 95)
+        #expect(Set(placements.map(\.definitionID)) == ["seaweed-a", "seaweed-b", "seaweed_c", "small_rock_a", "small_rock_b", "small_rock_c", "medium_rock_a", "medium_rock_b", "medium_rock_c", "coral_a_pink", "coral_a_orange", "coral_a_purple", "coral_b_pink", "coral_b_orange", "coral_b_purple", "coral_c_pink", "coral_c_orange", "coral_c_purple", "treasure_chest"])
         #expect(placements.allSatisfy { !$0.isPlaced })
         let inventory = AquariumDecorationEditorPresentation.inventory(from: placements)
-        #expect(inventory.map(\.kind) == [.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple])
+        #expect(inventory.map(\.kind) == [.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple, .treasureChest])
         #expect(inventory.allSatisfy { $0.ownedCount == 5 && $0.canPlaceAnother })
         for (index, placement) in placements.enumerated() {
             try AquariumEditorDropCoordinator.placeDecoration(
@@ -339,10 +339,10 @@ struct AquariumDeveloperDecorationTests {
         }
         let reloadContext = ModelContext(container)
         let reloaded = try reloadContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-        #expect(reloaded.count == 90)
+        #expect(reloaded.count == 95)
         #expect(reloaded.allSatisfy { $0.isPlaced })
         let placedInventory = AquariumDecorationEditorPresentation.inventory(from: reloaded)
-        #expect(placedInventory.count == 18)
+        #expect(placedInventory.count == 19)
         #expect(placedInventory.allSatisfy { $0.placedCount == 5 && !$0.canPlaceAnother })
         #expect(!(try AquariumDeveloperDecorations.seedIfNeeded(in: context)))
 #else
@@ -363,7 +363,7 @@ struct AquariumDeveloperDecorationTests {
         #expect(!placements.contains { $0.kind.stars != nil })
     }
 
-    @Test(arguments: [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple])
+    @Test(arguments: [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple, .treasureChest])
     func seaweedDropIsGroundedAndUsesExistingPlacementPersistence(kind: AquariumDecorationKind) throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -408,11 +408,11 @@ struct AquariumDeveloperDecorationTests {
         #expect(original.relativeY == 0.92)
         #expect(original.scale == 1.1)
         #expect(original.isPlaced)
-        #expect(try context.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 90)
+        #expect(try context.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 95)
 #endif
     }
 
-    @Test(arguments: [CGFloat(240), CGFloat(393), CGFloat(800)], [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple])
+    @Test(arguments: [CGFloat(240), CGFloat(393), CGFloat(800)], [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple, .treasureChest])
     func groundBoundsUseWideHorizontalRangeAndScaledContentMargins(width: CGFloat, kind: AquariumDecorationKind) {
         let size = CGSize(width: width, height: 852)
         for scale in [CGFloat(1), CGFloat(1.5)] {
@@ -505,7 +505,7 @@ struct AquariumDeveloperDecorationTests {
         #expect(AquariumDecorationKind.seaweedA.groundAnchorOffset() < 0)
     }
 
-    @Test(arguments: [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple])
+    @Test(arguments: [AquariumDecorationKind.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple, .treasureChest])
     func groundDepthInterpolatesSizeOpacityAndOrderingWithoutChangingStoredScale(kind: AquariumDecorationKind) throws {
         #expect(kind.movementBounds.y.lowerBound < 0.78)
         let back = AquariumDecorationDepthPresentation(kind: kind, relativeY: 0.66)

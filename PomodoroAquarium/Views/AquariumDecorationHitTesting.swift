@@ -10,9 +10,7 @@ enum AquariumDecorationHitTesting {
     static func selectedID(at point: CGPoint, decorations: [AquariumDecoration],
                            aquariumSize: CGSize, theme: AquariumBackgroundTheme) -> String? {
         let ordered = decorations.enumerated().sorted {
-            let left = AquariumDecorationDepthPresentation(kind: $0.element.kind, relativeY: $0.element.relativeY).zIndex
-            let right = AquariumDecorationDepthPresentation(kind: $1.element.kind, relativeY: $1.element.relativeY).zIndex
-            return left == right ? $0.offset > $1.offset : left > right
+            AquariumDecorationStacking.isBehind($1.element, $0.element)
         }.map(\.element)
         // 透明部分は後ろへ通す。余裕判定は全候補の可視領域判定後に行う。
         for tolerance in [CGFloat(0), CGFloat(6)] {
@@ -32,9 +30,9 @@ enum AquariumDecorationHitTesting {
         let height = decoration.kind.displaySize.height * scale
         guard width > 0, height > 0 else { return false }
         let origin = CGPoint(x: root.x * aquariumSize.width - width / 2,
-                             y: root.y * aquariumSize.height - (decoration.kind.groundAnchorY ?? 0.5) * height)
+                             y: root.y * aquariumSize.height - (decoration.kind.groundAnchorY(facingDirection: decoration.facingDirection) ?? 0.5) * height)
         let names = decoration.kind.animationFrameNames.isEmpty
-            ? [decoration.kind.assetImageName(for: theme)].compactMap { $0 }
+            ? [decoration.kind.assetImageName(for: theme, facingDirection: decoration.facingDirection)].compactMap { $0 }
             : decoration.kind.animationFrameNames
         guard !names.isEmpty else {
             return CGRect(origin: origin, size: CGSize(width: width, height: height)).insetBy(dx: -tolerance, dy: -tolerance).contains(point)

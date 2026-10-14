@@ -863,6 +863,7 @@ struct HomeView: View {
                 size: canvasFrame.size, existing: decorationPlacements.filter(\.isPlaced).map(\.decoration))
             try AquariumDecorationService.confirmPlacement(placement, at: initial,
                 in: modelContext, persistChanges: mode != .aquariumEditor)
+            AquariumDecorationStacking.insertNew(placement, among: decorationPlacements)
             aquariumEditorCategory = .decoration
             showsEditorLibrary = false
             decorationRestoreRequestID = id
@@ -946,7 +947,7 @@ struct HomeView: View {
             id: placement.decorationID, kind: placement.kind,
             relativeX: root.x / max(aquariumSize.width, 1),
             relativeY: root.y / max(aquariumSize.height, 1),
-            scale: CGFloat(placement.scale)
+            scale: CGFloat(placement.scale), facingDirection: placement.facingDirection
         )
     }
 
