@@ -133,6 +133,10 @@ struct HomeView: View {
     @State private var fishAppearances: [UUID: AquariumFishAppearance] = [:]
     @State private var editingFishPositions: [UUID: CGPoint] = [:]
     @State private var canvasFrame: CGRect = .zero
+    @State private var globalCanvasFrame: CGRect = .zero
+    @State private var editorHistoryBottom: CGFloat = 0
+    @State private var aquariumHistoryRestorationRequestID: UUID?
+    @State private var aquariumViewingTapRequest: AquariumTreasureChestTapLocation?
     @State private var showsEditorLibrary = false
     @State private var isFishLibraryCompact = false
     @State private var showsActiveFishLibrary = false
@@ -236,8 +240,11 @@ struct HomeView: View {
                         fishAppearances: fishAppearances,
                         onFishPositionsChanged: { editingFishPositions = $0 },
                         onCanvasGeometryChanged: { canvasFrame = $0 },
+                        onGlobalCanvasGeometryChanged: { globalCanvasFrame = $0 },
+                        viewingTapRequest: aquariumViewingTapRequest,
                         isSimulationPaused: isAquariumSimulationPaused,
                         isEditing: isAquariumEditorPresented && !showsEditorLibrary,
+                        isTreasureTapEnabled: !isAquariumEditorPresented,
                         defersDecorationPersistence: mode == .aquariumEditor,
                         isFishSelectionEnabled: isAquariumEditorPresented && !showsEditorLibrary,
                         selectedFishID: selectedAquariumFishID,
@@ -251,6 +258,8 @@ struct HomeView: View {
                             }
                         },
                         selectionResetRequestID: aquariumSelectionResetRequestID,
+                        historyRestorationRequestID: aquariumHistoryRestorationRequestID,
+                        decorationControlsTopInset: max(0, editorHistoryBottom - globalCanvasFrame.minY + 12),
                         decorationRestoreRequestID: decorationRestoreRequestID,
                         onDecorationRestoreRequestHandled: { decorationRestoreRequestID = nil },
                         decorationDragPreview: decorationPreview(in: aquariumSize),
@@ -276,9 +285,13 @@ struct HomeView: View {
                     if mode == .aquariumEditor, !isAquariumEditorPresented {
                         Color.clear
                             .contentShape(Rectangle())
-                            .onTapGesture {
+                            .gesture(SpatialTapGesture(coordinateSpace: .global).onEnded { value in
                                 onAquariumViewingInteraction()
-                            }
+                                aquariumViewingTapRequest = AquariumTreasureChestTapLocation(
+                                    point: CGPoint(x: value.location.x - globalCanvasFrame.minX,
+                                                   y: value.location.y - globalCanvasFrame.minY),
+                                    aquariumSize: globalCanvasFrame.size)
+                            })
                             .accessibilityElement()
                             .accessibilityLabel("水槽")
                             .accessibilityHidden(coreTutorial?.isActive == true)
@@ -804,6 +817,13 @@ struct HomeView: View {
             }
             .background(.ultraThinMaterial, in: Capsule())
             .padding(.top, 4)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear
+                        .onAppear { editorHistoryBottom = geometry.frame(in: .global).maxY }
+                        .onChange(of: geometry.frame(in: .global)) { _, frame in editorHistoryBottom = frame.maxY }
+                }
+            }
             Spacer()
         }.zIndex(30)
     }
@@ -1317,7 +1337,8 @@ struct HomeView: View {
         let previousIDs = Set(work.player.activeAquariumFishIDs)
         work.apply(draft)
         draftBackgroundTheme = AquariumBackgroundTheme(rawValue: draft.background)
-        clearAquariumSelections()
+        selectedAquariumFishID = nil
+        aquariumHistoryRestorationRequestID = UUID()
         let changedIDs = previousIDs.symmetricDifference(Set(work.player.activeAquariumFishIDs))
         for id in changedIDs { fishAppearances[id] = nil }
         // Only restored fish lose their initial spawn hint; other swimmers keep their state.

@@ -472,21 +472,26 @@ enum AquariumDecorationStacking {
     }
     @MainActor
     static func canMove(_ placement: AquariumDecorationPlacement, action: Action,
-                        among placements: [AquariumDecorationPlacement]) -> Bool {
-        let items = ordered(placements)
+                        among placements: [AquariumDecorationPlacement], within members: Set<String>) -> Bool {
+        let items = ordered(placements).filter { members.contains($0.decorationID) }
+        guard Set(items.map(\.zOrder)).count == items.count else { return false }
         guard let index = items.firstIndex(where: { $0.decorationID == placement.decorationID }) else { return false }
         return destination(action, index: index, count: items.count) != index
     }
     @MainActor @discardableResult
     static func move(_ placement: AquariumDecorationPlacement, action: Action,
-                     among placements: [AquariumDecorationPlacement]) -> Bool {
-        var items = ordered(placements)
+                     among placements: [AquariumDecorationPlacement], within members: Set<String>) -> Bool {
+        var items = ordered(placements).filter { members.contains($0.decorationID) }
         guard let index = items.firstIndex(where: { $0.decorationID == placement.decorationID }) else { return false }
         let target = destination(action, index: index, count: items.count)
         guard target != index else { return false }
+        let slots = items.map(\.zOrder)
+        guard Set(slots).count == slots.count else { return false }
         items.remove(at: index)
         items.insert(placement, at: target)
-        assignOrder(items)
+        for (index, item) in items.enumerated() {
+            item.zOrder = slots[index]
+        }
         return true
     }
     @MainActor

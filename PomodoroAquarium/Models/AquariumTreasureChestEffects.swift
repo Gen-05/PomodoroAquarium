@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// B案の通常時だけを再生する。時間から有限のサンプルを計算し、粒子Timerや保存データを持たない。
+/// B案の通常時と一時的なタップ演出を再生する。時間から有限のサンプルを計算し、粒子Timerや保存データを持たない。
 nonisolated enum AquariumTreasureChestEffects {
     static let bubbleAsset = "treasure_chest_bubble"
     // 本体・接地・当たり判定とエフェクトのUV座標を同じ表示寸法へ合わせる。
@@ -12,6 +12,11 @@ nonisolated enum AquariumTreasureChestEffects {
     static let sparkleLimitPerChest = 3
     static let sceneBubbleLimit = 80
     static let sceneSparkleLimit = 16
+    static let tapCooldown = 2.8
+    static let tapBubbleLimit = 8
+    static let tapSparkleLimit = 4
+    static let sceneTapBubbleLimit = 24
+    static let sceneTapSparkleLimit = 12
 
     struct Instance: Equatable {
         let id: String
@@ -79,6 +84,7 @@ nonisolated enum AquariumTreasureChestEffects {
     struct Frame: Equatable {
         var bubbles: [Bubble] = []
         var sparkles: [Sparkle] = []
+        var interiorLight: Double = 0
         static let empty = Frame()
     }
 
@@ -120,7 +126,8 @@ nonisolated enum AquariumTreasureChestEffects {
         }
         return result
     }
-    static func frames(instances: [Instance], patterns: [String: Pattern], elapsed: Double) -> [String: Frame] {
+    static func frames(instances: [Instance], patterns: [String: Pattern], elapsed: Double,
+                       bursts: [String: [TapBurst]] = [:]) -> [String: Frame] {
         var result: [String: Frame] = [:]
         var bubbleBudget = sceneBubbleLimit, sparkleBudget = sceneSparkleLimit
         for instance in instances {
@@ -132,7 +139,90 @@ nonisolated enum AquariumTreasureChestEffects {
             bubbleBudget -= sample.bubbles.count
             sparkleBudget -= sample.sparkles.count
         }
+        var extraBubbles = sceneTapBubbleLimit, extraSparkles = sceneTapSparkleLimit
+        for instance in instances {
+            guard let taps = bursts[instance.id], var sample = result[instance.id] else { continue }
+            let extra = tapFrame(bursts: taps, elapsed: elapsed, direction: instance.direction,
+                bubbleLimit: extraBubbles, sparkleLimit: extraSparkles)
+            sample.bubbles += extra.bubbles; sample.sparkles += extra.sparkles
+            sample.interiorLight = extra.interiorLight
+            result[instance.id] = sample
+            extraBubbles -= extra.bubbles.count; extraSparkles -= extra.sparkles.count
+        }
         return result
+    }
+
+    struct TapBurst: Equatable {
+        let start: Double
+        let bubbles: [BubbleSpec]
+        let sparkles: [SparkleSpec]
+        var end: Double { start + max(tapCooldown, bubbles.map { $0.birth + $0.lifetime }.max() ?? 0) }
+        init(start: Double, seed: UInt64) {
+            self.start = start
+            var random = Random(seed: seed)
+            bubbles = [0.08, 0.20, 0.34, 0.39, 0.53, 0.70, 0.88].enumerated().map { index, birth in
+                BubbleSpec(birth: birth, diameter: 5.5 + random.next() * 5,
+                    lifetime: 1.8 + random.next() * 0.3, rise: 110 + random.next() * 30,
+                    sway: 1.1 + random.next() * 2.1, phase: random.next() * .pi * 2,
+                    frequency: 1.3 + random.next() * 1.2, opacity: 1, originIndex: index % 3)
+            }
+            // 王冠→正面のエメラルド→内部の宝石→金貨。一定の間隔で柔らかく輝く。
+            sparkles = [0, 1, 2, 3, 4, 5, 6, 7, 2, 4].enumerated().map { index, spot in
+                SparkleSpec(birth: Double(index) * 0.21, lifetime: 0.58 + random.next() * 0.12,
+                    size: (index == 0 ? 11 : 8.5) + random.next() * 1.5, spot: spot)
+            }
+        }
+    }
+    static func tapFrame(bursts: [TapBurst], elapsed: Double, direction: AquariumDecorationFacingDirection,
+                         bubbleLimit: Int = tapBubbleLimit, sparkleLimit: Int = tapSparkleLimit) -> Frame {
+        var result = Frame()
+        let origins = bubbleOrigins(direction), spots = sparklePoints(direction)
+        for burst in bursts {
+            let time = elapsed - burst.start
+            guard time >= 0 else { continue }
+            result.interiorLight = max(result.interiorLight, 0.24 * smooth(time / 0.09) * (1 - smooth(time / 0.65)))
+            for spec in burst.bubbles where result.bubbles.count < min(tapBubbleLimit, max(0, bubbleLimit)) {
+                let age = time - spec.birth
+                guard age >= 0, age < spec.lifetime else { continue }
+                let progress = age / spec.lifetime
+                let dx = spec.sway * (sin(age * spec.frequency + spec.phase) - sin(spec.phase) + 0.23 * sin(age * spec.frequency * 1.6))
+                let dy = spec.rise * (progress * 0.94 + 0.06 * progress * progress)
+                let origin = origins[spec.originIndex]
+                result.bubbles.append(Bubble(point: CGPoint(x: origin.x + dx / canvasSide, y: origin.y - dy / canvasSide),
+                    diameter: spec.diameter * (0.94 + 0.06 * smooth(age / 0.3)),
+                    opacity: bubbleOpacity(age: age, lifetime: spec.lifetime)))
+            }
+            for spec in burst.sparkles where result.sparkles.count < min(tapSparkleLimit, max(0, sparkleLimit)) {
+                let age = time - spec.birth
+                guard age >= 0, age < spec.lifetime else { continue }
+                let pulse = pow(sin(.pi * age / spec.lifetime), 2)
+                let strength = 1 - 0.25 * min(1, spec.birth / tapCooldown)
+                result.sparkles.append(Sparkle(point: spots[spec.spot], size: spec.size * (0.75 + 0.25 * pulse),
+                    opacity: 0.98 * strength * pulse))
+            }
+        }
+        return result
+    }
+
+    /// 配置IDごとの短命な状態だけを保持。タイマー・保存・Undo履歴は持たない。
+    struct TapState {
+        private(set) var bursts: [String: [TapBurst]] = [:]
+        private var sequence: UInt64 = 0
+        @discardableResult
+        mutating func trigger(id: String, elapsed: Double, enabled: Bool) -> Bool {
+            guard enabled, bursts[id]?.last.map({ elapsed - $0.start < tapCooldown }) != true else { return false }
+            sequence &+= 1
+            let seed = id.utf8.reduce(sequence) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
+            bursts[id] = (bursts[id] ?? []).filter { $0.end > elapsed } + [TapBurst(start: elapsed, seed: seed)]
+            return true
+        }
+        mutating func prune(elapsed: Double, visibleIDs: Set<String>) {
+            for id in Array(bursts.keys) {
+                guard visibleIDs.contains(id) else { bursts[id] = nil; continue }
+                let live = bursts[id, default: []].filter { $0.end > elapsed }
+                if live.isEmpty { bursts[id] = nil } else if live != bursts[id] { bursts[id] = live }
+            }
+        }
     }
     private struct Random {
         var state: UInt64

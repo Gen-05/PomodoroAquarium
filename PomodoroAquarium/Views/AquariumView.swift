@@ -20,8 +20,11 @@ struct AquariumView: View {
     var fishAppearances: [UUID: AquariumFishAppearance] = [:]
     var onFishPositionsChanged: ([UUID: CGPoint]) -> Void = { _ in }
     var onCanvasGeometryChanged: (CGRect) -> Void = { _ in }
+    var onGlobalCanvasGeometryChanged: (CGRect) -> Void = { _ in }
+    var viewingTapRequest: AquariumTreasureChestTapLocation?
     var isSimulationPaused = false
     var isEditing = false
+    var isTreasureTapEnabled = true
     var defersDecorationPersistence = false
     var isFishSelectionEnabled = false
     var selectedFishID: UUID?
@@ -30,6 +33,8 @@ struct AquariumView: View {
     var onDecorationChanged: () -> Void = {}
     var onDecorationEditingChanged: (Bool) -> Void = { _ in }
     var selectionResetRequestID: UUID?
+    var historyRestorationRequestID: UUID?
+    var decorationControlsTopInset: CGFloat = 160
     var decorationRestoreRequestID: String?
     var onDecorationRestoreRequestHandled: () -> Void = {}
     var decorationDragPreview: AquariumDecoration?
@@ -38,8 +43,11 @@ struct AquariumView: View {
     @Query private var officialDecorationPlacements: [AquariumDecorationPlacement]
     var editingPlacements: [AquariumDecorationPlacement]?
     private var decorationPlacements: [AquariumDecorationPlacement] { editingPlacements ?? officialDecorationPlacements }
+    @State private var treasureTapRequest: AquariumTreasureChestTapRequest?
     @State private var editingDecorationID: String?
     @State private var showsDecorationNudge = false
+    @State private var showsStackingControls = false
+    @State private var decorationControlsCenter: CGPoint?
     @State private var draggingDecorationID: String?
     @State private var canvasDragStart: CGPoint?
     @State private var canvasGestureStarted = false
@@ -70,13 +78,18 @@ struct AquariumView: View {
                 selectionClearingLayer
                 decorationLayer(in: geometry.size)
                 if isEditing { decorationInteractionLayer(in: geometry.size) }
+                else { treasureInteractionLayer(in: geometry.size) }
                 fishLayer(in: geometry.size)
                 if isEditing { decorationOperationMenu(in: geometry.size) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
-            .onAppear { onCanvasGeometryChanged(geometry.frame(in: .named(AquariumEditorCoordinateSpace.name))) }
+            .onAppear {
+                onCanvasGeometryChanged(geometry.frame(in: .named(AquariumEditorCoordinateSpace.name)))
+                onGlobalCanvasGeometryChanged(geometry.frame(in: .global))
+            }
             .onChange(of: geometry.size) { _, _ in onCanvasGeometryChanged(geometry.frame(in: .named(AquariumEditorCoordinateSpace.name))) }
+            .onChange(of: geometry.frame(in: .global)) { _, frame in onGlobalCanvasGeometryChanged(frame) }
         }
         .ignoresSafeArea()
         .onAppear {
@@ -94,6 +107,10 @@ struct AquariumView: View {
             if retainedPositions.count != fishPositions.count {
                 fishPositions = retainedPositions
             }
+        }
+        .onChange(of: viewingTapRequest?.token) { _, _ in
+            guard let request = viewingTapRequest else { return }
+            triggerTreasureTap(at: request.point, in: request.aquariumSize)
         }
         .onChange(of: isEditing) { _, newValue in
             if !newValue {
@@ -113,6 +130,16 @@ struct AquariumView: View {
         .onChange(of: selectionResetRequestID) { _, requestID in
             guard requestID != nil else { return }
             cancelDecorationEditing()
+        }
+        .onChange(of: historyRestorationRequestID) { _, request in
+            guard request != nil else { return }
+            if showsStackingControls, let id = editingDecorationID,
+               let placement = decorationPlacements.first(where: { $0.decorationID == id && $0.isPlaced }) {
+                originalPosition = CGPoint(x: placement.relativeX, y: placement.relativeY)
+                previewPosition = nil
+            } else {
+                cancelDecorationEditing()
+            }
         }
         .onChange(of: fishPositions) { _, positions in
             if isEditing || isFishSelectionEnabled { onFishPositionsChanged(positions) }
@@ -187,7 +214,8 @@ struct AquariumView: View {
             return rect.intersects(CGRect(origin: .zero, size: size))
         }.sorted { $0.relativeY == $1.relativeY ? $0.decorationID < $1.decorationID : $0.relativeY > $1.relativeY }
         .map { AquariumTreasureChestEffects.Instance(id: $0.decorationID, direction: $0.facingDirection) }
-        return AquariumTreasureChestAnimationLayer(instances: instances, isSimulationPaused: isSimulationPaused) { frames in
+        return AquariumTreasureChestAnimationLayer(instances: instances, isSimulationPaused: isSimulationPaused,
+            tapRequest: treasureTapRequest, allowsSpecialTap: !isEditing && isTreasureTapEnabled) { frames in
             decorationContent(in: size, treasureFrames: frames)
         }
     }
@@ -237,6 +265,24 @@ struct AquariumView: View {
 
     }
 
+    private func treasureInteractionLayer(in size: CGSize) -> some View {
+        Color.clear.contentShape(Rectangle())
+            .gesture(SpatialTapGesture().onEnded { value in
+                triggerTreasureTap(at: value.location, in: size)
+            })
+            .accessibilityLabel("宝箱のタップ演出")
+            .accessibilityIdentifier("aquarium.treasureTapCanvas")
+    }
+
+    private func triggerTreasureTap(at point: CGPoint, in size: CGSize) {
+        guard !isEditing, isTreasureTapEnabled, !isSimulationPaused, size.width > 0, size.height > 0 else { return }
+        let visible = decorationPlacements.filter(\.isPlaced).map(\.decoration)
+        let hitID = AquariumDecorationHitTesting.selectedID(at: point, decorations: visible,
+            aquariumSize: size, theme: backgroundTheme, allowsTouchPadding: false)
+        guard let id = hitID, visible.first(where: { $0.id == id })?.kind == .treasureChest else { return }
+        treasureTapRequest = AquariumTreasureChestTapRequest(placementID: id)
+    }
+
     private func decorationInteractionLayer(in size: CGSize) -> some View {
         Color.clear.contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0)
@@ -264,6 +310,7 @@ struct AquariumView: View {
                        let position = previewPosition,
                        let placement = decorationPlacements.first(where: { $0.decorationID == id }) {
                         moveDecoration(placement, to: position)
+                        updateDecorationControlsCenter(placement, size: size)
                     }
                     canvasDragStart = nil
                     canvasGestureStarted = false
@@ -277,37 +324,52 @@ struct AquariumView: View {
     private func decorationOperationMenu(in size: CGSize) -> some View {
         if draggingDecorationID == nil, let id = editingDecorationID,
            let placement = decorationPlacements.first(where: { $0.decorationID == id }) {
-            VStack {
-                Spacer()
-                HStack(spacing: 4) {
+            HStack(spacing: 4) {
                     if showsDecorationNudge {
                         nudgeButton("arrow.left", label: "左へ", delta: CGSize(width: -8, height: 0), placement: placement, size: size)
                         nudgeButton("arrow.up", label: "奥へ", delta: CGSize(width: 0, height: -8), placement: placement, size: size)
                         nudgeButton("arrow.down", label: "手前へ", delta: CGSize(width: 0, height: 8), placement: placement, size: size)
                         nudgeButton("arrow.right", label: "右へ", delta: CGSize(width: 8, height: 0), placement: placement, size: size)
-                        Button { showsDecorationNudge = false } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                        Button { showsDecorationNudge = false } label: { Image(systemName: "xmark").decorationControlHitArea() }
                             .accessibilityLabel("微調整を閉じる")
                             .accessibilityIdentifier("aquariumEditor.closeNudge")
+                    } else if showsStackingControls {
+                        ForEach([AquariumDecorationStacking.Action.back, .backward, .forward, .front], id: \.self) { action in
+                            let enabled = AquariumDecorationStacking.canMove(placement, action: action, among: decorationPlacements,
+                                within: AquariumDecorationOverlapGroups.members(of: id, placements: decorationPlacements, size: size, theme: backgroundTheme))
+                            Button { changeStacking(placement, action: action, size: size) } label: {
+                                Image(systemName: stackingSymbol(action)).decorationControlHitArea()
+                                    .foregroundStyle(.white.opacity(enabled ? 1 : 0.3))
+                            }
+                            .disabled(!enabled)
+                            .accessibilityLabel(action.title)
+                            .help(action.title)
+                            .accessibilityIdentifier("aquariumEditor.stacking.\(action.rawValue)")
+                        }
+                        Button { showsStackingControls = false } label: {
+                            Image(systemName: "xmark").decorationControlHitArea()
+                        }
+                        .accessibilityLabel("重なり順を閉じる")
+                        .accessibilityIdentifier("aquariumEditor.closeStacking")
                     } else {
-                        Button { showsDecorationNudge = true } label: {
+                        Button { showsDecorationNudge = true; showsStackingControls = false } label: {
                             Label("微調整", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
-                                .labelStyle(.titleOnly).font(.caption.bold()).frame(width: 64, height: 44)
+                                .labelStyle(.titleOnly).font(.caption.bold()).decorationControlHitArea(width: placement.kind.supportsFacingDirection ? 64 : 76)
                         }
                         .accessibilityIdentifier("aquariumEditor.openNudge")
-                        Menu {
-                            ForEach(AquariumDecorationStacking.Action.allCases, id: \.self) { action in
-                                Button(action.title) { changeStacking(placement, action: action) }
-                                    .disabled(!AquariumDecorationStacking.canMove(placement, action: action, among: decorationPlacements))
-                                    .accessibilityIdentifier("aquariumEditor.stacking.\(action.rawValue)")
-                            }
+                        Button {
+                            showsDecorationNudge = false
+                            showsStackingControls = true
                         } label: {
-                            Text("重なり順").font(.caption.bold()).frame(width: 72, height: 44)
+                            Text("重なり順").font(.caption.bold()).decorationControlHitArea(width: placement.kind.supportsFacingDirection ? 68 : 80)
+                                .foregroundStyle(showsStackingControls ? Color.cyan : Color.white)
                         }
+                        .accessibilityValue(showsStackingControls ? "開いています" : "閉じています")
                         .accessibilityIdentifier("aquariumEditor.stackingMenu")
                         if placement.kind.supportsFacingDirection {
                             Button { changeFacing(placement) } label: {
                                 Label("向き", systemImage: "arrow.left.arrow.right")
-                                    .labelStyle(.iconOnly).font(.caption.bold()).frame(width: 44, height: 44)
+                                    .labelStyle(.iconOnly).font(.caption.bold()).decorationControlHitArea(width: 44)
                             }
                             .accessibilityLabel("向きを変える")
                             .accessibilityValue(placement.facingDirection == .right ? "右側面" : "左側面")
@@ -315,19 +377,50 @@ struct AquariumView: View {
                         }
                         Button { storeDecoration(placement) } label: {
                             Label("水槽からしまう", systemImage: "tray.and.arrow.down")
-                                .labelStyle(.titleOnly).font(.caption.bold()).frame(minHeight: 44)
+                                .labelStyle(.titleOnly).font(.caption.bold()).decorationControlHitArea()
                         }
                             .accessibilityLabel("水槽からしまう")
                             .accessibilityIdentifier("aquariumEditor.removeSelectedDecoration")
                     }
                 }
-                .padding(8)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
                 .foregroundStyle(.white)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                .background {
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(.ultraThinMaterial)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(Color(red: 0.03, green: 0.20, blue: 0.34).opacity(0.65))
+                        }
+                        .allowsHitTesting(false)
+                }
                 .buttonStyle(.plain)
-                .frame(width: min(size.width - 24, !showsDecorationNudge ? 330 : 260), height: 60)
-                .padding(.bottom, 35)
-            }
+                .frame(width: min(size.width - 24, (!showsDecorationNudge && !showsStackingControls) ? 330 : 260), height: 60)
+                .position(decorationControlsCenter ?? controlsCenter(for: placement, size: size))
+                .onAppear { updateDecorationControlsCenter(placement, size: size) }
+                .onChange(of: id) { _, _ in updateDecorationControlsCenter(placement, size: size) }
+                .onChange(of: size) { _, _ in updateDecorationControlsCenter(placement, size: size) }
+                .onChange(of: decorationControlsTopInset) { _, _ in updateDecorationControlsCenter(placement, size: size) }
+        }
+    }
+
+    private func controlsCenter(for placement: AquariumDecorationPlacement, size: CGSize) -> CGPoint {
+        let shape = AquariumDecorationHitTesting.overlapShape(for: placement.decoration, aquariumSize: size, theme: backgroundTheme)
+        return AquariumDecorationControlLayout.center(bounds: shape.visibleBounds.isNull ? shape.rect : shape.visibleBounds,
+            canvas: size, topInset: decorationControlsTopInset)
+    }
+
+    private func updateDecorationControlsCenter(_ placement: AquariumDecorationPlacement, size: CGSize) {
+        decorationControlsCenter = controlsCenter(for: placement, size: size)
+    }
+
+    private func stackingSymbol(_ action: AquariumDecorationStacking.Action) -> String {
+        switch action {
+        case .front: "arrow.up.to.line"
+        case .forward: "arrow.up"
+        case .backward: "arrow.down"
+        case .back: "arrow.down.to.line"
         }
     }
 
@@ -338,7 +431,7 @@ struct AquariumView: View {
             let moved = AquariumDecorationEditor.relativePosition(originalX: root.x, originalY: root.y,
                 translation: delta, aquariumSize: size, kind: placement.kind, isEditing: true, scale: CGFloat(placement.scale))
             moveDecoration(placement, to: moved)
-        } label: { Image(systemName: icon).frame(width: 44, height: 44) }
+        } label: { Image(systemName: icon).decorationControlHitArea() }
         .accessibilityLabel(label)
         .accessibilityIdentifier("aquariumEditor.nudge.\(icon)")
     }
@@ -379,8 +472,9 @@ struct AquariumView: View {
         finishDecorationEditing()
     }
 
-    private func changeStacking(_ placement: AquariumDecorationPlacement, action: AquariumDecorationStacking.Action) {
-        guard isEditing, AquariumDecorationStacking.move(placement, action: action, among: decorationPlacements) else { return }
+    private func changeStacking(_ placement: AquariumDecorationPlacement, action: AquariumDecorationStacking.Action, size: CGSize) {
+        let members = AquariumDecorationOverlapGroups.members(of: placement.decorationID, placements: decorationPlacements, size: size, theme: backgroundTheme)
+        guard isEditing, AquariumDecorationStacking.move(placement, action: action, among: decorationPlacements, within: members) else { return }
         if !defersDecorationPersistence { try? modelContext.save() }
         onDecorationChanged()
     }
@@ -425,6 +519,8 @@ struct AquariumView: View {
     }
 
     private func finishDecorationEditing() {
+        decorationControlsCenter = nil
+        showsStackingControls = false
         showsDecorationNudge = false
         draggingDecorationID = nil
         editingDecorationID = nil
@@ -1060,4 +1156,13 @@ struct AquariumSecondaryButtonStyle: ButtonStyle {
 #Preview {
     AquariumView(player: nil)
         .modelContainer(for: AquariumDecorationPlacement.self, inMemory: true)
+}
+
+private extension View {
+    /// Buttonのlabel内部で領域を確保する。背景や親HStackにはジェスチャーを付けない。
+    func decorationControlHitArea(width: CGFloat? = nil) -> some View {
+        self.frame(width: width, height: 52)
+            .frame(maxWidth: width == nil ? .infinity : nil)
+            .contentShape(Rectangle())
+    }
 }
