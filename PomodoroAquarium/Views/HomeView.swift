@@ -323,7 +323,8 @@ struct HomeView: View {
                                 close: { showsEditorLibrary = false },
                                 selectBackground: { theme in selectBackground(theme); showsEditorLibrary = false },
                                 storeAllFish: { storeAllAquariumItems(.fish) },
-                                storeAllDecorations: { storeAllAquariumItems(.decorations) })
+                                storeAllDecorations: { storeAllAquariumItems(.decorations) },
+                                placeShipwreck: placeShipwreckFromLibrary)
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .opacity(fishDragSession == nil ? 1 : 0)
                             .zIndex(40)
@@ -876,8 +877,23 @@ struct HomeView: View {
         if mode != .aquariumEditor { try? modelContext.save() }
     }
 
+    private func placeShipwreckFromLibrary(_ id: String, side: AquariumDecorationFacingDirection) {
+        guard isAquariumEditorPresented, let placement = AquariumShipwreckEditing.place(id: id, side: side, among: decorationPlacements) else {
+            // 同じ側の再選択は履歴を作らず、配置済み個体を選択するだけ。
+            if let active = decorationPlacements.first(where: { $0.kind == .shipwreck && $0.isPlaced }) {
+                showsEditorLibrary = false
+                decorationRestoreRequestID = active.decorationID
+            }
+            return
+        }
+        showsEditorLibrary = false
+        decorationRestoreRequestID = placement.decorationID
+        markAquariumEditorChanged()
+        if mode != .aquariumEditor { try? modelContext.save() }
+    }
+
     private func addDecorationFromSheet(_ id: String) {
-        guard let placement = decorationPlacements.first(where: { $0.decorationID == id && !$0.isPlaced }) else { return }
+        guard let placement = decorationPlacements.first(where: { $0.decorationID == id && !$0.isPlaced && $0.kind != .shipwreck }) else { return }
         do {
             let initial = AquariumEditorInitialPlacement.decoration(kind: placement.kind, scale: CGFloat(placement.scale),
                 size: canvasFrame.size, existing: decorationPlacements.filter(\.isPlaced).map(\.decoration))

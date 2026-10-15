@@ -25,7 +25,8 @@ enum AquariumDeveloperDecorations {
         AquariumDecorationKind.coralCPink.rawValue,
         AquariumDecorationKind.coralCOrange.rawValue,
         AquariumDecorationKind.coralCPurple.rawValue,
-        AquariumDecorationKind.treasureChest.rawValue
+        AquariumDecorationKind.treasureChest.rawValue,
+        AquariumDecorationKind.shipwreck.rawValue
     ]
     static let ownedCountPerDecoration = 5
 #else

@@ -321,14 +321,14 @@ struct AquariumDeveloperDecorationTests {
         #expect(!(try AquariumDeveloperDecorations.seedIfNeeded(in: context)))
         let placementContext = ModelContext(container)
         let placements = try placementContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-        #expect(placements.count == 95)
-        #expect(Set(placements.map(\.decorationID)).count == 95)
-        #expect(Set(placements.map(\.definitionID)) == ["seaweed-a", "seaweed-b", "seaweed_c", "small_rock_a", "small_rock_b", "small_rock_c", "medium_rock_a", "medium_rock_b", "medium_rock_c", "coral_a_pink", "coral_a_orange", "coral_a_purple", "coral_b_pink", "coral_b_orange", "coral_b_purple", "coral_c_pink", "coral_c_orange", "coral_c_purple", "treasure_chest"])
+        #expect(placements.count == 100)
+        #expect(Set(placements.map(\.decorationID)).count == 100)
+        #expect(Set(placements.map(\.definitionID)) == ["seaweed-a", "seaweed-b", "seaweed_c", "small_rock_a", "small_rock_b", "small_rock_c", "medium_rock_a", "medium_rock_b", "medium_rock_c", "coral_a_pink", "coral_a_orange", "coral_a_purple", "coral_b_pink", "coral_b_orange", "coral_b_purple", "coral_c_pink", "coral_c_orange", "coral_c_purple", "treasure_chest", "shipwreck_distant"])
         #expect(placements.allSatisfy { !$0.isPlaced })
         let inventory = AquariumDecorationEditorPresentation.inventory(from: placements)
-        #expect(inventory.map(\.kind) == [.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple, .treasureChest])
+        #expect(inventory.map(\.kind) == [.seaweedA, .seaweedB, .seaweedC, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC, .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple, .treasureChest, .shipwreck])
         #expect(inventory.allSatisfy { $0.ownedCount == 5 && $0.canPlaceAnother })
-        for (index, placement) in placements.enumerated() {
+        for (index, placement) in placements.filter({ $0.kind != .shipwreck }).enumerated() {
             try AquariumEditorDropCoordinator.placeDecoration(
                 from: .decoration(id: placement.decorationID),
                 placement: placement,
@@ -337,13 +337,17 @@ struct AquariumDeveloperDecorationTests {
                 in: placementContext
             )
         }
+        if let ship = placements.first(where: { $0.kind == .shipwreck }) {
+            _ = AquariumShipwreckEditing.place(id: ship.decorationID, side: .left, among: placements)
+            try placementContext.save()
+        }
         let reloadContext = ModelContext(container)
         let reloaded = try reloadContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-        #expect(reloaded.count == 95)
-        #expect(reloaded.allSatisfy { $0.isPlaced })
+        #expect(reloaded.count == 100)
+        #expect(reloaded.filter { $0.kind != .shipwreck }.allSatisfy { $0.isPlaced })
         let placedInventory = AquariumDecorationEditorPresentation.inventory(from: reloaded)
-        #expect(placedInventory.count == 19)
-        #expect(placedInventory.allSatisfy { $0.placedCount == 5 && !$0.canPlaceAnother })
+        #expect(placedInventory.count == 20)
+        #expect(placedInventory.allSatisfy { $0.placedCount == ($0.kind == .shipwreck ? 1 : 5) && !$0.canPlaceAnother })
         #expect(!(try AquariumDeveloperDecorations.seedIfNeeded(in: context)))
 #else
         #expect(AquariumDeveloperDecorations.developerOwnedDecorationIDs.isEmpty)
@@ -408,7 +412,7 @@ struct AquariumDeveloperDecorationTests {
         #expect(original.relativeY == 0.92)
         #expect(original.scale == 1.1)
         #expect(original.isPlaced)
-        #expect(try context.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 95)
+        #expect(try context.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 100)
 #endif
     }
 

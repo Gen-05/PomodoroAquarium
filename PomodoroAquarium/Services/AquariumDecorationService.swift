@@ -1,6 +1,8 @@
 import CoreGraphics
 import SwiftData
 
+enum AquariumDecorationPlacementError: Error { case requiresFixedPlacement }
+
 enum AquariumDecorationService {
     static let defaultDecorations: [AquariumDecoration] = [
         AquariumDecoration(
@@ -89,6 +91,7 @@ enum AquariumDecorationService {
         in context: ModelContext,
         persistChanges: Bool = true
     ) throws {
+        guard placement.kind != .shipwreck else { throw AquariumDecorationPlacementError.requiresFixedPlacement }
         placement.relativeX = Double(position.x)
         placement.relativeY = Double(position.y)
         placement.isPlaced = true

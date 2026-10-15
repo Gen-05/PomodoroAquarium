@@ -19,7 +19,7 @@ enum AquariumDecorationOverlapGroups {
 
     static func members(of id: String, placements: [AquariumDecorationPlacement],
                         size: CGSize, theme: AquariumBackgroundTheme) -> Set<String> {
-        let placed = placements.filter(\.isPlaced).map(\.decoration).sorted { $0.id < $1.id }
+        let placed = placements.filter { $0.isPlaced && $0.kind != .shipwreck }.map(\.decoration).sorted { $0.id < $1.id }
         let key = Key(size: size, theme: theme, items: placed.map {
             Geometry(id: $0.id, kind: $0.kind, x: $0.relativeX, y: $0.relativeY, scale: $0.scale, direction: $0.facingDirection)
         })

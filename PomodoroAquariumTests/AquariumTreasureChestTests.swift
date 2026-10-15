@@ -25,7 +25,7 @@ struct AquariumTreasureChestTests {
         #expect(abs(kind.displaySize.width * 1115 / 1254 - 126) < 0.000001)
         #expect(kind.displaySize.height == kind.displaySize.width)
         #expect(abs(kind.displaySize.width - AquariumTreasureChestEffects.canvasSide) < 0.000001)
-        for other in AquariumDecorationKind.allCases where other != kind { #expect(!other.supportsFacingDirection) }
+        for other in AquariumDecorationKind.allCases where other != kind && other != .shipwreck { #expect(!other.supportsFacingDirection) }
         let container = try ModelContainer(for: AquariumDecorationPlacement.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let context = container.mainContext

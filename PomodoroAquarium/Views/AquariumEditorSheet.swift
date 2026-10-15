@@ -20,6 +20,8 @@ struct AquariumEditorSheet: View {
     var storeAllDecorations: () -> Void = {}
     @State private var bulkStorageConfirmation: AquariumEditorBulkStorage?
     @State private var showsPlaced = false
+    @State private var shipwreckCandidateID: String?
+    var placeShipwreck: (String, AquariumDecorationFacingDirection) -> Void = { _, _ in }
 
     private var inventory: [AquariumDecorationInventoryItem] {
         AquariumDecorationEditorPresentation.inventory(from: placements)
@@ -63,6 +65,16 @@ struct AquariumEditorSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(red: 0.78, green: 0.94, blue: 0.98).ignoresSafeArea())
+        .confirmationDialog("沈没船の配置場所", isPresented: Binding(get: { shipwreckCandidateID != nil }, set: { if !$0 { shipwreckCandidateID = nil } }), titleVisibility: .visible) {
+            ForEach([AquariumDecorationFacingDirection.left, .right], id: \.self) { side in
+                Button(side == .left ? "左奥" : "右奥") {
+                    guard let id = shipwreckCandidateID else { return }
+                    placeShipwreck(id, side)
+                    shipwreckCandidateID = nil
+                }
+            }
+            Button("キャンセル", role: .cancel) { shipwreckCandidateID = nil }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("aquariumEditor.fullScreenLibrary")
         .alert(bulkStorageConfirmation == .fish ? "魚を全部しまいますか？" : "装飾を全部しまいますか？",
@@ -196,17 +208,22 @@ struct AquariumEditorSheet: View {
                     ForEach(kinds, id: \.self) { kind in
                         let item = inventory.first { $0.kind == kind }
                         let remaining = (item?.ownedCount ?? 0) - (item?.placedCount ?? 0)
+                        let activeShip = placements.first { $0.kind == .shipwreck && $0.isPlaced }
+                        let available = kind == .shipwreck ? (item?.ownedCount ?? 0) > 0 : remaining > 0
                         Button {
-                            if let item, remaining > 0 { addDecoration(item.dragPlacementID) }
+                            if kind == .shipwreck, let item {
+                                shipwreckCandidateID = activeShip?.decorationID ?? item.dragPlacementID
+                            } else if let item, remaining > 0 { addDecoration(item.dragPlacementID) }
                         } label: {
                             VStack(spacing: 6) {
                                 thumbnail(kind)
                                 Text(kind.displayName).font(.caption).multilineTextAlignment(.center).frame(minHeight: 30)
                                 Text(String(repeating: "★", count: kind.stars ?? 0)).font(.caption).foregroundStyle(.yellow)
                                 Text("残り \(remaining) / \(item?.ownedCount ?? 0)").font(.caption)
+                                if kind == .shipwreck { Text(activeShip == nil ? "水槽に1隻まで" : "配置済み・左右を変更").font(.caption2) }
                             }.frame(maxWidth: .infinity).padding(10)
                                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                        }.buttonStyle(.plain).disabled(remaining <= 0).opacity(remaining > 0 ? 1 : 0.45)
+                        }.buttonStyle(.plain).disabled(!available).opacity(available ? 1 : 0.45)
                         .accessibilityIdentifier("aquariumEditor.add.\(kind.rawValue)")
                     }
                 }

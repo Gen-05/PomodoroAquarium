@@ -52,8 +52,8 @@ struct AquariumEditorDraft: Codable, Equatable {
     }
     /// 旧データは従来の見た目順に一度だけ番号を補完。過去の履歴も同じ規則で読み込む。
     private mutating func normalizeLegacyStacking() {
-        guard placements.contains(where: { $0.isPlaced && !$0.isStackingOrderInitialized }) else { return }
-        let ordered = placements.indices.filter { placements[$0].isPlaced }.sorted { a, b in
+        guard placements.contains(where: { $0.isPlaced && !$0.isStackingOrderInitialized && $0.kind != AquariumDecorationKind.shipwreck.rawValue }) else { return }
+        let ordered = placements.indices.filter { placements[$0].isPlaced && placements[$0].kind != AquariumDecorationKind.shipwreck.rawValue }.sorted { a, b in
             func decoration(_ index: Int) -> AquariumDecoration {
                 let p = placements[index]
                 return AquariumDecoration(id: p.id, kind: AquariumDecorationKind(rawValue: p.kind) ?? .rock,

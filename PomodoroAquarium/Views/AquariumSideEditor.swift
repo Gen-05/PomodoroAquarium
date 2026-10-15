@@ -283,7 +283,7 @@ struct AquariumDecorationInventoryItem: Identifiable, Equatable {
     let dragPlacementID: String
 
     var id: String { kind.rawValue }
-    var canPlaceAnother: Bool { placedCount < ownedCount }
+    var canPlaceAnother: Bool { placedCount < ownedCount && (kind != .shipwreck || placedCount == 0) }
 }
 
 enum AquariumDecorationEditorPresentation {
@@ -368,6 +368,7 @@ enum AquariumEditorDropCoordinator {
         in aquariumSize: CGSize,
         kind: AquariumDecorationKind
     ) -> Bool {
+        guard kind != .shipwreck else { return false }
         guard kind.groundAnchorY != nil else {
             return AquariumSideEditorLayout.acceptsDrop(at: location, in: aquariumSize)
         }
@@ -428,7 +429,7 @@ enum AquariumEditorDropCoordinator {
         in context: ModelContext,
         persistChanges: Bool = true
     ) throws {
-        guard item.kind == .decoration,
+        guard item.kind == .decoration, placement.kind != .shipwreck,
               item.identifier == placement.decorationID else {
             throw AquariumEditorDropError.invalidDecoration
         }
@@ -725,7 +726,7 @@ struct AquariumSideEditor: View {
                 AquariumDecorationDragHandle(
                     placement: placement,
                     backgroundTheme: selectedBackgroundTheme,
-                    canDrag: item.canPlaceAnother,
+                    canDrag: item.canPlaceAnother && item.kind != .shipwreck,
                     updateDrag: updateDecorationDrag,
                     finishDrag: finishDecorationDrag,
                     cancelDrag: cancelDecorationDrag
