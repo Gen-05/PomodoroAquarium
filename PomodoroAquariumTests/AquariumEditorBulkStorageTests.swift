@@ -13,6 +13,85 @@ struct AquariumEditorBulkStorageTests {
         }
         return (player, placements, AquariumEditorDraft(player: player, placements: placements, background: .deepSea))
     }
+    @Test(arguments: AquariumDecorationCategory.allCases)
+    func categoryStoragePreservesOtherKindsOwnershipAndOneStepHistory(category: AquariumDecorationCategory) throws {
+        let official = Player(ownedFish: [PlayerFish(species: .clownfish)], coins: 130)
+        let placements = AquariumDecorationKind.allCases.flatMap { kind in
+            [AquariumDecorationPlacement(kind: kind, relativeX: 0.3, relativeY: 0.8,
+                scale: 1.2, isPlaced: true),
+             AquariumDecorationPlacement(kind: kind, relativeX: 0.6, relativeY: 0.9,
+                scale: 0.8, isPlaced: false)]
+        }
+        let before = AquariumEditorDraft(player: official, placements: placements, background: .deepSea)
+        let work = AquariumEditorWorkingState(official: official, placements: placements, draft: before)
+        let target = AquariumEditorBulkStorage.decorationCategory(category)
+        let expectedKinds: Set<AquariumDecorationKind>
+        let expectedTitle: String
+        switch category {
+        case .plant:
+            expectedKinds = [.seaweed, .seaweedA, .seaweedB, .seaweedC]
+            expectedTitle = "海藻を全部しまう"
+        case .rock:
+            expectedKinds = [.rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC]
+            expectedTitle = "岩を全部しまう"
+        case .coral:
+            expectedKinds = [.coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange,
+                .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple]
+            expectedTitle = "サンゴを全部しまう"
+        case .object:
+            expectedKinds = [.treasureChest, .shipwreck]
+            expectedTitle = "その他を全部しまう"
+        }
+        #expect(target.buttonTitle == expectedTitle)
+        #expect(AquariumEditorBulkStorage.decorations.buttonTitle == "装飾を全部しまう")
+        let after = try #require(target.applying(to: before))
+        for original in before.snapshot.placements {
+            var expected = original
+            if expectedKinds.contains(AquariumDecorationKind(rawValue: original.kind)!) {
+                expected.isPlaced = false
+            }
+            #expect(after.placements.first { $0.id == original.id } == expected)
+        }
+        #expect(after.fishIDs == before.fishIDs && after.background == before.background)
+        #expect(target.applying(to: after) == nil)
+        work.apply(after)
+        var history = AquariumEditorHistory(initial: before)
+        let recorded = history.record(after)
+        #expect(recorded)
+        #expect(history.states.count == 2 && history.position == 1)
+        let undoResult = history.undo()
+        let undone = try #require(undoResult)
+        work.apply(undone)
+        #expect(AquariumEditorDraft(player: work.player, placements: work.placements, background: .deepSea).snapshot == before.snapshot)
+        let redoResult = history.redo()
+        let redone = try #require(redoResult)
+        work.apply(redone)
+        #expect(AquariumEditorDraft(player: work.player, placements: work.placements, background: .deepSea).snapshot == after)
+        // 編集内容はdetachedのWorkingStateだけ。キャンセルで破棄しても正式データは元のまま。
+        #expect(AquariumEditorDraft(player: official, placements: placements, background: .deepSea).snapshot == before.snapshot)
+        #expect(work.placements.count == placements.count)
+        #expect(work.placements.filter { !$0.isPlaced }.allSatisfy { placement in
+            AquariumDecorationEditorPresentation.inventory(from: work.placements).contains { $0.kind == placement.kind }
+        })
+        var persisted = after
+        persisted.history = history
+        let store = AquariumEditorDraftStore(url: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        defer { try? store.remove() }
+        try store.save(persisted)
+        let loaded = try #require(try store.load())
+        var restoredHistory = try #require(loaded.history)
+        #expect(restoredHistory.isValid(for: loaded))
+        let restoredUndo = restoredHistory.undo()
+        let restoredRedo = restoredHistory.redo()
+        #expect(restoredUndo?.snapshot == before.snapshot)
+        #expect(restoredRedo?.snapshot == after)
+        let updated = AquariumEditorSessionSnapshot.capture(player: work.player,
+            decorationPlacements: work.placements, backgroundTheme: .deepSea)
+        try AquariumEditorCommit.apply(updated, to: official, placements: placements, background: .deepSea) {}
+        #expect(AquariumEditorDraft(player: official, placements: placements, background: .deepSea).snapshot == after)
+        #expect(official.coins == 130 && official.ownedFish.count == 1)
+    }
+
     @Test(arguments: [AquariumEditorBulkStorage.fish, .decorations])
     func eachBulkEditIsIndependentAndOneUndoRestoresAll(target: AquariumEditorBulkStorage) throws {
         let (official, placements, before) = fixture()

@@ -823,7 +823,7 @@ struct AquariumNeighborPositions: RandomAccessCollection {
     }
 }
 
-private struct SwimmingFishView: View {
+struct SwimmingFishView: View {
     let fishID: UUID
     let species: FishSpecies
     let appearance: AquariumFishAppearance?
@@ -839,6 +839,10 @@ private struct SwimmingFishView: View {
     let select: () -> Void
     let spriteAnimationPhase: TimeInterval
     let spriteTempoMultiplier: TimeInterval
+
+    @State private var appliedAppearanceStart: Date?
+    // テストで実ViewのGeometryを観測する。通常表示では測定Viewを生成しない。
+    var onRenderedFrames: ((Bool, CGRect) -> Void)? = nil
 
     @State private var motion: AquariumFishMotion.State
     @State private var spriteDirectionTransition: FishSpriteDirectionTransition
@@ -880,16 +884,16 @@ private struct SwimmingFishView: View {
         self.spriteTempoMultiplier = AquariumFishMotion.spriteTempoMultiplier(for: fishID)
 
         let profile = AquariumFishMotion.movementProfile(for: species)
-        var initialMotion = AquariumFishMotion.initialState(
+        let initialMotion = AquariumFishMotion.initialState(
             for: fishID,
             profile: profile,
             speedVariationProfile: AquariumFishMotion.speedVariationProfile(for: species),
             roamingBounds: profile.roamingStyle.bounds(
                 in: aquariumSize,
                 fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite)
-            )
+            ),
+            initialPosition: appearance?.spawnPosition(in: aquariumSize) ?? initialPosition
         )
-        if let initialPosition { initialMotion.position = initialPosition }
         self._motion = State(initialValue: initialMotion)
         self._spriteDirectionTransition = State(
             initialValue: FishSpriteDirectionTransition(direction: initialMotion.facingDirection)
@@ -903,8 +907,10 @@ private struct SwimmingFishView: View {
         ZStack {
             if let appearance, appearance.progress(at: updateDate) < 1 {
                 AquariumFishAppearanceRing(progress: appearance.progress(at: updateDate))
+                    .background { renderedFrameObserver(isRing: true) }
             }
             fishImage
+                .background { renderedFrameObserver(isRing: false) }
                 .modifier(AquariumFishColorCorrection.correction(for: backgroundTheme, species: species))
                 .modifier(AquariumSelectionGlow(isSelected: isSelected && isSelectionEnabled,
                     edgeOpacity: species.displayScale < 1 ? 1 : 0.95,
@@ -923,13 +929,16 @@ private struct SwimmingFishView: View {
             .allowsHitTesting(isSelectionEnabled)
             .rotationEffect(.degrees(swimRotation + smallFishDirectionRotation))
             .scaleEffect(x: 1, y: swimVerticalScale)
-            .offset(y: swimVerticalOffset)
+            .offset(y: swimVerticalOffset * appearanceOffsetProgress)
             .opacity(motion.depthOpacity)
             .position(
-                x: aquariumSize.width * motion.position.x,
-                y: aquariumSize.height * motion.position.y
+                x: aquariumSize.width * renderedPosition.x,
+                y: aquariumSize.height * renderedPosition.y
             )
             .zIndex(Double(motion.currentDepth))
+            .onChange(of: appearance?.startedAt, initial: true) { _, _ in
+                applyAppearancePositionIfNeeded()
+            }
             .onChange(of: updateDate) { _, newDate in
                 updateMotion(at: newDate)
             }
@@ -939,6 +948,9 @@ private struct SwimmingFishView: View {
                 }
             }
             .onChange(of: aquariumSize) { _, size in
+                if let appearance, appearance.progress(at: updateDate) < 1 {
+                    applyAppearancePositionIfNeeded(force: true)
+                }
                 motion.updateRoamingBounds(motion.movementProfile.roamingStyle.bounds(
                     in: size, fishSize: fishSize
                 ))
@@ -947,6 +959,49 @@ private struct SwimmingFishView: View {
             .accessibilityLabel(fishAccessibilityLabel)
             .accessibilityIdentifier("aquarium.fish.\(fishID.uuidString)")
             .accessibilityValue(isSelectionEnabled && isSelected ? "選択中" : "")
+    }
+
+    @ViewBuilder
+    private func renderedFrameObserver(isRing: Bool) -> some View {
+        if let onRenderedFrames {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { onRenderedFrames(isRing, geometry.frame(in: .global)) }
+                    .onChange(of: geometry.frame(in: .global)) { _, frame in onRenderedFrames(isRing, frame) }
+            }
+        }
+    }
+
+    private var appearanceSpawnPosition: CGPoint? {
+        appearance?.spawnPosition(in: aquariumSize).map {
+            AquariumFishMotion.clampedPoint($0, bounds: motion.movementProfile.roamingStyle.bounds(
+                in: aquariumSize, fishSize: fishSize))
+        }
+    }
+
+    private var renderedPosition: CGPoint {
+        if let appearance, appearance.progress(at: updateDate) < 1,
+           let spawn = appearanceSpawnPosition { return spawn }
+        return motion.position
+    }
+
+    private var appearanceOffsetProgress: CGFloat {
+        guard let appearance, appearance.spawnOffset != nil else { return 1 }
+        // 演出中の中心は固定。終了後は通常の微小な上下動を連続的に戻す。
+        return min(max(CGFloat((updateDate.timeIntervalSince(appearance.startedAt) - 1) / 0.2), 0), 1)
+    }
+
+    private func applyAppearancePositionIfNeeded(force: Bool = false) {
+        guard let appearance, force || appliedAppearanceStart != appearance.startedAt,
+              let spawn = appearanceSpawnPosition else { return }
+        // initのState初期値はViewが既に存在すると採用されないため、追加イベントでも反映する。
+        let profile = motion.movementProfile
+        motion = AquariumFishMotion.initialState(for: fishID, profile: profile,
+            speedVariationProfile: AquariumFishMotion.speedVariationProfile(for: species),
+            roamingBounds: profile.roamingStyle.bounds(in: aquariumSize, fishSize: fishSize),
+            initialPosition: spawn)
+        simulationTiming.pause()
+        appliedAppearanceStart = appearance.startedAt
     }
 
     private func updateMotion(at date: Date) {

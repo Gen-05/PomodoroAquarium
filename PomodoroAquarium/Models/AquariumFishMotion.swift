@@ -957,7 +957,8 @@ enum AquariumFishMotion {
         for id: UUID,
         profile: FishMovementProfile = .clownfish,
         speedVariationProfile: SpeedVariationProfile? = nil,
-        roamingBounds: FishRoamingBounds = .legacy
+        roamingBounds: FishRoamingBounds = .legacy,
+        initialPosition spawnPosition: CGPoint? = nil
     ) -> State {
         let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
         let angle = CGFloat(bytes[4]) / 255 * .pi * 2
@@ -971,7 +972,9 @@ enum AquariumFishMotion {
         let initialBehavior: Behavior = profile.hoverProbability > 0 && bytes[11].isMultiple(of: 3)
             ? .hovering
             : .wandering
-        let initialPosition = initialPosition(for: id, bounds: roamingBounds)
+        // 追加時だけ出現座標を基準にする。通常生成時の乱数・速度・方向は従来どおり。
+        let initialPosition = spawnPosition.map { clampedPoint($0, bounds: roamingBounds) }
+            ?? initialPosition(for: id, bounds: roamingBounds)
         let wanderingRadiusX = interpolated(profile.wanderingRadiusX, byte: bytes[12])
         let wanderingRadiusY = interpolated(profile.wanderingRadiusY, byte: bytes[13])
         let initialDepth = interpolated(profile.depthRange, byte: bytes[14])

@@ -4,6 +4,13 @@ import SwiftUI
 struct AquariumFishAppearance {
     static let duration: TimeInterval = 1
     let startedAt: Date
+    // 描画canvasの中心からのptオフセット。正規化座標と混在させない。
+    var spawnOffset: CGPoint? = nil
+
+    func spawnPosition(in size: CGSize) -> CGPoint? {
+        guard let spawnOffset, size.width > 0, size.height > 0 else { return nil }
+        return CGPoint(x: 0.5 + spawnOffset.x / size.width, y: 0.5 + spawnOffset.y / size.height)
+    }
 
     func progress(at date: Date) -> CGFloat {
         min(max(date.timeIntervalSince(startedAt) / Self.duration, 0), 1)
@@ -30,18 +37,25 @@ struct AquariumFishAppearanceRing: View {
 }
 
 enum AquariumEditorInitialPlacement {
-    static func fish(species: FishSpecies, size: CGSize, neighbors: [CGPoint]) -> CGPoint {
-        let bounds = AquariumFishMotion.movementProfile(for: species).roamingStyle.bounds(
-            in: size, fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: false))
-        let candidates = [CGPoint(x: 0.5, y: 0.4), CGPoint(x: 0.3, y: 0.4),
-                          CGPoint(x: 0.7, y: 0.4), CGPoint(x: 0.35, y: 0.55), CGPoint(x: 0.65, y: 0.55)]
-            .map { AquariumFishMotion.clampedPoint($0, bounds: bounds) }
-        return candidates.max { score($0, neighbors: neighbors) < score($1, neighbors: neighbors) } ?? CGPoint(x: 0.5, y: 0.4)
+    static func fish(species: FishSpecies, size: CGSize) -> CGPoint {
+        var generator = SystemRandomNumberGenerator()
+        return fish(species: species, size: size, using: &generator)
     }
 
-    private static func score(_ point: CGPoint, neighbors: [CGPoint]) -> CGFloat {
-        let separation = neighbors.map { hypot(point.x - $0.x, point.y - $0.y) }.min() ?? 1
-        return separation - hypot(point.x - 0.5, point.y - 0.4) * 0.1
+    static func fish<R: RandomNumberGenerator>(species: FishSpecies, size: CGSize,
+                                               using generator: inout R) -> CGPoint {
+        guard size.width > 0, size.height > 0 else { return CGPoint(x: 0.5, y: 0.5) }
+        let bounds = AquariumFishMotion.movementProfile(for: species).roamingStyle.bounds(
+            in: size, fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: false))
+        // GeometryReaderが報告する実描画canvasの中心から最大60pt。
+        // 小画面でも通常回遊の補正で円外へ押し出されないよう、内接する円を使う。
+        // 描画時のピクセル丸めでも60ptを超えないよう1ptの余白を残す。
+        let radius = min(59, size.width * min(0.5 - bounds.horizontal.lowerBound, bounds.horizontal.upperBound - 0.5),
+                         size.height * min(0.5 - bounds.vertical.lowerBound, bounds.vertical.upperBound - 0.5))
+        let distance = sqrt(CGFloat.random(in: 0...1, using: &generator)) * radius
+        let angle = CGFloat.random(in: 0..<(2 * .pi), using: &generator)
+        return CGPoint(x: 0.5 + cos(angle) * distance / size.width,
+                       y: 0.5 + sin(angle) * distance / size.height)
     }
 
     static func decoration(kind: AquariumDecorationKind, scale: CGFloat, size: CGSize,

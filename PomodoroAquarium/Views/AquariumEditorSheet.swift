@@ -17,11 +17,18 @@ struct AquariumEditorSheet: View {
     let close: () -> Void
     let selectBackground: (AquariumBackgroundTheme) -> Void
     var storeAllFish: () -> Void = {}
-    var storeAllDecorations: () -> Void = {}
+    var storeDecorations: (AquariumEditorBulkStorage) -> Void = { _ in }
     @State private var bulkStorageConfirmation: AquariumEditorBulkStorage?
     @State private var showsPlaced = false
     @State private var shipwreckCandidateID: String?
     var placeShipwreck: (String, AquariumDecorationFacingDirection) -> Void = { _, _ in }
+
+    private var decorationStorageTarget: AquariumEditorBulkStorage {
+        category.map { .decorationCategory($0) } ?? .decorations
+    }
+    private var placedDecorations: [AquariumDecorationPlacement] {
+        placements.filter { $0.isPlaced && decorationStorageTarget.includes($0.kind) }
+    }
 
     private var inventory: [AquariumDecorationInventoryItem] {
         AquariumDecorationEditorPresentation.inventory(from: placements)
@@ -29,7 +36,7 @@ struct AquariumEditorSheet: View {
     private var kinds: [AquariumDecorationKind] {
         AquariumDecorationKind.allCases.filter { kind in
             (kind.stars != nil || inventory.contains { item in item.kind == kind }) &&
-            (category == nil || kind.category == category)
+            decorationStorageTarget.includes(kind)
         }
     }
     var body: some View {
@@ -77,20 +84,20 @@ struct AquariumEditorSheet: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("aquariumEditor.fullScreenLibrary")
-        .alert(bulkStorageConfirmation == .fish ? "魚を全部しまいますか？" : "装飾を全部しまいますか？",
+        .alert(bulkStorageConfirmation?.confirmationTitle ?? "",
                isPresented: Binding(get: { bulkStorageConfirmation != nil }, set: { if !$0 { bulkStorageConfirmation = nil } }),
                presenting: bulkStorageConfirmation) { target in
             Button("キャンセル", role: .cancel) { bulkStorageConfirmation = nil }
             Button("全部しまう") {
                 bulkStorageConfirmation = nil
                 if target == .fish { storeAllFish() }
-                else if target == .decorations { storeAllDecorations() }
+                else { storeDecorations(target) }
             }
         } message: { target in
             if target == .fish {
                 Text("水槽にいる魚\(player?.activeAquariumFish.count ?? 0)匹をすべてしまいます。\n所持している魚は失われません。")
             } else {
-                Text("配置済みの装飾\(placements.filter(\.isPlaced).count)個をすべてしまいます。\n所持している装飾は失われません。")
+                Text("配置済みの\(target.itemName)\(placements.filter { $0.isPlaced && target.includes($0.kind) }.count)個をすべてしまいます。\n所持している装飾は失われません。")
             }
         }
     }
@@ -187,12 +194,12 @@ struct AquariumEditorSheet: View {
                 Text("配置済み").tag(true)
             }.pickerStyle(.segmented)
             if showsPlaced {
-                bulkStorageButton(.decorations, count: placements.filter(\.isPlaced).count)
-                if !placements.contains(where: { $0.isPlaced }) {
+                bulkStorageButton(decorationStorageTarget, count: placedDecorations.count)
+                if placedDecorations.isEmpty {
                     Text("配置済みの装飾はありません").font(.subheadline).foregroundStyle(.secondary)
                         .accessibilityIdentifier("aquariumEditor.emptyDecorations")
                 }
-                ForEach(placements.filter { $0.isPlaced && (category == nil || $0.kind.category == category) }) { placement in
+                ForEach(placedDecorations) { placement in
                     Button { selectPlacement(placement.decorationID) } label: {
                         HStack {
                             thumbnail(placement.kind)
@@ -232,7 +239,7 @@ struct AquariumEditorSheet: View {
     }
     private func bulkStorageButton(_ target: AquariumEditorBulkStorage, count: Int) -> some View {
         Button { bulkStorageConfirmation = target } label: {
-            Label(target == .fish ? "魚を全部しまう" : "装飾を全部しまう", systemImage: "tray.and.arrow.down")
+            Label(target.buttonTitle, systemImage: "tray.and.arrow.down")
                 .font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))

@@ -9,6 +9,7 @@ enum CoreTutorialTarget: Hashable {
     case studySettings
     case studyStart
     case aquariumEdit
+    case aquariumFishLibrary
     case aquariumDone
     case tutorialClownfish
     case aquariumTab
@@ -158,8 +159,12 @@ enum CoreTutorialConversationScript {
     static let aquariumIntro: [CoreTutorialConversationPage] = [
         .message("ここがあなたの水槽です。"),
         .message("さっきゲットしたクマノミを入れてみましょう。"),
-        .message("まずは「編集」を押してみてください。")
+        .message("右上の「編集」を押し、「編集する」を選んでください。")
     ]
+
+    static let fishLibrary = CoreTutorialConversationPage.message(
+        "上の「魚」を押して、全画面の一覧を開きましょう。"
+    )
 
     static let fishPlacement: [CoreTutorialConversationPage] = [
         .message("クマノミをタップして、水槽へ追加してみましょう。")
@@ -167,7 +172,7 @@ enum CoreTutorialConversationScript {
 
     static let aquariumSave: [CoreTutorialConversationPage] = [
         .message("できました！"),
-        .message("最後に編集を保存しましょう。")
+        .message("右上の「完了」を押して、編集内容を保存しましょう。")
     ]
 
     static let aquariumReturnHome: [CoreTutorialConversationPage] = [

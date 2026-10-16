@@ -41,6 +41,12 @@ final class PomodoroAquariumUITests: XCTestCase {
             "-hasCompletedCoreTutorial", "YES"
         ]
         app.launch()
+        // 中断したテストのDraftが復元された場合は、ホーム前提の検証前に終了する。
+        if app.buttons["aquariumEditor.cancel"].waitForExistence(timeout: 1) {
+            app.buttons["aquariumEditor.cancel"].tap()
+            app.alerts["編集内容を破棄しますか？"].buttons["変更を破棄"].tap()
+            app.buttons["mainTab.home"].tap()
+        }
         XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
     }
 
@@ -487,7 +493,12 @@ final class PomodoroAquariumUITests: XCTestCase {
 
         app.buttons["mainTab.more"].tap()
         app.buttons["more.rewardPreview"].tap()
-        app.buttons["rewardPreview.onboarding"].tap()
+        let onboardingPreview = app.buttons["rewardPreview.onboarding"]
+        for _ in 0..<3 where !onboardingPreview.isHittable {
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(onboardingPreview.waitForExistence(timeout: 5))
+        onboardingPreview.tap()
         for page in 0..<3 {
             XCTAssertTrue(app.staticTexts["onboarding.title.\(page)"].waitForExistence(timeout: 5))
             app.buttons["onboarding.next"].tap()
@@ -597,17 +608,20 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.fish.pufferfish"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.fish.seahorse"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["aquariumEditor.fish.manta"].exists)
+        waitForConversationReady(in: app)
+        app.buttons["aquariumEditor.category.fish"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["aquariumEditor.fullScreenLibrary"].waitForExistence(timeout: 5))
+        waitForConversationReady(in: app)
+
         let tutorialFish = app.descendants(matching: .any)["aquariumEditor.dragFish.clownfish"]
         XCTAssertTrue(tutorialFish.waitForExistence(timeout: 5))
-        tutorialFish.tap()
+        tapPresentedButton(in: app, identifier: "aquariumEditor.dragFish.clownfish")
 
         XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.savePrompt"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["coreTutorial.ghostHand"].exists)
         advanceConversation(in: app, pageCount: 1)
         waitForConversationReady(in: app)
-        app.buttons["aquariumEditor.done"].tap()
-        XCTAssertTrue(app.buttons["保存する"].waitForExistence(timeout: 3))
-        app.buttons["保存する"].tap()
+        tapPresentedButton(in: app, identifier: "aquariumEditor.done")
 
         XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.returnHome"].waitForExistence(timeout: 5))
         advanceConversation(
@@ -711,17 +725,20 @@ final class PomodoroAquariumUITests: XCTestCase {
         editAlert.buttons["編集する"].tap()
         XCTAssertTrue(app.buttons["aquariumEditor.category.fish"].waitForExistence(timeout: 5))
 
+        waitForConversationReady(in: app)
+        app.buttons["aquariumEditor.category.fish"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["aquariumEditor.fullScreenLibrary"].waitForExistence(timeout: 5))
+        waitForConversationReady(in: app)
+
         let tutorialFish = app.descendants(matching: .any)["aquariumEditor.dragFish.clownfish"]
         XCTAssertTrue(tutorialFish.waitForExistence(timeout: 5))
-        tutorialFish.tap()
+        tapPresentedButton(in: app, identifier: "aquariumEditor.dragFish.clownfish")
 
         XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.savePrompt"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["coreTutorial.ghostHand"].exists)
         advanceConversation(in: app, pageCount: 1)
         waitForConversationReady(in: app)
-        app.buttons["aquariumEditor.done"].tap()
-        XCTAssertTrue(app.buttons["保存する"].waitForExistence(timeout: 3))
-        app.buttons["保存する"].tap()
+        tapPresentedButton(in: app, identifier: "aquariumEditor.done")
         XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.returnHome"].waitForExistence(timeout: 5))
         advanceConversation(
             in: app,
@@ -1216,6 +1233,7 @@ final class PomodoroAquariumUITests: XCTestCase {
             app.buttons["aquariumEditor.cancel"].tap()
             app.alerts["編集内容を破棄しますか？"].buttons["変更を破棄"].tap()
         }
+        app.descendants(matching: .any)["aquariumViewing.tapSurface"].tap()
         XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
         app.buttons["aquariumEditor.start"].tap()
         XCTAssertTrue(app.alerts["水槽を編集しますか？"].waitForExistence(timeout: 5))
@@ -1319,9 +1337,6 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(app.buttons["サンゴ礁"].waitForExistence(timeout: 5))
         app.buttons["サンゴ礁"].tap()
         app.buttons["aquariumEditor.done"].tap()
-        let save = app.buttons["保存する"]
-        XCTAssertTrue(save.waitForExistence(timeout: 5))
-        save.tap()
         XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["mainTab.home"].isHittable)
     }

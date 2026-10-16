@@ -323,7 +323,7 @@ struct HomeView: View {
                                 close: { showsEditorLibrary = false },
                                 selectBackground: { theme in selectBackground(theme); showsEditorLibrary = false },
                                 storeAllFish: { storeAllAquariumItems(.fish) },
-                                storeAllDecorations: { storeAllAquariumItems(.decorations) },
+                                storeDecorations: { storeAllAquariumItems($0) },
                                 placeShipwreck: placeShipwreckFromLibrary)
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .opacity(fishDragSession == nil ? 1 : 0)
@@ -856,6 +856,11 @@ struct HomeView: View {
                 Text(title).font(.caption)
             }
         }
+        .background {
+            if category == .fish {
+                Color.clear.coreTutorialTarget(.aquariumFishLibrary)
+            }
+        }
         .accessibilityLabel(title)
         .accessibilityIdentifier("aquariumEditor.category.\(category == .fish ? "fish" : category == .decoration ? "decoration" : "background")")
     }
@@ -864,14 +869,15 @@ struct HomeView: View {
         guard isAquariumEditorPresented, showsEditorLibrary, let player else { return }
         let preferredID = species == .clownfish && coreTutorial?.step == .waitingForFishPlacement
             ? coreTutorial?.tutorialFishID(in: player) : nil
-        let initial = AquariumEditorInitialPlacement.fish(species: species, size: canvasFrame.size,
-            neighbors: player.activeAquariumFish.compactMap { editingFishPositions[$0.id] ?? fishSpawnPositions[$0.id] })
+        let initial = AquariumEditorInitialPlacement.fish(species: species, size: canvasFrame.size)
         let location = CGPoint(x: canvasFrame.minX + canvasFrame.width * initial.x,
                                y: canvasFrame.minY + canvasFrame.height * initial.y)
         guard let added = AquariumFishEditing.drop(species: species, location: location,
             canvas: canvasFrame, player: player, preferredFishID: preferredID) else { return }
         fishSpawnPositions[added.id] = added.position
-        fishAppearances[added.id] = AquariumFishAppearance(startedAt: Date())
+        fishAppearances[added.id] = AquariumFishAppearance(startedAt: Date(), spawnOffset: CGPoint(
+            x: (added.position.x - 0.5) * canvasFrame.width,
+            y: (added.position.y - 0.5) * canvasFrame.height))
         showsEditorLibrary = false
         markAquariumEditorChanged()
         if mode != .aquariumEditor { try? modelContext.save() }
@@ -1253,9 +1259,10 @@ struct HomeView: View {
             Text("水槽編集の操作")
                 .font(.headline)
 
-            Label("魚や置物を左へスライドして、水槽へ追加できます", systemImage: "hand.draw.fill")
-            Label("水槽内の魚をタップすると、その個体を戻せます", systemImage: "hand.tap.fill")
-            Label("右パネルを閉じると、水槽全体を確認できます", systemImage: "rectangle.compress.vertical")
+            Label("上の「魚・装飾・背景」から一覧を開き、タップして追加・変更します", systemImage: "hand.tap.fill")
+            Label("水槽内の魚や装飾をタップすると、収納できます。装飾は移動・微調整・重なり順も変更できます", systemImage: "tray.and.arrow.down")
+            Label("沈没船は「左奥・右奥」を選んで配置します", systemImage: "arrow.left.arrow.right")
+            Label("矢印で元に戻す・やり直す。右上の「完了」から保存、「×」から変更を破棄できます", systemImage: "checkmark")
 
             Button("わかった", action: dismissAquariumEditorTutorial)
                 .buttonStyle(.borderedProminent)
@@ -1598,15 +1605,23 @@ struct HomeView: View {
                 )
 
             case (.aquariumEditor, .waitingForFishPlacement, true):
+                // 一覧が閉じている間は、実際の「魚」ボタンだけを操作可能にする。
+                // 一覧と追加処理は本番と同じView・コールバックをそのまま使用する。
+                let placementTarget: CoreTutorialTarget = showsEditorLibrary
+                    ? .tutorialClownfish : .aquariumFishLibrary
                 let clownfishFrame = targetFrame(
-                    .tutorialClownfish,
+                    placementTarget,
                     in: geometry,
                     targets: targets
                 )
                 CoreTutorialSpotlightStep(
                     targetFrame: clownfishFrame,
-                    page: CoreTutorialConversationScript.fishPlacement[0],
-                    pageIndex: 0, allowsConversationAdvance: false, allowsTargetInteraction: true,
+                    page: showsEditorLibrary
+                        ? CoreTutorialConversationScript.fishPlacement[0]
+                        : CoreTutorialConversationScript.fishLibrary,
+                    pageIndex: showsEditorLibrary ? 1 : 0,
+                    showsPointingHand: true,
+                    allowsConversationAdvance: false, allowsTargetInteraction: true,
                     accessibilityIdentifier: "coreTutorial.fishPlacementPrompt"
                 )
 
