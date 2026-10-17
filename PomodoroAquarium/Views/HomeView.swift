@@ -2000,7 +2000,7 @@ struct HomeView: View {
             if ProcessInfo.processInfo.arguments.contains("-fish-editor-ui-test"),
                ProcessInfo.processInfo.arguments.contains("-core-tutorial-in-memory"),
                initialization.player.ownedFish.isEmpty {
-                initialization.player.ownedFish = FishSpecies.allCases.flatMap { species in
+                initialization.player.ownedFish = FishSpecies.allCases.filter { $0 != .blueTang }.flatMap { species in
                     (0..<5).map { _ in PlayerFish(species: species) }
                 }
                 initialization.player.activeAquariumFishIDs = []
@@ -2008,6 +2008,8 @@ struct HomeView: View {
                 try modelContext.save()
             }
 #endif
+            _ = try AquariumDeveloperFish.seedIfNeeded(for: initialization.player, in: modelContext,
+                enabled: coreTutorial?.isPreviewMode != true)
             guard !Task.isCancelled else { return }
             updateDailyStudyTotalsIfNeeded(for: initialization.player, now: Date())
         } catch {

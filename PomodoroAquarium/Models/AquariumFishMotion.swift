@@ -1055,7 +1055,7 @@ enum AquariumFishMotion {
 
     static func movementProfile(for species: FishSpecies) -> FishMovementProfile {
         switch species {
-        case .clownfish:
+        case .clownfish, .blueTang:
             .clownfish
         case .jellyfish:
             .jellyfish
@@ -1078,13 +1078,13 @@ enum AquariumFishMotion {
         species == .manta ? .manta : nil
     }
 
-    /// Frame tempoと実移動の印象を揃えるクマノミ専用の目標速度倍率。
+    /// Frame tempoと実移動の印象を揃えるクマノミ型の目標速度倍率。
     /// nilの魚種は従来のtargetSpeedをそのまま使う。
     static func behaviorTargetSpeedMultiplier(
         for species: FishSpecies,
         behavior: Behavior
     ) -> CGFloat? {
-        guard species == .clownfish else { return nil }
+        guard species == .clownfish || species == .blueTang else { return nil }
         return switch behavior {
         case .hovering:
             0.62
@@ -1124,7 +1124,7 @@ enum AquariumFishMotion {
             return max(sharedDuration * 0.45, 0.06)
         case .seahorse:
             return 0.28
-        case .clownfish:
+        case .clownfish, .blueTang:
             break
         }
         return spriteFrameDuration(

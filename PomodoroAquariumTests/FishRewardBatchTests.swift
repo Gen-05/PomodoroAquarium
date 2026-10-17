@@ -5,6 +5,22 @@ import Testing
 
 @MainActor
 struct FishRewardBatchTests {
+    @Test func blueTangCanBeClaimedThroughTheNormalRewardPipelineExactlyOnce() throws {
+        let fixture = try BatchFixture()
+        let id = try fixture.process(seconds: 1500)
+        let batch = try #require(try fixture.grant(id) { probabilities in
+            #expect(probabilities.common == 70)
+            // 通常の候補からナンヨウハギを選び、抽選後は本番と同じ付与・履歴経路を通す。
+            return FishSpecies.allCases.filter { $0.rarity == .common }.first { $0 == .blueTang }
+        })
+        #expect(batch.results.map(\.species) == [.blueTang])
+        #expect(fixture.player.ownedFish.count == 1)
+        #expect(try fixture.grant(id) { _ in .blueTang } == nil)
+        let entries = try fixture.context.fetch(FetchDescriptor<RewardHistoryEntry>())
+        #expect(entries.count == 1 && entries.first?.fishSpeciesRawValue == "blueTang")
+        #expect(fixture.player.dailyClaimedFishCount == 1 && fixture.player.coins == 80)
+    }
+
     @Test(arguments: [0, 1, 3, 8])
     func earnedCountDrivesIndependentDrawsAndSavedFish(count: Int) throws {
         let fixture = try BatchFixture()

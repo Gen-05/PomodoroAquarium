@@ -6,6 +6,19 @@ import Testing
 
 @MainActor
 struct AquariumSideEditorTests {
+    @Test func displayOrderUsesRarityThenDefinitionOrderWithoutMutatingOwnership() {
+        let expected: [FishSpecies] = [.clownfish, .jellyfish, .pufferfish, .blueTang, .seahorse, .manta, .whaleShark]
+        let owned = FishSpecies.allCases.reversed().map { PlayerFish(species: $0) }
+            + [PlayerFish(species: .blueTang)]
+        let originalIDs = owned.map(\.id)
+        #expect(AquariumFishEditorPresentation.speciesInRarityOrder == expected)
+        #expect(AquariumFishEditorPresentation.ownedSpecies(from: owned) == expected)
+        #expect(AquariumFishEditorPresentation.ownedSpecies(from: Array(owned.reversed())) == expected)
+        #expect(AquariumFishEditorPresentation.ownedSpecies(from: owned.filter { [.blueTang, .manta, .jellyfish].contains($0.species) })
+            == [.jellyfish, .blueTang, .manta])
+        #expect(owned.map(\.id) == originalIDs)
+    }
+
     @Test func fishEditorListsOnlyOwnedSpeciesInCatalogOrder() {
         let ownedFish = [
             PlayerFish(species: .manta),

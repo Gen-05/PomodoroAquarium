@@ -22,7 +22,8 @@ enum FishDetailImageLayout {
     static func preferredDisplaySize(for species: FishSpecies) -> CGFloat {
         let minimumScale = FishSpecies.clownfish.displayScale.squareRoot()
         let maximumScale = FishSpecies.whaleShark.displayScale.squareRoot()
-        let speciesScale = species.displayScale.squareRoot()
+        // ナンヨウハギの水槽内だけの拡大は、詳細カードの既存寸法へ波及させない。
+        let speciesScale = (species == .blueTang ? 0.43 : species.displayScale).squareRoot()
         let normalizedScale = min(
             max((speciesScale - minimumScale) / (maximumScale - minimumScale), 0),
             1
@@ -44,6 +45,8 @@ enum FishDetailImageLayout {
     /// 透明余白だけを考慮し、displayScaleによる体格差はpreferredDisplaySizeで扱う。
     static func visibleContentRatio(for species: FishSpecies) -> CGSize {
         switch species {
+        case .blueTang:
+            CGSize(width: 0.923, height: 0.529)
         case .clownfish:
             CGSize(width: 1.00, height: 0.63)
         case .jellyfish:

@@ -54,13 +54,16 @@ struct AquariumEditorPresentationTests {
 
     @MainActor
     @Test func twentyAddsUseTheActualRenderedFishAndRingCenterEvenWhenSpawnArrivesLate() async throws {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let windowScene = try #require(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
         var generator = SpawnTestGenerator()
         for size in [CGSize(width: 320, height: 568), CGSize(width: 393, height: 852),
                      CGSize(width: 1024, height: 768)] {
             let probe = SpawnRenderProbe()
             let recorder = SpawnRenderRecorder()
             let host = UIHostingController(rootView: SpawnRenderHost(probe: probe, recorder: recorder, size: size))
-            let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+            let window = UIWindow(windowScene: windowScene)
+            window.frame = CGRect(origin: .zero, size: size)
             window.rootViewController = host
             window.makeKeyAndVisible()
             defer { window.isHidden = true }

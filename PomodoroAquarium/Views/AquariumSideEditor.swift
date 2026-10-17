@@ -269,8 +269,15 @@ private struct AquariumEditorControlledScrollView<Content: View>: View {
 }
 
 enum AquariumFishEditorPresentation {
+    /// 表示専用。レアリティ順を明示し、同レアリティ内では魚種定義順を維持する。
+    static var speciesInRarityOrder: [FishSpecies] {
+        [FishRarity.common, .rare, .epic, .legendary].flatMap { rarity in
+            FishSpecies.allCases.filter { $0.rarity == rarity }
+        }
+    }
+
     static func ownedSpecies(from ownedFish: [PlayerFish]) -> [FishSpecies] {
-        FishSpecies.allCases.filter { species in
+        speciesInRarityOrder.filter { species in
             ownedFish.contains { $0.species == species }
         }
     }

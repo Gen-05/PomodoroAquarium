@@ -15,6 +15,8 @@ enum BookFishThumbnailLayout {
     /// 水槽用のdisplayScaleとは独立した一覧専用値。
     static func imageScale(for species: FishSpecies) -> CGFloat {
         switch species {
+        case .blueTang:
+            1.00
         case .clownfish:
             0.75
         case .jellyfish:
@@ -44,7 +46,7 @@ struct BookView: View {
     }
 
     var body: some View {
-        List(FishSpecies.allCases) { species in
+        List(AquariumFishEditorPresentation.speciesInRarityOrder) { species in
             let ownedCount = Self.ownedCount(for: species, in: player)
 
             NavigationLink {
