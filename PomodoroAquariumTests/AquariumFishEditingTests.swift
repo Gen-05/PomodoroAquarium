@@ -7,6 +7,12 @@ import Testing
 
 @MainActor
 struct AquariumFishEditingTests {
+    private let expectedAquariumSizes: [FishSpecies: CGFloat] = [
+        .clownfish: 31.2, .blueGreenChromis: 33.462, .yellowTang: 49.608,
+        .blueTang: 54.912, .pufferfish: 77.22, .seahorse: 88.92,
+        .jellyfish: 62.4, .manta: 175.5, .whaleShark: 468
+    ]
+
     private func player() -> Player {
         Player(ownedFish: (0..<5).map { _ in PlayerFish(species: .clownfish) }, activeAquariumFishIDs: [], hasInitializedActiveAquariumFish: true)
     }
@@ -43,7 +49,7 @@ struct AquariumFishEditingTests {
             let length = CGFloat(max(maxX - minX + 1, maxY - minY + 1))
             visibleLengths[species] = length
             #expect(length > 0 && length <= ceil(size) + 1)
-            #expect(size == 78 * species.displayScale)
+            #expect(abs(size - expectedAquariumSizes[species]!) < 0.000001)
             print("Fish rendered size", species.rawValue, "canvas", size, "visible", length)
         }
         let sizes = Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map { species in
@@ -77,7 +83,7 @@ struct AquariumFishEditingTests {
             #expect(card.width <= 112 && card.height <= 112)
             #expect(row.width <= 60)
             #expect(abs(row.width / card.width - 0.52) < 0.0001)
-            #expect(AquariumFishSizing.displaySize(for: species, isFavorite: false) == 78 * species.displayScale)
+            #expect(abs(AquariumFishSizing.displaySize(for: species, isFavorite: false) - expectedAquariumSizes[species]!) < 0.000001)
         }
         #expect(AquariumEditorFishThumbnailLayout.imageSize(for: .whaleShark).width > AquariumEditorFishThumbnailLayout.imageSize(for: .manta).width)
         #expect(AquariumEditorFishThumbnailLayout.imageSize(for: .manta).width > AquariumEditorFishThumbnailLayout.imageSize(for: .clownfish).width)

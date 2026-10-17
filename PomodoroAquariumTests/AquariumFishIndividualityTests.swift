@@ -6,7 +6,7 @@ import Testing
 struct AquariumFishIndividualityTests {
     // 保存済みの開発用IDそのもの。Releaseでも同じデータで検証する。
     private func ids(for species: FishSpecies) -> [UUID] {
-        let prefix = species == .blueTang ? "B10E7A60" : "E1107A60"
+        let prefix = species == .blueGreenChromis ? "C470A115" : species == .blueTang ? "B10E7A60" : "E1107A60"
         return (1...5).map { UUID(uuidString: String(format: "\(prefix)-6A60-4A60-8A60-%012d", $0))! }
     }
 
@@ -20,7 +20,7 @@ struct AquariumFishIndividualityTests {
          Double(state.turnResponsiveness), Double(state.wanderingRadiusX), Double(state.wanderingRadiusY)]
     }
 
-    @Test(arguments: [FishSpecies.blueTang, .yellowTang])
+    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis])
     func fixedIDsStartIndependentlyAndReplayTheSameFirstFiveSeconds(species: FishSpecies) {
         let ids = ids(for: species)
         let profile = AquariumFishMotion.movementProfile(for: species)
@@ -71,7 +71,7 @@ struct AquariumFishIndividualityTests {
         }
     }
 
-    @Test(arguments: [FishSpecies.blueTang, .yellowTang])
+    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis])
     func explicitSpawnAlwaysTakesPriorityOverIndividualPosition(species: FishSpecies) {
         let profile = AquariumFishMotion.movementProfile(for: species)
         for id in ids(for: species) {

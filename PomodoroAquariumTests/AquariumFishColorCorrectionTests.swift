@@ -6,7 +6,7 @@ import Testing
 @MainActor
 struct AquariumFishColorCorrectionTests {
     @Test func otherThemesRemainUnchangedAndBasicUsesLightResponseGroups() {
-        for species in FishSpecies.allCases {
+        for species in FishSpecies.allCases.filter({ !targetSpecies.contains($0) }) {
             let deep = AquariumFishColorCorrection.correction(for: .deepSea, species: species)
             #expect(deep.saturation == (species == .jellyfish ? 0.94 : 0.88))
             #expect(deep.brightness == (species == .jellyfish ? -0.03 : -0.06))
@@ -27,7 +27,7 @@ struct AquariumFishColorCorrectionTests {
 
     @Test func correctionPreservesSpriteAlphaAndDimensionsIncludingJellyfish() throws {
         for species in FishSpecies.allCases {
-            for frame in Set([0, max(species.swimmingImageNames.count - 1, 0)]) {
+            for frame in Set([0, species.swimmingImageNames.count / 2, max(species.swimmingImageNames.count - 1, 0)]) {
                 let source = FishImageView(species: species, fixedAnimationFrameIndex: frame).frame(width: 128, height: 128)
                 let original = ImageRenderer(content: source)
                 let image = try #require(original.uiImage?.cgImage)
@@ -43,43 +43,140 @@ struct AquariumFishColorCorrectionTests {
         }
     }
 
-    @Test func otherThemesKeepThePreviousRenderedPixels() throws {
-        for species in FishSpecies.allCases {
-            let source = FishImageView(species: species, fixedAnimationFrameIndex: 0).frame(width: 128, height: 128)
-            for theme in [AquariumBackgroundTheme.tropical, .deepSea] {
-                let correction = AquariumFishColorCorrection.correction(for: theme, species: species)
-                let previous = ImageRenderer(content: source.saturation(correction.saturation)
-                    .colorMultiply(Color(red: correction.red, green: correction.green, blue: correction.blue))
-                    .brightness(correction.brightness))
-                let current = ImageRenderer(content: source.modifier(correction))
+    @Test func existingSixSpeciesKeepExactlyThePreviousRenderedPixelsForEveryBackground() throws {
+        for species in FishSpecies.allCases.filter({ !targetSpecies.contains($0) }) {
+            let source = FishImageView(species: species, fixedAnimationFrameIndex: 1).frame(width: 128, height: 128)
+            for theme in AquariumBackgroundTheme.allCases {
+                let previous = ImageRenderer(content: source.modifier(legacy(theme, species)))
+                let current = ImageRenderer(content: source.modifier(AquariumFishColorCorrection.correction(for: theme, species: species)))
                 #expect(pixelValues(try #require(previous.uiImage?.cgImage)) == pixelValues(try #require(current.uiImage?.cgImage)))
             }
         }
     }
 
-    @Test func renderBasicBeforeAndAfterAtIdenticalPositions() throws {
-        let previousBasic = AquariumFishColorCorrection(saturation: 0.96, brightness: -0.005, red: 0.98, green: 0.995, blue: 1)
-        let renderer = ImageRenderer(content: VStack(spacing: 0) {
-            ForEach(FishSpecies.allCases, id: \.self) { species in
-                HStack(spacing: 0) {
-                    ForEach([false, true], id: \.self) { after in
-                        ZStack {
-                            Image(AquariumBackgroundTheme.aquarium.imageName).resizable().scaledToFill()
-                                .frame(width: 270, height: 170).clipped()
-                            FishImageView(species: species, fixedAnimationFrameIndex: 0)
-                                .frame(width: 140, height: 140)
-                                .modifier(after ? AquariumFishColorCorrection.correction(for: .aquarium, species: species) : previousBasic)
-                            VStack {
-                                Text("\(species.name) / \(after ? "変更後" : "変更前")").font(.caption).foregroundStyle(.white)
-                                Spacer()
-                            }.padding(.top, 8)
-                        }.frame(width: 270, height: 170)
+    private let targetSpecies: [FishSpecies] = [.blueTang, .yellowTang, .blueGreenChromis]
+
+    // 今回の変更前の値を独立して保持。比較・回帰検証に現在の値を流用しない。
+    private func legacy(_ theme: AquariumBackgroundTheme, _ species: FishSpecies) -> AquariumFishColorCorrection {
+        switch theme {
+        case .aquarium:
+            if species == .jellyfish {
+                return .init(saturation: 0.92, brightness: -0.005, red: 0.98, green: 0.995, blue: 1, contrast: 0.98)
+            }
+            return .init(saturation: species == .clownfish || species == .seahorse ? 0.84 : 0.88,
+                         brightness: -0.015, red: 0.97, green: 0.99, blue: 1, contrast: 0.96)
+        case .tropical:
+            return .init(saturation: 0.94, brightness: 0.008, red: 0.96, green: 1, blue: 1)
+        case .deepSea:
+            return .init(saturation: species == .jellyfish ? 0.94 : 0.88,
+                         brightness: species == .jellyfish ? -0.03 : -0.06,
+                         red: species == .jellyfish ? 0.91 : 0.82, green: species == .jellyfish ? 0.955 : 0.91, blue: 1)
+        }
+    }
+
+    @Test func renderThreeFishOnAllActualBackgroundsAtMatchedPositionsAndSizes() throws {
+        for theme in [AquariumBackgroundTheme.aquarium, .tropical, .deepSea] {
+            let speciesList = targetSpecies + [.clownfish]
+            let full = ImageRenderer(content: VStack(spacing: 0) {
+                ForEach(speciesList, id: \.self) { species in
+                    HStack(spacing: 0) {
+                        comparisonScene(theme, species, after: false)
+                        comparisonScene(theme, species, after: true)
                     }
                 }
+            })
+            full.scale = 2
+            try #require(full.uiImage?.pngData()).write(to: URL(fileURLWithPath: "/private/tmp/FishColor-\(theme.rawValue)-actual.png"))
+            let zoom = ImageRenderer(content: VStack(spacing: 0) {
+                ForEach(speciesList, id: \.self) { species in
+                    VStack(spacing: 4) {
+                        Text("\(theme.displayName) / \(species.name) / 上部：前・後 ｜ 下部：前・後").font(.caption).foregroundStyle(.black).zIndex(1)
+                        HStack(spacing: 4) {
+                            ForEach([0.18, 0.82], id: \.self) { y in
+                                ForEach([false, true], id: \.self) { after in
+                                    comparisonScene(theme, species, after: after, labels: false)
+                                        .offset(y: CGFloat(0.5 - y) * 746)
+                                        .frame(width: 72, height: 76).clipped()
+                                        .scaleEffect(3).frame(width: 216, height: 228).clipped()
+                                }
+                            }
+                        }
+                    }.padding(.vertical, 8)
+                }
+            }.background(.white))
+            zoom.scale = 2
+            try #require(zoom.uiImage?.pngData()).write(to: URL(fileURLWithPath: "/private/tmp/FishColor-\(theme.rawValue)-detail.png"))
+        }
+    }
+
+    private func comparisonScene(_ theme: AquariumBackgroundTheme, _ species: FishSpecies,
+                                 after: Bool, labels: Bool = true) -> some View {
+        let size = AquariumFishSizing.displaySize(for: species, isFavorite: false)
+        return ZStack {
+            // 本番の00＋光01のscreen合成。ImageRendererの初期描画で光フレームを揃える。
+            AquariumBackground(theme: theme)
+            ForEach([0.18, 0.5, 0.82], id: \.self) { y in
+                FishImageView(species: species, fixedAnimationFrameIndex: 1)
+                    .frame(width: size, height: size)
+                    .modifier(after ? AquariumFishColorCorrection.correction(for: theme, species: species) : legacy(theme, species))
+                    .opacity(AquariumFishMotion.movementProfile(for: species).depthOpacity(at: 0.5))
+                    .position(x: 393 / 2, y: CGFloat(y) * 746)
             }
-        })
-        renderer.scale = 2
-        try #require(renderer.uiImage?.pngData()).write(to: URL(fileURLWithPath: "/private/tmp/PomodoroBasicFishColorComparison.png"))
+            if labels {
+                VStack {
+                    Text("\(species.name) / \(after ? "AFTER" : "BEFORE") / \(theme.displayName)")
+                        .font(.caption).foregroundStyle(.white).padding(6).background(.black.opacity(0.65))
+                    Spacer()
+                }
+            }
+        }.frame(width: 393, height: 746).clipped()
+    }
+
+    @Test func targetMatrixSwitchesByBackgroundAndLeavesTheTwoBasicCombinationsUnchanged() {
+        let expected: [(AquariumBackgroundTheme, FishSpecies, [Double])] = [
+            (.aquarium, .blueTang, [0.88, -0.015, 0.97, 0.99, 1, 0.96]),
+            (.aquarium, .yellowTang, [0.88, -0.015, 0.97, 0.99, 1, 0.96]),
+            (.aquarium, .blueGreenChromis, [0.94, -0.012, 0.98, 1, 0.99, 1.03]),
+            (.tropical, .blueTang, [0.90, -0.012, 0.98, 0.995, 1, 1.08]),
+            (.tropical, .yellowTang, [0.86, -0.020, 1, 0.99, 0.97, 1.02]),
+            (.tropical, .blueGreenChromis, [0.96, -0.025, 0.99, 1, 0.96, 1.12]),
+            (.deepSea, .blueTang, [0.90, -0.040, 0.90, 0.95, 1, 1.04]),
+            (.deepSea, .yellowTang, [0.86, -0.045, 0.94, 0.94, 0.98, 1]),
+            (.deepSea, .blueGreenChromis, [0.92, -0.045, 0.92, 0.97, 1, 1.04])
+        ]
+        for (theme, species, values) in expected {
+            let c = AquariumFishColorCorrection.correction(for: theme, species: species)
+            #expect([c.saturation, c.brightness, c.red, c.green, c.blue, c.contrast] == values)
+        }
+    }
+
+    @Test func neutralSpritesRetainTonalRangeAndDoNotIntroduceBroadClipping() throws {
+        func levels(_ image: CGImage) -> [Int] {
+            let bytes = pixelValues(image)
+            return stride(from: 0, to: bytes.count, by: 4).compactMap { i in
+                guard bytes[i + 3] >= 250 else { return nil }
+                return Int((Double(bytes[i]) * 0.2126 + Double(bytes[i + 1]) * 0.7152 + Double(bytes[i + 2]) * 0.0722).rounded())
+            }.sorted()
+        }
+        for species in targetSpecies {
+            let source = FishImageView(species: species, fixedAnimationFrameIndex: 1).frame(width: 256, height: 256)
+            for theme in AquariumBackgroundTheme.allCases {
+                let before = levels(try #require(ImageRenderer(content: source.modifier(legacy(theme, species))).uiImage?.cgImage))
+                let after = levels(try #require(ImageRenderer(content: source.modifier(AquariumFishColorCorrection.correction(for: theme, species: species))).uiImage?.cgImage))
+                #expect(!before.isEmpty && before.count == after.count)
+                let rangeBefore = before[before.count * 9 / 10] - before[before.count / 10]
+                let rangeAfter = after[after.count * 9 / 10] - after[after.count / 10]
+                #expect(Double(rangeAfter) >= Double(rangeBefore) * 0.8)
+                #expect(Double(Set(after).count) >= Double(Set(before).count) * 0.8)
+                let highBefore = Double(before.count { $0 >= 250 }) / Double(before.count)
+                let highAfter = Double(after.count { $0 >= 250 }) / Double(after.count)
+                let lowBefore = Double(before.count { $0 <= 5 }) / Double(before.count)
+                let lowAfter = Double(after.count { $0 <= 5 }) / Double(after.count)
+                #expect(highAfter <= highBefore + 0.02)
+                #expect(lowAfter <= lowBefore + 0.03)
+                print("Tones \(species.rawValue) \(theme.rawValue): p10-p90 \(rangeBefore)→\(rangeAfter), levels \(Set(before).count)→\(Set(after).count), high \(highBefore)→\(highAfter), low \(lowBefore)→\(lowAfter)")
+            }
+        }
     }
 
     private func alphaValues(_ image: CGImage) -> [UInt8] {

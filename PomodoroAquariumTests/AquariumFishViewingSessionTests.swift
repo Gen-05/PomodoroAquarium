@@ -18,7 +18,7 @@ struct AquariumFishViewingSessionTests {
                          CGSize(width: 1024, height: 768)] {
                 let bounds = profile.roamingStyle.bounds(in: size,
                     fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: false))
-                let prefix = species == .yellowTang ? "E1107A60" : "B10E7A60"
+                let prefix = species == .blueGreenChromis ? "C470A115" : species == .yellowTang ? "E1107A60" : "B10E7A60"
                 let ids = (1...5).map {
                     UUID(uuidString: String(format: "\(prefix)-6A60-4A60-8A60-%012d", $0))!
                 }
@@ -182,11 +182,12 @@ struct AquariumFishViewingSessionTests {
         #expect(adjusted.elapsedTime == 8)
     }
 
-    @Test func actualFishViewsResumeAcrossRemountBackgroundAndCentralAddition() async throws {
+    @Test(arguments: [FishSpecies.blueTang, .blueGreenChromis])
+    func actualFishViewsResumeAcrossRemountBackgroundAndCentralAddition(species: FishSpecies) async throws {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = try #require(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
         let session = AquariumFishViewingSession(id: firstSession)
-        let probe = ViewingSessionRenderProbe()
+        let probe = ViewingSessionRenderProbe(species: species)
         let host = UIHostingController(rootView: ViewingSessionRenderHost(session: session, probe: probe))
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
@@ -246,8 +247,11 @@ struct AquariumFishViewingSessionTests {
 
 @MainActor
 private final class ViewingSessionRenderProbe: ObservableObject {
-    let ids = [UUID(uuidString: "B10E7A60-6A60-4A60-8A60-000000000001")!,
-               UUID(uuidString: "E1107A60-6A60-4A60-8A60-000000000002")!]
+    let species: FishSpecies
+    init(species: FishSpecies) { self.species = species }
+    var ids: [UUID] { [UUID(uuidString: species == .blueGreenChromis
+        ? "C470A115-6A60-4A60-8A60-000000000001" : "B10E7A60-6A60-4A60-8A60-000000000001")!,
+               UUID(uuidString: "E1107A60-6A60-4A60-8A60-000000000002")!] }
     @Published var screen = 0
     @Published var visible = true
     @Published var phase = ScenePhase.active
@@ -276,7 +280,7 @@ private struct ViewingSessionRenderHost: View {
     private func fish(id: UUID) -> some View {
         var view = SwimmingFishView(fishID: id, viewingSession: session,
             appearance: id == probe.ids[0] ? probe.appearance : nil,
-            species: id == probe.ids[0] ? .blueTang : .yellowTang,
+            species: id == probe.ids[0] ? probe.species : .yellowTang,
             backgroundTheme: .aquarium, isFavorite: false, aquariumSize: CGSize(width: 393, height: 852),
             updateDate: probe.date, isSimulationPaused: false, isSelectionEnabled: false,
             isSelected: false, neighborPositions: .empty, reportPosition: { _ in }, select: {})

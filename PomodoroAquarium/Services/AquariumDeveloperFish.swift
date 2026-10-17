@@ -12,6 +12,9 @@ enum AquariumDeveloperFish {
             }),
             (.yellowTang, (1...5).map {
                 UUID(uuidString: String(format: "E1107A60-6A60-4A60-8A60-%012d", $0))!
+            }),
+            (.blueGreenChromis, (1...5).map {
+                UUID(uuidString: String(format: "C470A115-6A60-4A60-8A60-%012d", $0))!
             })
         ]
 #else

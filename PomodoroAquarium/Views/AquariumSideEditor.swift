@@ -112,7 +112,7 @@ enum AquariumFishDragPresentation {
     static func previewSize(for species: FishSpecies) -> CGFloat {
         min(
             max(
-                AquariumFishSizing.displaySize(for: species, isFavorite: false),
+                AquariumFishSizing.baseSize * species.displayScale,
                 minimumPreviewSize
             ),
             maximumPreviewSize

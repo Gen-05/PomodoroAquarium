@@ -7,7 +7,7 @@ import Testing
 @MainActor
 struct AquariumSideEditorTests {
     @Test func displayOrderUsesRarityThenDefinitionOrderWithoutMutatingOwnership() {
-        let expected: [FishSpecies] = [.clownfish, .jellyfish, .pufferfish, .blueTang, .yellowTang, .seahorse, .manta, .whaleShark]
+        let expected: [FishSpecies] = [.clownfish, .jellyfish, .pufferfish, .blueTang, .yellowTang, .blueGreenChromis, .seahorse, .manta, .whaleShark]
         let owned = FishSpecies.allCases.reversed().map { PlayerFish(species: $0) }
             + [PlayerFish(species: .blueTang)]
         let originalIDs = owned.map(\.id)
@@ -401,11 +401,11 @@ struct AquariumSideEditorTests {
         ) == .scrolling)
     }
 
-    @Test func fishDragPreviewUsesAquariumScaleWithATransparentFriendlySizeCap() {
+    @Test func fishDragPreviewKeepsBaselineScaleWithATransparentFriendlySizeCap() {
         #expect(AquariumFishDragPresentation.previewSize(for: .clownfish) == 44)
         #expect(abs(
             AquariumFishDragPresentation.previewSize(for: .pufferfish) -
-                AquariumFishSizing.displaySize(for: .pufferfish, isFavorite: false)
+                70.2
         ) < 0.000_001)
         #expect(AquariumFishDragPresentation.previewSize(for: .whaleShark) == min(AquariumFishSizing.displaySize(for: .whaleShark, isFavorite: false), 300))
 

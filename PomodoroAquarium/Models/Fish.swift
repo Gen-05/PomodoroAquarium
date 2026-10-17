@@ -24,6 +24,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     case whaleShark
     case blueTang
     case yellowTang
+    case blueGreenChromis
 
     var id: String {
         rawValue
@@ -31,6 +32,8 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
 
     var name: String {
         switch self {
+        case .blueGreenChromis:
+            "デバスズメダイ"
         case .yellowTang:
             "キイロハギ"
         case .blueTang:
@@ -54,6 +57,8 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     /// 未対応魚はnilとし、表示側で既存の魚シンボルへフォールバックする。
     var imageName: String? {
         switch self {
+        case .blueGreenChromis:
+            "fish_blue_green_chromis_side_2"
         case .yellowTang:
             "fish_yellow_tang_side_2"
         case .blueTang:
@@ -75,12 +80,12 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
 
     /// 移動方向に応じた画像切替・左右反転を行う魚種かどうか。
     var usesDirectionalSwimmingSprites: Bool {
-        self == .clownfish || self == .blueTang || self == .yellowTang || self == .pufferfish || self == .seahorse
+        self == .clownfish || self == .blueTang || self == .yellowTang || self == .blueGreenChromis || self == .pufferfish || self == .seahorse
     }
 
     /// 右向きのside素材を、水平方向の進行に合わせて左右反転する魚種。
     var usesHorizontalSwimmingFlip: Bool {
-        self == .clownfish || self == .blueTang || self == .yellowTang || self == .pufferfish || self == .seahorse
+        self == .clownfish || self == .blueTang || self == .yellowTang || self == .blueGreenChromis || self == .pufferfish || self == .seahorse
             || self == .manta || self == .whaleShark
     }
 
@@ -92,6 +97,8 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
 
     func swimmingImageNames(for direction: FishFacingDirection) -> [String] {
         switch self {
+        case .blueGreenChromis:
+            return (1...3).map { "fish_blue_green_chromis_side_\($0)" }
         case .yellowTang:
             return (1...3).map { "fish_yellow_tang_side_\($0)" }
         case .blueTang:
@@ -120,7 +127,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
             swimmingImageNames(for: direction)
         case .sideToDiagonalUp15, .sideToDiagonalDown15:
             switch self {
-            case .clownfish, .blueTang, .yellowTang, .pufferfish, .seahorse:
+            case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .pufferfish, .seahorse:
                 // 小魚型は中間方向でも専用Assetへ切り替えず、魚種ごとのsideフレームを共用する。
                 swimmingImageNames
             case .jellyfish, .manta, .whaleShark:
@@ -155,6 +162,9 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     /// 共通基準サイズに対する魚種ごとの表示倍率。
     var displayScale: CGFloat {
         switch self {
+        case .blueGreenChromis:
+            // neutralの可視横幅（1149/1254）を補正し、クマノミ程度にする。
+            0.429
         case .yellowTang:
             // neutral画像の可視横幅（1164/1254）を補正し、ナンヨウハギと揃える。
             0.636
@@ -177,7 +187,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
 
     var rarity: FishRarity {
         switch self {
-        case .clownfish, .blueTang, .yellowTang, .jellyfish, .pufferfish:
+        case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .jellyfish, .pufferfish:
             .common
         case .seahorse:
             .rare

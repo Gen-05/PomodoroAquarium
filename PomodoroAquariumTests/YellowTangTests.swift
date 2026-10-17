@@ -42,7 +42,7 @@ struct YellowTangTests {
             == [0, 1, 2, 1, 0, 1, 2, 1])
     }
 
-    @Test func renderedWidthMatchesBlueTangWithoutCroppingFins() throws {
+    @Test func renderedWidthKeepsItsPreviousSizeWhileBlueTangGrows() throws {
         func visibleWidth(_ species: FishSpecies, frame: CGSize? = nil) throws -> Int {
             let size = AquariumFishSizing.displaySize(for: species, isFavorite: false)
             let frame = frame ?? CGSize(width: size, height: size)
@@ -64,7 +64,7 @@ struct YellowTangTests {
         }
         #expect(FishSpecies.yellowTang.displayScale == 0.636)
         let yellow = try visibleWidth(.yellowTang), blue = try visibleWidth(.blueTang)
-        #expect(abs(Double(yellow) / Double(blue) - 1) < 0.03)
+        #expect(abs(Double(yellow) / Double(blue) - 1 / 1.10) < 0.03)
         print("Neutral visible width: yellowTang \(Double(yellow) / 3)pt, blueTang \(Double(blue) / 3)pt")
         let bookYellow = try visibleWidth(.yellowTang, frame: BookFishThumbnailLayout.imageSize(for: .yellowTang))
         let bookBlue = try visibleWidth(.blueTang, frame: BookFishThumbnailLayout.imageSize(for: .blueTang))

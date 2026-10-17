@@ -709,10 +709,16 @@ struct AquariumDecorationView: View {
 }
 
 enum AquariumFishSizing {
-    // 3ae83d8の正常な水槽サイズを復元。一覧・drag previewのサイズとは独立。
+    // 水槽専用の微調整。共通displayScaleや保存データには反映しない。
     static let baseSize: CGFloat = 78
     static func displaySize(for species: FishSpecies, isFavorite _: Bool) -> CGFloat {
-        baseSize * species.displayScale
+        let adjustment: CGFloat
+        switch species {
+        case .blueTang, .pufferfish: adjustment = 1.10
+        case .seahorse: adjustment = 0.95
+        default: adjustment = 1
+        }
+        return baseSize * species.displayScale * adjustment
     }
 }
 

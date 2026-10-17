@@ -10,7 +10,26 @@ struct AquariumFishColorCorrection: ViewModifier {
     var contrast: Double = 1
 
     static func correction(for theme: AquariumBackgroundTheme, species: FishSpecies) -> Self {
-        switch theme {
+        // 追加3種だけを背景別に調整。同じModifier内で値を選び、補正は一度だけ適用する。
+        switch (theme, species) {
+        case (.aquarium, .blueGreenChromis):
+            return Self(saturation: 0.94, brightness: -0.012, red: 0.98, green: 1, blue: 0.99, contrast: 1.03)
+        case (.tropical, .blueTang):
+            return Self(saturation: 0.90, brightness: -0.012, red: 0.98, green: 0.995, blue: 1, contrast: 1.08)
+        case (.tropical, .yellowTang):
+            return Self(saturation: 0.86, brightness: -0.020, red: 1, green: 0.99, blue: 0.97, contrast: 1.02)
+        case (.tropical, .blueGreenChromis):
+            return Self(saturation: 0.96, brightness: -0.025, red: 0.99, green: 1, blue: 0.96, contrast: 1.12)
+        case (.deepSea, .blueTang):
+            return Self(saturation: 0.90, brightness: -0.040, red: 0.90, green: 0.95, blue: 1, contrast: 1.04)
+        case (.deepSea, .yellowTang):
+            return Self(saturation: 0.86, brightness: -0.045, red: 0.94, green: 0.94, blue: 0.98)
+        case (.deepSea, .blueGreenChromis):
+            return Self(saturation: 0.92, brightness: -0.045, red: 0.92, green: 0.97, blue: 1, contrast: 1.04)
+        default:
+            break
+        }
+        return switch theme {
         case .aquarium:
             switch BasicWaterLightResponse(species: species) {
             case .standard:
@@ -47,7 +66,7 @@ struct AquariumFishColorCorrection: ViewModifier {
 
     @ViewBuilder
     private func contrastAdjusted(_ content: Content) -> some View {
-        // 他背景では既存の描画経路を維持し、contrastを重ね掛けしない。
+        // contrastが1の既存魚は従来の描画経路を維持し、重ね掛けしない。
         if contrast == 1 { content } else { content.contrast(contrast) }
     }
 }
