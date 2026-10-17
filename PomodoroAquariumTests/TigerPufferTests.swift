@@ -141,7 +141,7 @@ struct TigerPufferTests {
     @Test func rewardCatalogKeepsTheExistingCommonSlot() {
         let commonSpecies = FishSpecies.allCases.filter { $0.rarity == .common }
         #expect(commonSpecies.filter { $0 == .pufferfish }.count == 1)
-        #expect(commonSpecies.count == 4)
+        #expect(commonSpecies.count == 5)
         #expect(FishRewardService.rarityProbabilities(for: 0).common == 70)
         #expect(FishRewardService.rarityProbabilities(for: 180).common == 58)
     }

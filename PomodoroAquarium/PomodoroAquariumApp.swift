@@ -10,6 +10,7 @@ import SwiftData
 
 @main
 struct PomodoroAquariumApp: App {
+    @StateObject private var fishViewingSession = AquariumFishViewingSession()
     private let usesInMemoryUITestStore: Bool
 
     init() {
@@ -46,6 +47,7 @@ struct PomodoroAquariumApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(\.aquariumFishViewingSession, fishViewingSession)
                 .modelContainer(for: [
                     Player.self,
                     PlayerFish.self,

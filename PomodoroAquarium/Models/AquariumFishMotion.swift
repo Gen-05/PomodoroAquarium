@@ -958,9 +958,10 @@ enum AquariumFishMotion {
         profile: FishMovementProfile = .clownfish,
         speedVariationProfile: SpeedVariationProfile? = nil,
         roamingBounds: FishRoamingBounds = .legacy,
-        initialPosition spawnPosition: CGPoint? = nil
+        initialPosition spawnPosition: CGPoint? = nil,
+        viewingSessionID: UUID? = nil
     ) -> State {
-        let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
+        let bytes = mixedIndividualBytes(for: id)
         let angle = CGFloat(bytes[4]) / 255 * .pi * 2
         let baseSpeed = interpolated(profile.baseSpeedRange, byte: bytes[5])
         let direction = normalized(CGVector(
@@ -972,9 +973,9 @@ enum AquariumFishMotion {
         let initialBehavior: Behavior = profile.hoverProbability > 0 && bytes[11].isMultiple(of: 3)
             ? .hovering
             : .wandering
-        // 追加時だけ出現座標を基準にする。通常生成時の乱数・速度・方向は従来どおり。
+        // 追加時の座標を優先。通常表示は個体IDと表示セッションから位置を決める。
         let initialPosition = spawnPosition.map { clampedPoint($0, bounds: roamingBounds) }
-            ?? initialPosition(for: id, bounds: roamingBounds)
+            ?? initialPosition(for: id, bounds: roamingBounds, viewingSessionID: viewingSessionID)
         let wanderingRadiusX = interpolated(profile.wanderingRadiusX, byte: bytes[12])
         let wanderingRadiusY = interpolated(profile.wanderingRadiusY, byte: bytes[13])
         let initialDepth = interpolated(profile.depthRange, byte: bytes[14])
@@ -1055,7 +1056,7 @@ enum AquariumFishMotion {
 
     static func movementProfile(for species: FishSpecies) -> FishMovementProfile {
         switch species {
-        case .clownfish, .blueTang:
+        case .clownfish, .blueTang, .yellowTang:
             .clownfish
         case .jellyfish:
             .jellyfish
@@ -1084,7 +1085,7 @@ enum AquariumFishMotion {
         for species: FishSpecies,
         behavior: Behavior
     ) -> CGFloat? {
-        guard species == .clownfish || species == .blueTang else { return nil }
+        guard species == .clownfish || species == .blueTang || species == .yellowTang else { return nil }
         return switch behavior {
         case .hovering:
             0.62
@@ -1108,6 +1109,8 @@ enum AquariumFishMotion {
         baseSpeed: CGFloat
     ) -> TimeInterval {
         switch species {
+        case .yellowTang:
+            return 0.20
         case .jellyfish:
             return 0.30
         case .manta:
@@ -1159,7 +1162,7 @@ enum AquariumFishMotion {
     }
 
     static func spriteAnimationPhase(for id: UUID) -> TimeInterval {
-        let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
+        let bytes = mixedIndividualBytes(for: id)
         return Double(bytes[6]) / 255 * 1.7
     }
 
@@ -1186,12 +1189,16 @@ enum AquariumFishMotion {
     }
 
     static func spriteTempoMultiplier(for id: UUID) -> TimeInterval {
-        let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
+        let bytes = mixedIndividualBytes(for: id)
         return 0.90 + Double(bytes[7]) / 255 * 0.20
     }
 
-    static func initialPosition(for id: UUID, bounds: FishRoamingBounds = .legacy) -> CGPoint {
-        let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
+    static func initialPosition(
+        for id: UUID,
+        bounds: FishRoamingBounds = .legacy,
+        viewingSessionID: UUID? = nil
+    ) -> CGPoint {
+        let bytes = mixedIndividualBytes(for: id, viewingSessionID: viewingSessionID)
         let xFraction = CGFloat(Int(bytes[0]) * 256 + Int(bytes[1])) / 65_535
         let yFraction = CGFloat(Int(bytes[2]) * 256 + Int(bytes[3])) / 65_535
         return point(xFraction: xFraction, yFraction: yFraction, bounds: bounds)
@@ -1275,6 +1282,29 @@ enum AquariumFishMotion {
         guard distance < margin else { return 0 }
         let proximity = min(max((margin - distance) / margin, 0), 1)
         return proximity * proximity
+    }
+
+    /// UUID全16バイトを既存のFNV-1aでseed化し、SplitMix64で初期値用に拡散する。
+    /// 末尾だけ異なる固定IDも全パラメータへ反映し、実行ごとに変わるhashValueは使わない。
+    private static func mixedIndividualBytes(for id: UUID, viewingSessionID: UUID? = nil) -> [UInt8] {
+        var input = withUnsafeBytes(of: id.uuid) { Array($0) }
+        if let viewingSessionID {
+            input.append(contentsOf: withUnsafeBytes(of: viewingSessionID.uuid) { Array($0) })
+        }
+        var state = seed(from: input)
+        var bytes: [UInt8] = []
+        for _ in 0..<2 {
+            state &+= 0x9E37_79B9_7F4A_7C15
+            var value = state
+            value = (value ^ (value >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            value = (value ^ (value >> 27)) &* 0x94D0_49BB_1331_11EB
+            value ^= value >> 31
+            // バイト順も固定し、CPUのエンディアンに依存しない。
+            for shift in stride(from: 0, to: 64, by: 8) {
+                bytes.append(UInt8(truncatingIfNeeded: value >> shift))
+            }
+        }
+        return bytes
     }
 
     private static func seed(from bytes: [UInt8]) -> UInt64 {

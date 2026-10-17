@@ -114,6 +114,11 @@ struct HomeView: View {
     private var storedDailyFishAcquisitionDayIdentifier = ""
     
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.aquariumFishViewingSession) private var sharedFishViewingSession
+    @StateObject private var previewFishViewingSession = AquariumFishViewingSession()
+    private var fishViewingSession: AquariumFishViewingSession {
+        sharedFishViewingSession ?? previewFishViewingSession
+    }
     @Environment(\.scenePhase) private var scenePhase
     
     @Query private var players: [Player]
@@ -235,6 +240,7 @@ struct HomeView: View {
                 ZStack(alignment: .trailing) {
                     AquariumView(
                         player: player,
+                        fishViewingSessionOverride: editorWorkingState == nil ? fishViewingSession : fishViewingSession.editingSession,
                         backgroundTheme: displayedBackgroundTheme,
                         fishSpawnPositions: fishSpawnPositions,
                         fishAppearances: fishAppearances,
@@ -242,7 +248,7 @@ struct HomeView: View {
                         onCanvasGeometryChanged: { canvasFrame = $0 },
                         onGlobalCanvasGeometryChanged: { globalCanvasFrame = $0 },
                         viewingTapRequest: aquariumViewingTapRequest,
-                        isSimulationPaused: isAquariumSimulationPaused,
+                        isSimulationPaused: isAquariumSimulationPaused || showsTimerScreen,
                         isEditing: isAquariumEditorPresented && !showsEditorLibrary,
                         isTreasureTapEnabled: !isAquariumEditorPresented,
                         defersDecorationPersistence: mode == .aquariumEditor,
@@ -449,6 +455,9 @@ struct HomeView: View {
         .onDisappear {
             homeStartTransition.reset()
             persistAquariumEditorDraft()
+            // 追加時の一時座標・演出を次の水槽表示へ持ち越さない。
+            fishSpawnPositions = [:]
+            fishAppearances = [:]
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { cancelFishDrag() }
@@ -1333,6 +1342,7 @@ struct HomeView: View {
         let initial = AquariumEditorDraft(player: player, placements: currentPlacements, background: savedBackgroundTheme)
         do { try AquariumEditorDraftStore.standard.save(initial) }
         catch { editorPersistenceError = "一時保存できませんでした。\(error.localizedDescription)"; return }
+        fishViewingSession.beginEditing()
         editorWorkingState = AquariumEditorWorkingState(official: player, placements: currentPlacements, draft: initial)
         draftBackgroundTheme = savedBackgroundTheme
         editorHistory = AquariumEditorHistory(initial: initial)
@@ -1387,6 +1397,7 @@ struct HomeView: View {
             _ = try AquariumDeveloperDecorations.seedIfNeeded(in: modelContext)
             let currentPlacements = try modelContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
             let work = AquariumEditorWorkingState(official: official, placements: currentPlacements, draft: draft)
+            fishViewingSession.beginEditing()
             editorWorkingState = work
             draftBackgroundTheme = AquariumBackgroundTheme(rawValue: draft.background)
             let current = AquariumEditorDraft(player: work.player,
@@ -1432,6 +1443,7 @@ struct HomeView: View {
             editorPersistenceError = "一時保存の削除に失敗しました。編集内容は保持しています。"
             return
         }
+        fishViewingSession.finishEditing(commit: official.activeAquariumFishIDs)
         coreTutorial?.didSaveAquarium(with: official)
         endAquariumEditorSession(selecting: nil)
     }
@@ -1439,6 +1451,7 @@ struct HomeView: View {
     private func discardAquariumEditorSession(closeEditor: Bool) {
         do { try AquariumEditorDraftStore.standard.remove() }
         catch { editorPersistenceError = "一時保存を破棄できませんでした。"; return }
+        fishViewingSession.finishEditing()
         coreTutorial?.didDiscardAquariumChanges()
         endAquariumEditorSession(selecting: nil)
     }
@@ -2000,7 +2013,7 @@ struct HomeView: View {
             if ProcessInfo.processInfo.arguments.contains("-fish-editor-ui-test"),
                ProcessInfo.processInfo.arguments.contains("-core-tutorial-in-memory"),
                initialization.player.ownedFish.isEmpty {
-                initialization.player.ownedFish = FishSpecies.allCases.filter { $0 != .blueTang }.flatMap { species in
+                initialization.player.ownedFish = FishSpecies.allCases.filter { AquariumDeveloperFish.individualIDs(for: $0).isEmpty }.flatMap { species in
                     (0..<5).map { _ in PlayerFish(species: species) }
                 }
                 initialization.player.activeAquariumFishIDs = []

@@ -4,13 +4,26 @@ import SwiftData
 /// 開発用所持は通常報酬と分離し、固定個体IDで不足分だけ追加する。
 @MainActor
 enum AquariumDeveloperFish {
+    private static let grants: [(species: FishSpecies, ids: [UUID])] = {
 #if DEBUG
-    static let individualIDs: [UUID] = (1...5).map {
-        UUID(uuidString: String(format: "B10E7A60-6A60-4A60-8A60-%012d", $0))!
-    }
+        return [
+            (.blueTang, (1...5).map {
+                UUID(uuidString: String(format: "B10E7A60-6A60-4A60-8A60-%012d", $0))!
+            }),
+            (.yellowTang, (1...5).map {
+                UUID(uuidString: String(format: "E1107A60-6A60-4A60-8A60-%012d", $0))!
+            })
+        ]
 #else
-    static let individualIDs: [UUID] = []
+        return []
 #endif
+    }()
+
+    static var individualIDs: [UUID] { grants.flatMap(\.ids) }
+
+    static func individualIDs(for species: FishSpecies) -> [UUID] {
+        grants.first { $0.species == species }?.ids ?? []
+    }
 
     @discardableResult
     static func seedIfNeeded(for player: Player, in context: ModelContext,
@@ -20,16 +33,18 @@ enum AquariumDeveloperFish {
         let stored = Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<PlayerFish>()).map { ($0.id, $0) })
         let ownedIDs = Set(original.map(\.id))
         var inserted: [PlayerFish] = []
-        for id in individualIDs where !ownedIDs.contains(id) {
-            // 保存済み個体が関係から外れていても、同じIDの個体を重複生成しない。
-            if let existing = stored[id] {
-                guard existing.species == .blueTang else { continue }
-                player.ownedFish.append(existing)
-            } else {
-                let fish = PlayerFish(id: id, species: .blueTang)
-                context.insert(fish)
-                player.ownedFish.append(fish)
-                inserted.append(fish)
+        for grant in grants {
+            for id in grant.ids where !ownedIDs.contains(id) {
+                // 保存済み個体が関係から外れていても、同じIDの個体を重複生成しない。
+                if let existing = stored[id] {
+                    guard existing.species == grant.species else { continue }
+                    player.ownedFish.append(existing)
+                } else {
+                    let fish = PlayerFish(id: id, species: grant.species)
+                    context.insert(fish)
+                    player.ownedFish.append(fish)
+                    inserted.append(fish)
+                }
             }
         }
         guard player.ownedFish.count != original.count else { return false }

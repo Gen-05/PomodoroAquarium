@@ -15,6 +15,7 @@ private struct AquariumFishSelectionRevision: Equatable {
 
 struct AquariumView: View {
     let player: Player?
+    var fishViewingSessionOverride: AquariumFishViewingSession?
     var backgroundTheme: AquariumBackgroundTheme = .aquarium
     var fishSpawnPositions: [UUID: CGPoint] = [:]
     var fishAppearances: [UUID: AquariumFishAppearance] = [:]
@@ -53,6 +54,13 @@ struct AquariumView: View {
     @State private var canvasGestureStarted = false
     @State private var originalPosition: CGPoint?
     @State private var previewPosition: CGPoint?
+    @Environment(\.aquariumFishViewingSession) private var sharedFishViewingSession
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var previewFishViewingSession = AquariumFishViewingSession()
+    private var fishViewingSession: AquariumFishViewingSession {
+        fishViewingSessionOverride ?? sharedFishViewingSession ?? previewFishViewingSession
+    }
+    private var pausesFish: Bool { isSimulationPaused || scenePhase != .active }
     @State private var fishPositions: [UUID: CGPoint] = [:]
     @State private var displayedFish: [PlayerFish] = []
 
@@ -226,7 +234,7 @@ struct AquariumView: View {
             return rect.intersects(CGRect(origin: .zero, size: size))
         }.sorted { $0.relativeY == $1.relativeY ? $0.decorationID < $1.decorationID : $0.relativeY > $1.relativeY }
         .map { AquariumTreasureChestEffects.Instance(id: $0.decorationID, direction: $0.facingDirection) }
-        return AquariumTreasureChestAnimationLayer(instances: instances, isSimulationPaused: isSimulationPaused,
+        return AquariumTreasureChestAnimationLayer(instances: instances, isSimulationPaused: pausesFish,
             tapRequest: treasureTapRequest, allowsSpecialTap: !isEditing && isTreasureTapEnabled) { frames in
             decorationContent(in: size, treasureFrames: frames)
         }
@@ -568,7 +576,7 @@ struct AquariumView: View {
     private func fishLayer(in size: CGSize) -> some View {
         TimelineView(.animation(
             minimumInterval: 1.0 / 30.0,
-            paused: isSimulationPaused
+            paused: pausesFish
         )) { timeline in
             let positionSnapshot = isSimulationPaused
                 ? AquariumFishPositionSnapshot.empty
@@ -578,6 +586,7 @@ struct AquariumView: View {
                 ForEach(displayedFish) { playerFish in
                     SwimmingFishView(
                         fishID: playerFish.id,
+                        viewingSession: fishViewingSession,
                         initialPosition: fishSpawnPositions[playerFish.id],
                         appearance: fishAppearances[playerFish.id],
                         species: playerFish.species,
@@ -596,6 +605,8 @@ struct AquariumView: View {
                     )
                 }
             }
+            // 編集の作業コピーへ切り替えるときだけViewの所有権を切り替える。
+            .id(fishViewingSession.scopeID)
         }
     }
 
@@ -825,6 +836,10 @@ struct AquariumNeighborPositions: RandomAccessCollection {
 
 struct SwimmingFishView: View {
     let fishID: UUID
+    let viewingSession: AquariumFishViewingSession?
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var ownerID = UUID()
+    @State private var isVisible = false
     let species: FishSpecies
     let appearance: AquariumFishAppearance?
     let backgroundTheme: AquariumBackgroundTheme
@@ -853,6 +868,8 @@ struct SwimmingFishView: View {
 
     init(
         fishID: UUID,
+        viewingSessionID: UUID? = nil,
+        viewingSession: AquariumFishViewingSession? = nil,
         initialPosition: CGPoint? = nil,
         appearance: AquariumFishAppearance? = nil,
         species: FishSpecies,
@@ -868,6 +885,7 @@ struct SwimmingFishView: View {
         select: @escaping () -> Void
     ) {
         self.fishID = fishID
+        self.viewingSession = viewingSession
         self.appearance = appearance
         self.species = species
         self.backgroundTheme = backgroundTheme
@@ -884,21 +902,26 @@ struct SwimmingFishView: View {
         self.spriteTempoMultiplier = AquariumFishMotion.spriteTempoMultiplier(for: fishID)
 
         let profile = AquariumFishMotion.movementProfile(for: species)
-        let initialMotion = AquariumFishMotion.initialState(
+        let bounds = profile.roamingStyle.bounds(in: aquariumSize,
+            fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite))
+        let saved = viewingSession?.snapshot(for: fishID)
+        var initialMotion = saved?.motion ?? AquariumFishMotion.initialState(
             for: fishID,
             profile: profile,
             speedVariationProfile: AquariumFishMotion.speedVariationProfile(for: species),
-            roamingBounds: profile.roamingStyle.bounds(
-                in: aquariumSize,
-                fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite)
-            ),
-            initialPosition: appearance?.spawnPosition(in: aquariumSize) ?? initialPosition
+            roamingBounds: bounds,
+            initialPosition: appearance?.spawnPosition(in: aquariumSize) ?? initialPosition,
+            viewingSessionID: viewingSession?.id ?? viewingSessionID
         )
+        initialMotion.updateRoamingBounds(bounds)
         self._motion = State(initialValue: initialMotion)
+        self._elapsedTime = State(initialValue: saved?.elapsedTime ?? 0)
+        self._appliedAppearanceStart = State(initialValue: saved?.appliedAppearanceStart)
+
         self._spriteDirectionTransition = State(
-            initialValue: FishSpriteDirectionTransition(direction: initialMotion.facingDirection)
+            initialValue: saved?.direction ?? FishSpriteDirectionTransition(direction: initialMotion.facingDirection)
         )
-        self._wingCycle = State(initialValue: AquariumFishMotion
+        self._wingCycle = State(initialValue: saved?.wing ?? AquariumFishMotion
             .wingSwimmingProfile(for: species)
             .map { _ in AquariumFishMotion.WingCycle(id: fishID, profile: .manta) })
     }
@@ -936,6 +959,17 @@ struct SwimmingFishView: View {
                 y: aquariumSize.height * renderedPosition.y
             )
             .zIndex(Double(motion.currentDepth))
+            .onAppear {
+                isVisible = true
+                resumeViewingSession()
+            }
+            .onDisappear {
+                isVisible = false
+                pauseViewingSession()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { resumeViewingSession() } else { pauseViewingSession() }
+            }
             .onChange(of: appearance?.startedAt, initial: true) { _, _ in
                 applyAppearancePositionIfNeeded()
             }
@@ -943,17 +977,18 @@ struct SwimmingFishView: View {
                 updateMotion(at: newDate)
             }
             .onChange(of: isSimulationPaused) { _, isPaused in
-                if isPaused {
-                    simulationTiming.pause()
-                }
+                if isPaused { pauseViewingSession() }
+                else { resumeViewingSession() }
             }
             .onChange(of: aquariumSize) { _, size in
                 if let appearance, appearance.progress(at: updateDate) < 1 {
                     applyAppearancePositionIfNeeded(force: true)
                 }
+                guard canUpdateSession else { return }
                 motion.updateRoamingBounds(motion.movementProfile.roamingStyle.bounds(
                     in: size, fishSize: fishSize
                 ))
+                saveViewingSession()
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(fishAccessibilityLabel)
@@ -991,8 +1026,42 @@ struct SwimmingFishView: View {
         return min(max(CGFloat((updateDate.timeIntervalSince(appearance.startedAt) - 1) / 0.2), 0), 1)
     }
 
+    private var snapshot: AquariumFishViewingSession.Snapshot {
+        .init(motion: motion, direction: spriteDirectionTransition, wing: wingCycle,
+              elapsedTime: elapsedTime, appliedAppearanceStart: appliedAppearanceStart)
+    }
+
+    private var canUpdateSession: Bool {
+        viewingSession.map { $0.isOwner(fishID, owner: ownerID) } ?? true
+    }
+
+    private func resumeViewingSession() {
+        guard isVisible, !isSimulationPaused, scenePhase == .active else { return }
+        if let viewingSession {
+            let saved = viewingSession.claim(fishID, owner: ownerID, initial: snapshot,
+                bounds: motion.movementProfile.roamingStyle.bounds(in: aquariumSize, fishSize: fishSize))
+            motion = saved.motion
+            spriteDirectionTransition = saved.direction
+            wingCycle = saved.wing
+            elapsedTime = saved.elapsedTime
+            appliedAppearanceStart = saved.appliedAppearanceStart
+        }
+        simulationTiming.pause()
+        applyAppearancePositionIfNeeded()
+        reportPosition(motion.position)
+    }
+
+    private func pauseViewingSession() {
+        simulationTiming.pause()
+        viewingSession?.release(fishID, owner: ownerID)
+    }
+
+    private func saveViewingSession() {
+        viewingSession?.update(fishID, owner: ownerID, snapshot: snapshot)
+    }
+
     private func applyAppearancePositionIfNeeded(force: Bool = false) {
-        guard let appearance, force || appliedAppearanceStart != appearance.startedAt,
+        guard canUpdateSession, let appearance, force || appliedAppearanceStart != appearance.startedAt,
               let spawn = appearanceSpawnPosition else { return }
         // initのState初期値はViewが既に存在すると採用されないため、追加イベントでも反映する。
         let profile = motion.movementProfile
@@ -1002,12 +1071,14 @@ struct SwimmingFishView: View {
             initialPosition: spawn)
         simulationTiming.pause()
         appliedAppearanceStart = appearance.startedAt
+        saveViewingSession()
     }
 
     private func updateMotion(at date: Date) {
+        guard canUpdateSession else { simulationTiming.pause(); return }
         guard let deltaTime = simulationTiming.nextDeltaTime(
             at: date,
-            isPaused: isSimulationPaused || (appearance?.progress(at: date) ?? 1) < 1
+            isPaused: isSimulationPaused || (viewingSession != nil && (!isVisible || scenePhase != .active)) || (appearance?.progress(at: date) ?? 1) < 1
         ) else { return }
         elapsedTime += min(max(deltaTime, 0), AquariumFishMotion.maximumDeltaTime)
         if var wingCycle, let wingProfile {
@@ -1036,6 +1107,7 @@ struct SwimmingFishView: View {
             toward: motion.facingDirection,
             deltaTime: deltaTime
         )
+        saveViewingSession()
         positionReportTimeRemaining -= deltaTime
         if positionReportTimeRemaining <= 0 {
             reportPosition(motion.position)
@@ -1103,7 +1175,7 @@ struct SwimmingFishView: View {
                 frameDuration: spriteFrameDuration
             )
         }
-        guard species == .manta else { return updateDate.timeIntervalSinceReferenceDate }
+        guard species == .manta else { return elapsedTime }
         guard wingCycle?.phase == .flapping else { return nil }
         return wingCycle?.flapElapsedTime
     }

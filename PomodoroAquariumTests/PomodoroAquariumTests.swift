@@ -3612,6 +3612,7 @@ struct PomodoroAquariumTests {
         let expectedScales: [FishSpecies: CGFloat] = [
             .clownfish: 0.75,
             .blueTang: 1.00,
+            .yellowTang: 0.994,
             .jellyfish: 1.00,
             .pufferfish: 1.20,
             .seahorse: 1.40,
@@ -3638,6 +3639,7 @@ struct PomodoroAquariumTests {
         let expectedImages: [FishSpecies: String] = [
             .clownfish: "fish_clownfish_side_2",
             .blueTang: "fish_blue_tang_side_2",
+            .yellowTang: "fish_yellow_tang_side_2",
             .jellyfish: "fish_moon_jellyfish",
             .pufferfish: "fish_tiger_puffer_side_3",
             .seahorse: "fish_seahorse_side_3",
@@ -3660,6 +3662,7 @@ struct PomodoroAquariumTests {
         let expectedSizes: [FishSpecies: CGFloat] = [
             .clownfish: 80,
             .blueTang: 82.82,
+            .yellowTang: 99.98,
             .jellyfish: 111.72,
             .pufferfish: 118.29,
             .seahorse: 136.06,
@@ -3712,6 +3715,7 @@ struct PomodoroAquariumTests {
         let expectedFrameCounts: [FishSpecies: Int] = [
             .clownfish: 3,
             .blueTang: 3,
+            .yellowTang: 3,
             .jellyfish: 5,
             .pufferfish: 5,
             .seahorse: 5,
@@ -3721,6 +3725,7 @@ struct PomodoroAquariumTests {
         let expectedDurations: [FishSpecies: TimeInterval] = [
             .clownfish: 0.155,
             .blueTang: 0.155,
+            .yellowTang: 0.20,
             .jellyfish: 0.30,
             .pufferfish: 0.06975,
             .seahorse: 0.28,

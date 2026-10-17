@@ -1531,6 +1531,38 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
     }
 
+    @MainActor
+    func testYellowTangDeveloperInventorySupportsNormalEditorAndHistory() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-core-tutorial-in-memory", "-timerSessionState", ""]
+        launchReturningUser(app)
+        app.buttons["mainTab.aquarium"].tap()
+        app.buttons["aquariumEditor.start"].tap()
+        app.alerts["水槽を編集しますか？"].buttons["編集する"].tap()
+        app.buttons["aquariumEditor.category.fish"].tap()
+        let card = app.buttons["aquariumEditor.dragFish.yellowTang"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(card.label.contains("所持 5匹"))
+        card.tap()
+        let swimming = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "aquarium.fish."))
+        XCTAssertTrue(swimming.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(swimming.count, 1)
+        app.buttons["aquariumEditor.undo"].tap()
+        XCTAssertTrue(swimming.firstMatch.waitForNonExistence(timeout: 5))
+        app.buttons["aquariumEditor.redo"].tap()
+        XCTAssertTrue(swimming.firstMatch.waitForExistence(timeout: 5))
+        app.buttons["aquariumEditor.category.fish"].tap()
+        app.buttons["水槽にいる魚"].tap()
+        let store = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "aquariumEditor.storeFish.")).firstMatch
+        XCTAssertTrue(store.waitForExistence(timeout: 5))
+        store.tap()
+        app.buttons["aquariumEditor.closeLibrary"].tap()
+        XCTAssertTrue(swimming.firstMatch.waitForNonExistence(timeout: 5))
+        app.buttons["aquariumEditor.cancel"].tap()
+        app.alerts["編集内容を破棄しますか？"].buttons["変更を破棄"].tap()
+        XCTAssertTrue(app.buttons["aquariumEditor.start"].waitForExistence(timeout: 5))
+    }
+
 #endif
 
     @MainActor

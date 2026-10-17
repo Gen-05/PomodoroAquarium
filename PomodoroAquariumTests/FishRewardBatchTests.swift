@@ -5,19 +5,20 @@ import Testing
 
 @MainActor
 struct FishRewardBatchTests {
-    @Test func blueTangCanBeClaimedThroughTheNormalRewardPipelineExactlyOnce() throws {
+    @Test(arguments: [FishSpecies.blueTang, .yellowTang])
+    func tangCanBeClaimedThroughTheNormalRewardPipelineExactlyOnce(species: FishSpecies) throws {
         let fixture = try BatchFixture()
         let id = try fixture.process(seconds: 1500)
         let batch = try #require(try fixture.grant(id) { probabilities in
             #expect(probabilities.common == 70)
-            // 通常の候補からナンヨウハギを選び、抽選後は本番と同じ付与・履歴経路を通す。
-            return FishSpecies.allCases.filter { $0.rarity == .common }.first { $0 == .blueTang }
+            // 通常の候補から対象のハギを選び、抽選後は本番と同じ付与・履歴経路を通す。
+            return FishSpecies.allCases.filter { $0.rarity == .common }.first { $0 == species }
         })
-        #expect(batch.results.map(\.species) == [.blueTang])
+        #expect(batch.results.map(\.species) == [species])
         #expect(fixture.player.ownedFish.count == 1)
-        #expect(try fixture.grant(id) { _ in .blueTang } == nil)
+        #expect(try fixture.grant(id) { _ in species } == nil)
         let entries = try fixture.context.fetch(FetchDescriptor<RewardHistoryEntry>())
-        #expect(entries.count == 1 && entries.first?.fishSpeciesRawValue == "blueTang")
+        #expect(entries.count == 1 && entries.first?.fishSpeciesRawValue == species.rawValue)
         #expect(fixture.player.dailyClaimedFishCount == 1 && fixture.player.coins == 80)
     }
 

@@ -15,6 +15,8 @@ enum BookFishThumbnailLayout {
     /// 水槽用のdisplayScaleとは独立した一覧専用値。
     static func imageScale(for species: FishSpecies) -> CGFloat {
         switch species {
+        case .yellowTang:
+            0.994
         case .blueTang:
             1.00
         case .clownfish:
