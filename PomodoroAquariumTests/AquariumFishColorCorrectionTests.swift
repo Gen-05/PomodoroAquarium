@@ -54,7 +54,7 @@ struct AquariumFishColorCorrectionTests {
         }
     }
 
-    private let targetSpecies: [FishSpecies] = [.blueTang, .yellowTang, .blueGreenChromis]
+    private let targetSpecies: [FishSpecies] = [.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish]
 
     // 今回の変更前の値を独立して保持。比較・回帰検証に現在の値を流用しない。
     private func legacy(_ theme: AquariumBackgroundTheme, _ species: FishSpecies) -> AquariumFishColorCorrection {
@@ -76,7 +76,8 @@ struct AquariumFishColorCorrectionTests {
 
     @Test func renderThreeFishOnAllActualBackgroundsAtMatchedPositionsAndSizes() throws {
         for theme in [AquariumBackgroundTheme.aquarium, .tropical, .deepSea] {
-            let speciesList = targetSpecies + [.clownfish]
+            // ハタタテダイは専用テストで別画像へ出力し、縦連結が描画上限を超えないようにする。
+            let speciesList = targetSpecies.filter { $0 != .pennantCoralfish } + [.clownfish]
             let full = ImageRenderer(content: VStack(spacing: 0) {
                 ForEach(speciesList, id: \.self) { species in
                     HStack(spacing: 0) {
@@ -142,7 +143,13 @@ struct AquariumFishColorCorrectionTests {
             (.tropical, .blueGreenChromis, [0.96, -0.025, 0.99, 1, 0.96, 1.12]),
             (.deepSea, .blueTang, [0.90, -0.040, 0.90, 0.95, 1, 1.04]),
             (.deepSea, .yellowTang, [0.86, -0.045, 0.94, 0.94, 0.98, 1]),
-            (.deepSea, .blueGreenChromis, [0.92, -0.045, 0.92, 0.97, 1, 1.04])
+            (.deepSea, .blueGreenChromis, [0.92, -0.045, 0.92, 0.97, 1, 1.04]),
+            (.aquarium, .orientalButterflyfish, [0.86, -0.015, 0.97, 0.99, 1, 1.02]),
+            (.tropical, .orientalButterflyfish, [0.84, -0.020, 1, 0.99, 0.97, 1.03]),
+            (.deepSea, .orientalButterflyfish, [0.86, -0.045, 0.94, 0.94, 0.98, 1.02]),
+            (.aquarium, .pennantCoralfish, [0.86, -0.025, 0.91, 0.95, 0.99, 0.98]),
+            (.tropical, .pennantCoralfish, [0.84, -0.035, 0.92, 0.95, 0.97, 0.97]),
+            (.deepSea, .pennantCoralfish, [0.88, -0.040, 0.86, 0.92, 1, 0.98])
         ]
         for (theme, species, values) in expected {
             let c = AquariumFishColorCorrection.correction(for: theme, species: species)

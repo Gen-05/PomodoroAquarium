@@ -13,7 +13,7 @@ struct BlueTangTests {
         #expect(FishSpecies.blueTang.rarity == .common)
         #expect(FishSpecies.blueTang.imageName == "fish_blue_tang_side_2")
         #expect(FishSpecies.blueTang.swimmingImageNames == (1...3).map { "fish_blue_tang_side_\($0)" })
-        let ids = ["clownfish", "jellyfish", "pufferfish", "seahorse", "manta", "whaleShark", "blueTang", "yellowTang", "blueGreenChromis"]
+        let ids = ["clownfish", "jellyfish", "pufferfish", "seahorse", "manta", "whaleShark", "blueTang", "yellowTang", "blueGreenChromis", "orientalButterflyfish", "pennantCoralfish"]
         #expect(FishSpecies.allCases.map(\.rawValue) == ids)
         for id in ids {
             let data = Data("\"\(id)\"".utf8)
@@ -29,13 +29,13 @@ struct BlueTangTests {
 
     @Test func commonPoolAndRarityProbabilitiesRemainUniform() {
         let common = FishSpecies.allCases.filter { $0.rarity == .common }
-        #expect(Set(common) == [.clownfish, .jellyfish, .pufferfish, .blueTang, .yellowTang, .blueGreenChromis])
+        #expect(Set(common) == [.clownfish, .jellyfish, .pufferfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish])
         for (minutes, expected) in [(0, [70.0, 20, 8, 2]), (180, [58.0, 25, 13, 4]), (300, [58.0, 25, 13, 4])] {
             let probabilities = FishRewardService.rarityProbabilities(for: minutes)
             #expect([probabilities.common, probabilities.rare, probabilities.epic, probabilities.legendary] == expected)
             #expect(probabilities.total == 100)
             for species in common {
-                #expect(probabilities.probability(for: species.rarity) / Double(common.count) == (minutes == 0 ? 70.0 / 6 : 58.0 / 6))
+                #expect(probabilities.probability(for: species.rarity) / Double(common.count) == (minutes == 0 ? 70.0 / 8 : 58.0 / 8))
             }
         }
         #expect(FishSpecies.allCases.filter { $0.rarity == .rare } == [.seahorse])
@@ -97,7 +97,7 @@ struct BlueTangTests {
         print("Book visible fish width at 3x: blueTang \(Double(bookBlue) / 3)pt, clownfish \(Double(bookClown) / 3)pt")
     }
 
-    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis])
+    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish])
     func developerFiveAreDistinctIdempotentAndDoNotTouchRewards(regularSpecies: FishSpecies) throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -114,9 +114,9 @@ struct BlueTangTests {
         #expect(try AquariumDeveloperFish.seedIfNeeded(for: player, in: context, enabled: false) == false)
         let changed = try AquariumDeveloperFish.seedIfNeeded(for: player, in: context)
 #if DEBUG
-        #expect(changed && AquariumDeveloperFish.individualIDs.count == 15)
-        #expect(player.ownedFish.count == 17)
-        #expect(Set(player.ownedFish.map(\.id)).count == 17)
+        #expect(changed && AquariumDeveloperFish.individualIDs.count == 25)
+        #expect(player.ownedFish.count == 27)
+        #expect(Set(player.ownedFish.map(\.id)).count == 27)
         #expect(Set(player.ownedFish.filter { $0.id != regular.id && $0.species == .blueTang }.map(\.id)) == Set(AquariumDeveloperFish.individualIDs(for: .blueTang)))
         #expect(Set(player.ownedFish.filter { $0.id != regular.id && $0.species == .yellowTang }.map(\.id))
             == Set(AquariumDeveloperFish.individualIDs(for: .yellowTang)))
@@ -124,6 +124,12 @@ struct BlueTangTests {
         #expect(Set(player.ownedFish.filter { $0.id != regular.id && $0.species == .blueGreenChromis }.map(\.id))
             == Set(AquariumDeveloperFish.individualIDs(for: .blueGreenChromis)))
         #expect(AquariumDeveloperFish.individualIDs(for: .blueGreenChromis).count == 5)
+        #expect(Set(player.ownedFish.filter { $0.id != regular.id && $0.species == .orientalButterflyfish }.map(\.id))
+            == Set(AquariumDeveloperFish.individualIDs(for: .orientalButterflyfish)))
+        #expect(AquariumDeveloperFish.individualIDs(for: .orientalButterflyfish).count == 5)
+        #expect(Set(player.ownedFish.filter { $0.id != regular.id && $0.species == .pennantCoralfish }.map(\.id))
+            == Set(AquariumDeveloperFish.individualIDs(for: .pennantCoralfish)))
+        #expect(AquariumDeveloperFish.individualIDs(for: .pennantCoralfish).count == 5)
         let testID = try #require(AquariumDeveloperFish.individualIDs(for: regularSpecies).first)
         #expect(player.addFishToAquarium(playerFishID: testID))
 #else
@@ -155,11 +161,11 @@ struct BlueTangTests {
     @Test func blueTangAndExistingFishPersistInTheSameStore() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("BlueTang-\(UUID()).store")
         defer { for suffix in ["", "-shm", "-wal"] { try? FileManager.default.removeItem(atPath: url.path + suffix) } }
-        let ids = [UUID(), UUID(), UUID(), UUID()]
+        let ids = [UUID(), UUID(), UUID(), UUID(), UUID(), UUID()]
         do {
             let container = try makeContainer(url: url)
-            let player = Player(ownedFish: [PlayerFish(id: ids[0], species: .blueTang), PlayerFish(id: ids[1], species: .clownfish), PlayerFish(id: ids[2], species: .yellowTang), PlayerFish(id: ids[3], species: .blueGreenChromis)],
-                activeAquariumFishIDs: [ids[0], ids[3]], hasInitializedActiveAquariumFish: true)
+            let player = Player(ownedFish: [PlayerFish(id: ids[0], species: .blueTang), PlayerFish(id: ids[1], species: .clownfish), PlayerFish(id: ids[2], species: .yellowTang), PlayerFish(id: ids[3], species: .blueGreenChromis), PlayerFish(id: ids[4], species: .orientalButterflyfish), PlayerFish(id: ids[5], species: .pennantCoralfish)],
+                activeAquariumFishIDs: [ids[0], ids[3], ids[4], ids[5]], hasInitializedActiveAquariumFish: true)
             container.mainContext.insert(player)
             try container.mainContext.save()
             _ = try AquariumDeveloperFish.seedIfNeeded(for: player, in: container.mainContext)
@@ -171,8 +177,10 @@ struct BlueTangTests {
         #expect(restored.ownedFish.first { $0.id == ids[0] }?.species == .blueTang)
         #expect(restored.ownedFish.first { $0.id == ids[2] }?.species == .yellowTang)
         #expect(restored.ownedFish.first { $0.id == ids[3] }?.species == .blueGreenChromis)
+        #expect(restored.ownedFish.first { $0.id == ids[4] }?.species == .orientalButterflyfish)
+        #expect(restored.ownedFish.first { $0.id == ids[5] }?.species == .pennantCoralfish)
         #expect(restored.ownedFish.first { $0.id == ids[1] }?.species == .clownfish)
-        #expect(restored.activeAquariumFishIDs == [ids[0], ids[3]])
+        #expect(restored.activeAquariumFishIDs == [ids[0], ids[3], ids[4], ids[5]])
     }
 
     private func makeContainer(url: URL? = nil) throws -> ModelContainer {

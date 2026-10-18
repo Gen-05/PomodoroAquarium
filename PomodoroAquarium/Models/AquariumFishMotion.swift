@@ -1056,7 +1056,7 @@ enum AquariumFishMotion {
 
     static func movementProfile(for species: FishSpecies) -> FishMovementProfile {
         switch species {
-        case .clownfish, .blueTang, .yellowTang, .blueGreenChromis:
+        case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish:
             .clownfish
         case .jellyfish:
             .jellyfish
@@ -1085,7 +1085,7 @@ enum AquariumFishMotion {
         for species: FishSpecies,
         behavior: Behavior
     ) -> CGFloat? {
-        guard species == .clownfish || species == .blueTang || species == .yellowTang || species == .blueGreenChromis else { return nil }
+        guard species == .clownfish || species == .blueTang || species == .yellowTang || species == .blueGreenChromis || species == .orientalButterflyfish || species == .pennantCoralfish else { return nil }
         return switch behavior {
         case .hovering:
             0.62
@@ -1109,7 +1109,7 @@ enum AquariumFishMotion {
         baseSpeed: CGFloat
     ) -> TimeInterval {
         switch species {
-        case .yellowTang, .blueGreenChromis:
+        case .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish:
             return 0.20
         case .jellyfish:
             return 0.30

@@ -714,6 +714,12 @@ enum AquariumFishSizing {
     static func displaySize(for species: FishSpecies, isFavorite _: Bool) -> CGFloat {
         let adjustment: CGFloat
         switch species {
+        case .pennantCoralfish:
+            // 背びれを除く横幅で合わせた初期サイズから、水槽内だけ10%拡大する。
+            adjustment = (1164.0 / 1065) * 1.10
+        case .orientalButterflyfish:
+            // 基準フレームの可視横幅1192pxを、キイロハギの1164pxに揃える。
+            adjustment = 1164.0 / 1192
         case .blueTang, .pufferfish: adjustment = 1.10
         case .seahorse: adjustment = 0.95
         default: adjustment = 1

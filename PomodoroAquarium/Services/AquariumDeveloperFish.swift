@@ -15,6 +15,12 @@ enum AquariumDeveloperFish {
             }),
             (.blueGreenChromis, (1...5).map {
                 UUID(uuidString: String(format: "C470A115-6A60-4A60-8A60-%012d", $0))!
+            }),
+            (.orientalButterflyfish, (1...5).map {
+                UUID(uuidString: String(format: "B077E2F1-6A60-4A60-8A60-%012d", $0))!
+            }),
+            (.pennantCoralfish, (1...5).map {
+                UUID(uuidString: String(format: "F1A77A7E-6A60-4A60-8A60-%012d", $0))!
             })
         ]
 #else

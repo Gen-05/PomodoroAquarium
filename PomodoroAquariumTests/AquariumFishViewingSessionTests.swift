@@ -18,7 +18,7 @@ struct AquariumFishViewingSessionTests {
                          CGSize(width: 1024, height: 768)] {
                 let bounds = profile.roamingStyle.bounds(in: size,
                     fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: false))
-                let prefix = species == .blueGreenChromis ? "C470A115" : species == .yellowTang ? "E1107A60" : "B10E7A60"
+                let prefix = species == .pennantCoralfish ? "F1A77A7E" : species == .orientalButterflyfish ? "B077E2F1" : species == .blueGreenChromis ? "C470A115" : species == .yellowTang ? "E1107A60" : "B10E7A60"
                 let ids = (1...5).map {
                     UUID(uuidString: String(format: "\(prefix)-6A60-4A60-8A60-%012d", $0))!
                 }
@@ -182,7 +182,7 @@ struct AquariumFishViewingSessionTests {
         #expect(adjusted.elapsedTime == 8)
     }
 
-    @Test(arguments: [FishSpecies.blueTang, .blueGreenChromis])
+    @Test(arguments: [FishSpecies.blueTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish])
     func actualFishViewsResumeAcrossRemountBackgroundAndCentralAddition(species: FishSpecies) async throws {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = try #require(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
@@ -249,7 +249,9 @@ struct AquariumFishViewingSessionTests {
 private final class ViewingSessionRenderProbe: ObservableObject {
     let species: FishSpecies
     init(species: FishSpecies) { self.species = species }
-    var ids: [UUID] { [UUID(uuidString: species == .blueGreenChromis
+    var ids: [UUID] { [UUID(uuidString: species == .pennantCoralfish
+        ? "F1A77A7E-6A60-4A60-8A60-000000000001" : species == .orientalButterflyfish
+        ? "B077E2F1-6A60-4A60-8A60-000000000001" : species == .blueGreenChromis
         ? "C470A115-6A60-4A60-8A60-000000000001" : "B10E7A60-6A60-4A60-8A60-000000000001")!,
                UUID(uuidString: "E1107A60-6A60-4A60-8A60-000000000002")!] }
     @Published var screen = 0

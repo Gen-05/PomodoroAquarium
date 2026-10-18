@@ -45,6 +45,10 @@ enum FishDetailImageLayout {
     /// 透明余白だけを考慮し、displayScaleによる体格差はpreferredDisplaySizeで扱う。
     static func visibleContentRatio(for species: FishSpecies) -> CGSize {
         switch species {
+        case .pennantCoralfish:
+            CGSize(width: 0.876, height: 0.874)
+        case .orientalButterflyfish:
+            CGSize(width: 0.951, height: 0.686)
         case .blueGreenChromis:
             CGSize(width: 0.916, height: 0.486)
         case .yellowTang:
