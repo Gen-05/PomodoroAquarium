@@ -1086,7 +1086,7 @@ enum AquariumFishMotion {
         switch species {
         case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish:
             .clownfish
-        case .lionfish:
+        case .lionfish, .porcupinefish:
             .lionfish
         case .jellyfish:
             .jellyfish
@@ -1115,7 +1115,7 @@ enum AquariumFishMotion {
         for species: FishSpecies,
         behavior: Behavior
     ) -> CGFloat? {
-        guard species == .clownfish || species == .blueTang || species == .yellowTang || species == .blueGreenChromis || species == .orientalButterflyfish || species == .pennantCoralfish || species == .lionfish else { return nil }
+        guard species == .clownfish || species == .blueTang || species == .yellowTang || species == .blueGreenChromis || species == .orientalButterflyfish || species == .pennantCoralfish || species == .lionfish || species == .porcupinefish else { return nil }
         return switch behavior {
         case .hovering:
             0.62
@@ -1134,7 +1134,7 @@ enum AquariumFishMotion {
 
     /// 体の揺れ・傾きだけを調整し、移動速度やひれのテンポから独立させる。
     static func presentationAmplitude(for species: FishSpecies) -> CGFloat {
-        species == .lionfish ? 0.45 : 1
+        (species == .lionfish || species == .porcupinefish) ? 0.45 : 1
     }
 
     static func spriteFrameDuration(
@@ -1146,6 +1146,8 @@ enum AquariumFishMotion {
         switch species {
         case .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish:
             return 0.20
+        case .porcupinefish:
+            return AquariumPorcupinefishInflation.swimmingFrameDuration
         case .jellyfish:
             return 0.30
         case .manta:
@@ -1340,6 +1342,10 @@ enum AquariumFishMotion {
             }
         }
         return bytes
+    }
+
+    static func individualSeed(for id: UUID) -> UInt64 {
+        seed(from: mixedIndividualBytes(for: id))
     }
 
     private static func seed(from bytes: [UInt8]) -> UInt64 {

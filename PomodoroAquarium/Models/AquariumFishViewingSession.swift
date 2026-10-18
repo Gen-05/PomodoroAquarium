@@ -21,12 +21,15 @@ final class AquariumFishViewingSession: ObservableObject {
         var wing: AquariumFishMotion.WingCycle?
         var elapsedTime: TimeInterval = 0
         var appliedAppearanceStart: Date?
+        var inflation: AquariumPorcupinefishInflation.State?
     }
 
     let id: UUID
     let scopeID = UUID()
     private var snapshots: [UUID: Snapshot] = [:]
     private var owners: [UUID: UUID] = [:]
+    private var inflationRequests: Set<UUID> = []
+    private(set) var handledViewingTapToken: UUID?
     private(set) var editingSession: AquariumFishViewingSession?
 
     init(id: UUID = UUID()) { self.id = id }
@@ -56,10 +59,41 @@ final class AquariumFishViewingSession: ObservableObject {
         owners[fishID] = nil
     }
 
+    /// 描画側の所有者だけが消費するコマンド。古いSnapshotで新しい泳ぎを上書きしない。
+    @discardableResult
+    func requestInflation(for fishID: UUID) -> Bool {
+        guard owners[fishID] != nil, snapshots[fishID]?.inflation?.canRequest == true,
+              !inflationRequests.contains(fishID) else { return false }
+        inflationRequests.insert(fishID)
+        return true
+    }
+
+    func takeInflationRequest(for fishID: UUID, owner: UUID) -> Bool {
+        guard isOwner(fishID, owner: owner) else { return false }
+        return inflationRequests.remove(fishID) != nil
+    }
+
+    func handleViewingTap(token: UUID, fishID: UUID, owner: UUID) {
+        guard handledViewingTapToken != token, isOwner(fishID, owner: owner) else { return }
+        handledViewingTapToken = token // 膨張中のタップも宝箱へ通さない。
+        requestInflation(for: fishID)
+    }
+
+    /// 画面遷移のreleaseでは残すが、収納・削除した個体の膨張処理は破棄する。
+    func stopInflation(except activeIDs: Set<UUID>) {
+        let removed = snapshots.keys.filter { !activeIDs.contains($0) && snapshots[$0]?.inflation != nil }
+        for id in removed {
+            snapshots[id] = nil
+            owners[id] = nil
+            inflationRequests.remove(id)
+        }
+    }
+
     func beginEditing() {
         guard editingSession == nil else { return }
         let editing = AquariumFishViewingSession(id: id)
         editing.snapshots = snapshots
+        editing.inflationRequests = inflationRequests
         editingSession = editing
     }
 
@@ -71,6 +105,8 @@ final class AquariumFishViewingSession: ObservableObject {
             }
             // 保存前のViewが、保存後の泳ぎを上書きできないよう更新権を破棄する。
             owners.removeAll()
+            inflationRequests.removeAll()
+            stopInflation(except: Set(activeIDs))
         }
         editing.owners.removeAll()
         editingSession = nil

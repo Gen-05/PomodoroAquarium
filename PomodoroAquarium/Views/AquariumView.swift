@@ -119,7 +119,17 @@ struct AquariumView: View {
         }
         .onChange(of: viewingTapRequest?.token) { _, _ in
             guard let request = viewingTapRequest else { return }
-            triggerTreasureTap(at: request.point, in: request.aquariumSize)
+            if displayedFish.contains(where: { $0.species == .porcupinefish }) {
+                // 子Viewが実際の魚体へhit testした後、通過したタップだけ宝箱へ渡す。
+                Task { @MainActor in
+                    await Task.yield()
+                    guard viewingTapRequest?.token == request.token,
+                          fishViewingSession.handledViewingTapToken != request.token else { return }
+                    triggerTreasureTap(at: request.point, in: request.aquariumSize)
+                }
+            } else {
+                triggerTreasureTap(at: request.point, in: request.aquariumSize)
+            }
         }
         .onChange(of: isEditing) { _, newValue in
             if !newValue {
@@ -177,6 +187,7 @@ struct AquariumView: View {
         }
 
         let activeFish = player.activeAquariumFish
+        fishViewingSession.stopInflation(except: Set(activeFish.map(\.id)))
         if activeFish.map(\.id) != displayedFishIDs {
             displayedFish = activeFish
         }
@@ -589,6 +600,7 @@ struct AquariumView: View {
                         viewingSession: fishViewingSession,
                         initialPosition: fishSpawnPositions[playerFish.id],
                         appearance: fishAppearances[playerFish.id],
+                        viewingTapRequest: viewingTapRequest,
                         species: playerFish.species,
                         backgroundTheme: backgroundTheme,
                         isFavorite: false,
@@ -714,6 +726,9 @@ enum AquariumFishSizing {
     static func displaySize(for species: FishSpecies, isFavorite _: Bool) -> CGFloat {
         let adjustment: CGFloat
         switch species {
+        case .porcupinefish:
+            // neutralの可視全長をトラフグ（607/768）に合わせる。膨張中も同じ描画枠。
+            adjustment = 1.10 * (607.0 / 768) / (1157.0 / 1254)
         case .lionfish:
             // 初期サイズの1.6332875倍（直前の1.71925倍から5%縮小）。水槽内だけに適用。
             adjustment = (949.0 / 861) * 1.6332875
@@ -857,6 +872,7 @@ struct SwimmingFishView: View {
     @State private var isVisible = false
     let species: FishSpecies
     let appearance: AquariumFishAppearance?
+    let viewingTapRequest: AquariumTreasureChestTapLocation?
     let backgroundTheme: AquariumBackgroundTheme
     let isFavorite: Bool
     let aquariumSize: CGSize
@@ -877,6 +893,7 @@ struct SwimmingFishView: View {
     @State private var motion: AquariumFishMotion.State
     @State private var spriteDirectionTransition: FishSpriteDirectionTransition
     @State private var wingCycle: AquariumFishMotion.WingCycle?
+    @State private var inflation: AquariumPorcupinefishInflation.State?
     @State private var simulationTiming = AquariumSimulationTiming()
     @State private var elapsedTime: TimeInterval = 0
     @State private var positionReportTimeRemaining: TimeInterval = 0
@@ -887,6 +904,7 @@ struct SwimmingFishView: View {
         viewingSession: AquariumFishViewingSession? = nil,
         initialPosition: CGPoint? = nil,
         appearance: AquariumFishAppearance? = nil,
+        viewingTapRequest: AquariumTreasureChestTapLocation? = nil,
         species: FishSpecies,
         backgroundTheme: AquariumBackgroundTheme,
         isFavorite: Bool,
@@ -902,6 +920,7 @@ struct SwimmingFishView: View {
         self.fishID = fishID
         self.viewingSession = viewingSession
         self.appearance = appearance
+        self.viewingTapRequest = viewingTapRequest
         self.species = species
         self.backgroundTheme = backgroundTheme
         self.isFavorite = isFavorite
@@ -930,6 +949,7 @@ struct SwimmingFishView: View {
         )
         initialMotion.updateRoamingBounds(bounds)
         self._motion = State(initialValue: initialMotion)
+        self._inflation = State(initialValue: saved?.inflation ?? (species == .porcupinefish ? .init(id: fishID) : nil))
         self._elapsedTime = State(initialValue: saved?.elapsedTime ?? 0)
         self._appliedAppearanceStart = State(initialValue: saved?.appliedAppearanceStart)
 
@@ -957,14 +977,14 @@ struct SwimmingFishView: View {
                 .opacity(Double(appearance == nil ? 1 : 0.15 + 0.85 * appearanceProgress))
         }
             .frame(width: selectionHitTargetSize, height: selectionHitTargetSize)
-            .contentShape(isSelectionEnabled ? AquariumFishHitTesting.path(
+            .contentShape(isSelectionEnabled || acceptsInflationTap ? AquariumFishHitTesting.path(
                 image: fishSprite.interactionImage, canvasSize: selectionHitTargetSize,
                 fishSize: fishSize, horizontalScale: fishSprite.resolvedHorizontalScale) : Path())
             .onTapGesture {
-                guard isSelectionEnabled else { return }
-                select()
+                if isSelectionEnabled { select() }
+                requestInflation()
             }
-            .allowsHitTesting(isSelectionEnabled)
+            .allowsHitTesting(isSelectionEnabled || acceptsInflationTap)
             .rotationEffect(.degrees(swimRotation + smallFishDirectionRotation))
             .scaleEffect(x: 1, y: swimVerticalScale)
             .offset(y: swimVerticalOffset * appearanceOffsetProgress)
@@ -987,6 +1007,13 @@ struct SwimmingFishView: View {
             }
             .onChange(of: appearance?.startedAt, initial: true) { _, _ in
                 applyAppearancePositionIfNeeded()
+            }
+            .onChange(of: viewingTapRequest?.token) { _, _ in
+                guard let request = viewingTapRequest, acceptsInflationTap,
+                      containsViewingTap(request) else { return }
+                if let viewingSession {
+                    viewingSession.handleViewingTap(token: request.token, fishID: fishID, owner: ownerID)
+                } else { requestInflation() }
             }
             .onChange(of: updateDate) { _, newDate in
                 updateMotion(at: newDate)
@@ -1043,7 +1070,7 @@ struct SwimmingFishView: View {
 
     private var snapshot: AquariumFishViewingSession.Snapshot {
         .init(motion: motion, direction: spriteDirectionTransition, wing: wingCycle,
-              elapsedTime: elapsedTime, appliedAppearanceStart: appliedAppearanceStart)
+              elapsedTime: elapsedTime, appliedAppearanceStart: appliedAppearanceStart, inflation: inflation)
     }
 
     private var canUpdateSession: Bool {
@@ -1058,6 +1085,7 @@ struct SwimmingFishView: View {
             motion = saved.motion
             spriteDirectionTransition = saved.direction
             wingCycle = saved.wing
+            inflation = saved.inflation
             elapsedTime = saved.elapsedTime
             appliedAppearanceStart = saved.appliedAppearanceStart
         }
@@ -1085,6 +1113,7 @@ struct SwimmingFishView: View {
             roamingBounds: profile.roamingStyle.bounds(in: aquariumSize, fishSize: fishSize),
             initialPosition: spawn)
         simulationTiming.pause()
+        if species == .porcupinefish { inflation = .init(id: fishID) }
         appliedAppearanceStart = appearance.startedAt
         saveViewingSession()
     }
@@ -1095,6 +1124,10 @@ struct SwimmingFishView: View {
             at: date,
             isPaused: isSimulationPaused || (viewingSession != nil && (!isVisible || scenePhase != .active)) || (appearance?.progress(at: date) ?? 1) < 1
         ) else { return }
+        if viewingSession?.takeInflationRequest(for: fishID, owner: ownerID) == true {
+            inflation?.request()
+        }
+        inflation?.advance(deltaTime: min(deltaTime, AquariumFishMotion.maximumDeltaTime))
         elapsedTime += min(max(deltaTime, 0), AquariumFishMotion.maximumDeltaTime)
         if var wingCycle, let wingProfile {
             wingCycle.advance(
@@ -1109,7 +1142,7 @@ struct SwimmingFishView: View {
             deltaTime: deltaTime,
             elapsedTime: elapsedTime,
             neighborPositions: neighborPositions,
-            speedMultiplier: wingSpeedMultiplier,
+            speedMultiplier: wingSpeedMultiplier * (inflation?.speedMultiplier ?? 1),
             behaviorTargetSpeedMultiplier: AquariumFishMotion.behaviorTargetSpeedMultiplier(
                 for: species,
                 behavior: motion.behavior
@@ -1140,10 +1173,11 @@ struct SwimmingFishView: View {
             facingDirection: motion.facingDirection,
             spritePose: spriteDirectionTransition.pose,
             facingHorizontalScale: motion.facingHorizontalScale,
-            animationTime: spriteAnimationTime,
+            animationTime: inflation == nil ? spriteAnimationTime : nil,
             animationFrameDuration: spriteFrameDuration,
             animationPhase: species == .manta || species == .seahorse ? 0 : spriteAnimationPhase,
-            fixedAnimationFrameIndex: fixedSpriteFrameIndex
+            fixedAnimationFrameIndex: fixedSpriteFrameIndex,
+            runtimeImageName: inflation?.imageName
         )
     }
 
@@ -1156,8 +1190,34 @@ struct SwimmingFishView: View {
     }
 
     private var selectionHitTargetSize: CGFloat {
-        guard isSelectionEnabled else { return fishSize }
+        guard isSelectionEnabled || acceptsInflationTap else { return fishSize }
         return max(fishSize + 20, 56)
+    }
+
+    private var acceptsInflationTap: Bool {
+        species == .porcupinefish && isVisible && !isSimulationPaused && scenePhase == .active && canUpdateSession
+    }
+
+    private func requestInflation() {
+        guard acceptsInflationTap else { return }
+        if let viewingSession { viewingSession.requestInflation(for: fishID) }
+        else { inflation?.request() }
+    }
+
+    /// Homeの操作表示用overlayからの座標を、描画と同じ変換の逆順で魚体へ戻す。
+    private func containsViewingTap(_ request: AquariumTreasureChestTapLocation) -> Bool {
+        guard request.aquariumSize.width > 0, request.aquariumSize.height > 0 else { return false }
+        let point = CGPoint(x: request.point.x * aquariumSize.width / request.aquariumSize.width,
+                            y: request.point.y * aquariumSize.height / request.aquariumSize.height)
+        let x = point.x - aquariumSize.width * renderedPosition.x
+        let y = (point.y - aquariumSize.height * renderedPosition.y
+                 - swimVerticalOffset * appearanceOffsetProgress) / swimVerticalScale
+        let angle = -(swimRotation + smallFishDirectionRotation) * .pi / 180
+        let local = CGPoint(x: x * cos(angle) - y * sin(angle) + selectionHitTargetSize / 2,
+                            y: x * sin(angle) + y * cos(angle) + selectionHitTargetSize / 2)
+        return AquariumFishHitTesting.path(image: fishSprite.interactionImage,
+            canvasSize: selectionHitTargetSize, fishSize: fishSize,
+            horizontalScale: fishSprite.resolvedHorizontalScale).contains(local)
     }
 
     private var fishAccessibilityLabel: String {

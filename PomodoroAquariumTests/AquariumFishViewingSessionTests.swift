@@ -18,7 +18,7 @@ struct AquariumFishViewingSessionTests {
                          CGSize(width: 1024, height: 768)] {
                 let bounds = profile.roamingStyle.bounds(in: size,
                     fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: false))
-                let prefix = species == .lionfish ? "110F15A0" : species == .pennantCoralfish ? "F1A77A7E" : species == .orientalButterflyfish ? "B077E2F1" : species == .blueGreenChromis ? "C470A115" : species == .yellowTang ? "E1107A60" : "B10E7A60"
+                let prefix = species == .porcupinefish ? "B0C0F15A" : species == .lionfish ? "110F15A0" : species == .pennantCoralfish ? "F1A77A7E" : species == .orientalButterflyfish ? "B077E2F1" : species == .blueGreenChromis ? "C470A115" : species == .yellowTang ? "E1107A60" : "B10E7A60"
                 let ids = (1...5).map {
                     UUID(uuidString: String(format: "\(prefix)-6A60-4A60-8A60-%012d", $0))!
                 }
@@ -182,12 +182,26 @@ struct AquariumFishViewingSessionTests {
         #expect(adjusted.elapsedTime == 8)
     }
 
-    @Test(arguments: [FishSpecies.blueTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish])
+    @Test(arguments: [FishSpecies.blueTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish])
     func actualFishViewsResumeAcrossRemountBackgroundAndCentralAddition(species: FishSpecies) async throws {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = try #require(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
         let session = AquariumFishViewingSession(id: firstSession)
         let probe = ViewingSessionRenderProbe(species: species)
+        if species == .porcupinefish {
+            let id = probe.ids[0], owner = UUID()
+            let profile = AquariumFishMotion.movementProfile(for: species)
+            let bounds = profile.roamingStyle.bounds(in: CGSize(width: 393, height: 852),
+                fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: false))
+            let motion = AquariumFishMotion.initialState(for: id, profile: profile, roamingBounds: bounds)
+            var inflation = AquariumPorcupinefishInflation.State(id: id)
+            for _ in 0..<100 where inflation.swimmingFrameIndex != 1 { inflation.advance(deltaTime: 0.01) }
+            inflation.request()
+            inflation.advance(deltaTime: 1.3)
+            _ = session.claim(id, owner: owner, initial: .init(motion: motion,
+                direction: .init(direction: motion.facingDirection), inflation: inflation), bounds: bounds)
+            session.release(id, owner: owner)
+        }
         let host = UIHostingController(rootView: ViewingSessionRenderHost(session: session, probe: probe))
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
@@ -207,6 +221,7 @@ struct AquariumFishViewingSessionTests {
         }
         let before = try #require(session.snapshot(for: probe.ids[0]))
         #expect(before.elapsedTime > 0)
+        if species == .porcupinefish { #expect(before.inflation?.phase == .holding) }
         // ホーム→水槽→タイマー相当のView作り直し。位置・行動・向き・位相を丸ごと引き継ぐ。
         for _ in 0..<3 {
             probe.screen += 1
@@ -235,11 +250,53 @@ struct AquariumFishViewingSessionTests {
         probe.appearance = AquariumFishAppearance(startedAt: probe.date, spawnOffset: CGPoint(x: 20, y: -15))
         try await settle()
         let added = try #require(session.snapshot(for: probe.ids[0]))
+        if species == .porcupinefish { #expect(added.inflation?.phase == .swimming) }
         #expect(abs(added.motion.position.x - (0.5 + 20.0 / 393)) < 0.000001)
         #expect(abs(added.motion.position.y - (0.5 - 15.0 / 852)) < 0.000001)
         #expect(String(reflecting: session.snapshot(for: probe.ids[1])) == String(reflecting: Optional(otherBefore)))
         let fish = try #require(probe.fishFrame), ring = try #require(probe.ringFrame)
         #expect(hypot(fish.midX - ring.midX, fish.midY - ring.midY) < 0.001)
+    }
+
+    @Test func porcupinefishReceivesOverlayTapsWithoutRestartingInflation() async throws {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = try #require(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
+        let session = AquariumFishViewingSession()
+        let probe = ViewingSessionRenderProbe(species: .porcupinefish)
+        let host = UIHostingController(rootView: ViewingSessionRenderHost(session: session, probe: probe))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        func settle() async throws {
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(35))
+            host.view.layoutIfNeeded()
+        }
+        try await settle()
+        let id = probe.ids[0]
+        let before = try #require(session.snapshot(for: id))
+        probe.tapRequest = .init(point: CGPoint(x: before.motion.position.x * 393,
+            y: before.motion.position.y * 852), aquariumSize: CGSize(width: 393, height: 852))
+        try await settle()
+        #expect(session.handledViewingTapToken == probe.tapRequest?.token)
+        for frame in 1...30 {
+            probe.date = Date(timeIntervalSince1970: 100 + Double(frame) / 30)
+            try await settle()
+        }
+        let active = try #require(session.snapshot(for: id)?.inflation)
+        #expect(active.phase == .inflating)
+        // 同じ時刻で再タップ。開始時刻・残り時間を更新しない。
+        let position = try #require(session.snapshot(for: id)?.motion.position)
+        probe.tapRequest = .init(point: CGPoint(x: position.x * 393, y: position.y * 852),
+            aquariumSize: CGSize(width: 393, height: 852))
+        try await settle()
+        #expect(session.snapshot(for: id)?.inflation == active)
+        #expect(!session.requestInflation(for: id))
+        probe.tapRequest = .init(point: .zero, aquariumSize: CGSize(width: 393, height: 852))
+        try await settle()
+        #expect(session.handledViewingTapToken != probe.tapRequest?.token)
     }
 
 }
@@ -249,7 +306,8 @@ struct AquariumFishViewingSessionTests {
 private final class ViewingSessionRenderProbe: ObservableObject {
     let species: FishSpecies
     init(species: FishSpecies) { self.species = species }
-    var ids: [UUID] { [UUID(uuidString: species == .lionfish
+    var ids: [UUID] { [UUID(uuidString: species == .porcupinefish
+        ? "B0C0F15A-6A60-4A60-8A60-000000000001" : species == .lionfish
         ? "110F15A0-6A60-4A60-8A60-000000000001" : species == .pennantCoralfish
         ? "F1A77A7E-6A60-4A60-8A60-000000000001" : species == .orientalButterflyfish
         ? "B077E2F1-6A60-4A60-8A60-000000000001" : species == .blueGreenChromis
@@ -260,6 +318,7 @@ private final class ViewingSessionRenderProbe: ObservableObject {
     @Published var phase = ScenePhase.active
     @Published var date = Date(timeIntervalSince1970: 100)
     @Published var appearance: AquariumFishAppearance?
+    @Published var tapRequest: AquariumTreasureChestTapLocation?
     var fishFrame: CGRect?
     var ringFrame: CGRect?
 }
@@ -283,6 +342,7 @@ private struct ViewingSessionRenderHost: View {
     private func fish(id: UUID) -> some View {
         var view = SwimmingFishView(fishID: id, viewingSession: session,
             appearance: id == probe.ids[0] ? probe.appearance : nil,
+            viewingTapRequest: probe.tapRequest,
             species: id == probe.ids[0] ? probe.species : .yellowTang,
             backgroundTheme: .aquarium, isFavorite: false, aquariumSize: CGSize(width: 393, height: 852),
             updateDate: probe.date, isSimulationPaused: false, isSelectionEnabled: false,

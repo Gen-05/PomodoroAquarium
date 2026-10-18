@@ -52,6 +52,8 @@ struct FishImageView: View {
     var animationFrameDuration: TimeInterval = 0.18
     var animationPhase: TimeInterval = 0
     var fixedAnimationFrameIndex: Int?
+    // 水槽内の個体別アニメーション。通常のカード画像には指定しない。
+    var runtimeImageName: String?
 
     var body: some View {
         Group {
@@ -92,6 +94,7 @@ struct FishImageView: View {
     }
 
     private var spriteImage: UIImage? {
+        if let runtimeImageName { return UIImage(named: runtimeImageName) }
         guard animationTime != nil || fixedAnimationFrameIndex != nil else { return nil }
         let directionalFrames = FishSpriteAssetCache.frames(
             for: species,
