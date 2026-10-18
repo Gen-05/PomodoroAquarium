@@ -27,7 +27,9 @@ struct AquariumFishColorCorrectionTests {
 
     @Test func correctionPreservesSpriteAlphaAndDimensionsIncludingJellyfish() throws {
         for species in FishSpecies.allCases {
-            for frame in Set([0, species.swimmingImageNames.count / 2, max(species.swimmingImageNames.count - 1, 0)]) {
+            let frames = species == .lionfish ? Set(0..<7)
+                : Set([0, species.swimmingImageNames.count / 2, max(species.swimmingImageNames.count - 1, 0)])
+            for frame in frames {
                 let source = FishImageView(species: species, fixedAnimationFrameIndex: frame).frame(width: 128, height: 128)
                 let original = ImageRenderer(content: source)
                 let image = try #require(original.uiImage?.cgImage)
@@ -54,7 +56,7 @@ struct AquariumFishColorCorrectionTests {
         }
     }
 
-    private let targetSpecies: [FishSpecies] = [.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish]
+    private let targetSpecies: [FishSpecies] = [.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish]
 
     // 今回の変更前の値を独立して保持。比較・回帰検証に現在の値を流用しない。
     private func legacy(_ theme: AquariumBackgroundTheme, _ species: FishSpecies) -> AquariumFishColorCorrection {
@@ -77,7 +79,7 @@ struct AquariumFishColorCorrectionTests {
     @Test func renderThreeFishOnAllActualBackgroundsAtMatchedPositionsAndSizes() throws {
         for theme in [AquariumBackgroundTheme.aquarium, .tropical, .deepSea] {
             // ハタタテダイは専用テストで別画像へ出力し、縦連結が描画上限を超えないようにする。
-            let speciesList = targetSpecies.filter { $0 != .pennantCoralfish } + [.clownfish]
+            let speciesList = targetSpecies.filter { $0 != .pennantCoralfish && $0 != .lionfish } + [.clownfish]
             let full = ImageRenderer(content: VStack(spacing: 0) {
                 ForEach(speciesList, id: \.self) { species in
                     HStack(spacing: 0) {
@@ -149,7 +151,10 @@ struct AquariumFishColorCorrectionTests {
             (.deepSea, .orientalButterflyfish, [0.86, -0.045, 0.94, 0.94, 0.98, 1.02]),
             (.aquarium, .pennantCoralfish, [0.86, -0.025, 0.91, 0.95, 0.99, 0.98]),
             (.tropical, .pennantCoralfish, [0.84, -0.035, 0.92, 0.95, 0.97, 0.97]),
-            (.deepSea, .pennantCoralfish, [0.88, -0.040, 0.86, 0.92, 1, 0.98])
+            (.deepSea, .pennantCoralfish, [0.88, -0.040, 0.86, 0.92, 1, 0.98]),
+            (.aquarium, .lionfish, [0.88, -0.020, 0.96, 0.98, 1, 1.02]),
+            (.tropical, .lionfish, [0.90, -0.025, 0.99, 0.98, 0.96, 1.06]),
+            (.deepSea, .lionfish, [0.88, -0.045, 0.91, 0.95, 1, 1.02])
         ]
         for (theme, species, values) in expected {
             let c = AquariumFishColorCorrection.correction(for: theme, species: species)

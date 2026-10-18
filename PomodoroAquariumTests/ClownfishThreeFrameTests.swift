@@ -135,7 +135,7 @@ struct ClownfishThreeFrameTests {
     }
 
     @Test func otherFishKeepTheirExistingMovementTargets() {
-        for species in FishSpecies.allCases where species != .clownfish && species != .blueTang && species != .yellowTang && species != .blueGreenChromis && species != .orientalButterflyfish && species != .pennantCoralfish {
+        for species in FishSpecies.allCases where species != .clownfish && species != .blueTang && species != .yellowTang && species != .blueGreenChromis && species != .orientalButterflyfish && species != .pennantCoralfish && species != .lionfish {
             for behavior in AquariumFishMotion.Behavior.allCases {
                 #expect(AquariumFishMotion.behaviorTargetSpeedMultiplier(
                     for: species, behavior: behavior

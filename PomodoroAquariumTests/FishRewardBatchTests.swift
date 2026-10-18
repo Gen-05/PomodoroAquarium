@@ -5,14 +5,14 @@ import Testing
 
 @MainActor
 struct FishRewardBatchTests {
-    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish])
-    func commonSpeciesCanBeClaimedThroughTheNormalRewardPipelineExactlyOnce(species: FishSpecies) throws {
+    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish])
+    func registeredSpeciesCanBeClaimedThroughTheNormalRewardPipelineExactlyOnce(species: FishSpecies) throws {
         let fixture = try BatchFixture()
         let id = try fixture.process(seconds: 1500)
         let batch = try #require(try fixture.grant(id) { probabilities in
             #expect(probabilities.common == 70)
             // 通常の候補から対象の魚種を選び、抽選後は本番と同じ付与・履歴経路を通す。
-            return FishSpecies.allCases.filter { $0.rarity == .common }.first { $0 == species }
+            return FishSpecies.allCases.filter { $0.rarity == species.rarity }.first { $0 == species }
         })
         #expect(batch.results.map(\.species) == [species])
         #expect(fixture.player.ownedFish.count == 1)

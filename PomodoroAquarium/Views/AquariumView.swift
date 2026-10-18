@@ -714,6 +714,9 @@ enum AquariumFishSizing {
     static func displaySize(for species: FishSpecies, isFavorite _: Bool) -> CGFloat {
         let adjustment: CGFloat
         switch species {
+        case .lionfish:
+            // 初期サイズの1.6332875倍（直前の1.71925倍から5%縮小）。水槽内だけに適用。
+            adjustment = (949.0 / 861) * 1.6332875
         case .pennantCoralfish:
             // 背びれを除く横幅で合わせた初期サイズから、水槽内だけ10%拡大する。
             adjustment = (1164.0 / 1065) * 1.10
@@ -1231,6 +1234,7 @@ struct SwimmingFishView: View {
                 * min(0.8 + swimIntensity * 0.45, 1.8)
                 * motion.presentationMotionIntensity
                 * wingPresentationMultiplier
+                * AquariumFishMotion.presentationAmplitude(for: species)
         )
     }
 
@@ -1245,6 +1249,7 @@ struct SwimmingFishView: View {
             * min(0.008 + swimIntensity * 0.005, 0.02)
             * motion.presentationMotionIntensity
             * wingPresentationMultiplier
+                * AquariumFishMotion.presentationAmplitude(for: species)
     }
 
     private var swimVerticalOffset: CGFloat {
@@ -1256,6 +1261,7 @@ struct SwimmingFishView: View {
             * min(0.7 + swimIntensity * 0.45, 1.8)
             * motion.presentationMotionIntensity
             * wingPresentationMultiplier
+                * AquariumFishMotion.presentationAmplitude(for: species)
     }
 
 }

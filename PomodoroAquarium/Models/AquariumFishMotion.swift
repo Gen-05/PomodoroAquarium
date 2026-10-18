@@ -149,6 +149,34 @@ struct FishMovementProfile {
         swimPhaseSpeedMultiplier: 0.55
     )
 
+    /// 浮遊型を基にしたミノカサゴ専用設定。既存profileと共有計算は変更しない。
+    static let lionfish = FishMovementProfile(
+        roamingStyle: .small,
+        baseSpeedRange: (clownfish.baseSpeedRange.lowerBound * 0.55)...(clownfish.baseSpeedRange.upperBound * 0.55),
+        hoverProbability: 0.20,
+        burstProbability: 0,
+        gatheringProbability: 0,
+        wanderingRadiusX: clownfish.wanderingRadiusX,
+        wanderingRadiusY: 0.18...0.32,
+        turnResponsivenessRange: jellyfish.turnResponsivenessRange,
+        depthRange: clownfish.depthRange,
+        depthScaleRange: clownfish.depthScaleRange,
+        depthOpacityRange: clownfish.depthOpacityRange,
+        depthSpeedRange: clownfish.depthSpeedRange,
+        depthChangeProbability: jellyfish.depthChangeProbability,
+        depthChangeResponse: jellyfish.depthChangeResponse,
+        directionHoldDurationRange: 7.0...12.0,
+        burstSpeedMultiplierRange: jellyfish.burstSpeedMultiplierRange,
+        burstDurationRange: jellyfish.burstDurationRange,
+        burstCooldownRange: jellyfish.burstCooldownRange,
+        hoverDurationRange: jellyfish.hoverDurationRange,
+        steeringNoiseMultiplier: 0.20,
+        verticalDirectionBias: 0.45,
+        accelerationResponseRange: jellyfish.accelerationResponseRange,
+        brakingResponseRange: jellyfish.brakingResponseRange,
+        swimPhaseSpeedMultiplier: jellyfish.swimPhaseSpeedMultiplier
+    )
+
     /// マンタなど、大きな翼で長距離をゆっくり巡航する魚種向けの基準profile。
     static let manta = FishMovementProfile(
         roamingStyle: .legacy,
@@ -1058,6 +1086,8 @@ enum AquariumFishMotion {
         switch species {
         case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish:
             .clownfish
+        case .lionfish:
+            .lionfish
         case .jellyfish:
             .jellyfish
         case .manta:
@@ -1085,7 +1115,7 @@ enum AquariumFishMotion {
         for species: FishSpecies,
         behavior: Behavior
     ) -> CGFloat? {
-        guard species == .clownfish || species == .blueTang || species == .yellowTang || species == .blueGreenChromis || species == .orientalButterflyfish || species == .pennantCoralfish else { return nil }
+        guard species == .clownfish || species == .blueTang || species == .yellowTang || species == .blueGreenChromis || species == .orientalButterflyfish || species == .pennantCoralfish || species == .lionfish else { return nil }
         return switch behavior {
         case .hovering:
             0.62
@@ -1102,6 +1132,11 @@ enum AquariumFishMotion {
         }
     }
 
+    /// 体の揺れ・傾きだけを調整し、移動速度やひれのテンポから独立させる。
+    static func presentationAmplitude(for species: FishSpecies) -> CGFloat {
+        species == .lionfish ? 0.45 : 1
+    }
+
     static func spriteFrameDuration(
         for species: FishSpecies,
         behavior: Behavior,
@@ -1109,7 +1144,7 @@ enum AquariumFishMotion {
         baseSpeed: CGFloat
     ) -> TimeInterval {
         switch species {
-        case .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish:
+        case .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish:
             return 0.20
         case .jellyfish:
             return 0.30
