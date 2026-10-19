@@ -42,6 +42,7 @@ struct FishRoamingBounds {
 
 struct FishMovementProfile {
     var roamingStyle: FishRoamingStyle = .legacy
+    var usesStationKeeping = false
     let baseSpeedRange: ClosedRange<CGFloat>
     let hoverProbability: CGFloat
     let burstProbability: CGFloat
@@ -176,6 +177,13 @@ struct FishMovementProfile {
         brakingResponseRange: jellyfish.brakingResponseRange,
         swimPhaseSpeedMultiplier: jellyfish.swimPhaseSpeedMultiplier
     )
+
+    /// 安全域・奥行きの既存設定のみ再利用。実移動は専用の滞留・近距離移動で決める。
+    static let mandarinfish: FishMovementProfile = {
+        var profile = lionfish
+        profile.usesStationKeeping = true
+        return profile
+    }()
 
     /// マンタなど、大きな翼で長距離をゆっくり巡航する魚種向けの基準profile。
     static let manta = FishMovementProfile(
@@ -436,6 +444,7 @@ enum AquariumFishMotion {
         var presentationDirectionScale: CGFloat
 
         var randomState: UInt64
+        var stationKeeping: AquariumMandarinfishMotion.State?
 
         mutating func advance(
             deltaTime rawDeltaTime: TimeInterval,
@@ -470,6 +479,12 @@ enum AquariumFishMotion {
         ) where NeighborPositions.Index == Int, NeighborPositions.Element == CGPoint {
             let deltaTime = min(max(rawDeltaTime, 0), AquariumFishMotion.maximumDeltaTime)
             guard deltaTime > 0 else { return }
+            if var stationKeeping {
+                stationKeeping.advance(deltaTime: deltaTime)
+                self.stationKeeping = stationKeeping
+                applyStationKeeping()
+                return
+            }
 
             behaviorTimeRemaining -= deltaTime
             directionChangeTimeRemaining -= deltaTime
@@ -948,8 +963,34 @@ enum AquariumFishMotion {
             desiredDirection = AquariumFishMotion.direction(from: position, to: localTarget)
         }
 
+        mutating func updateStationKeepingGeometry(size: CGSize, fishSize: CGFloat) {
+            stationKeeping?.updateGeometry(bounds: roamingBounds, size: size, fishSize: fishSize)
+        }
+
+        fileprivate mutating func applyStationKeeping() {
+            guard let stationKeeping else { return }
+            position = stationKeeping.position
+            velocity = stationKeeping.velocity
+            currentSpeed = hypot(velocity.dx, velocity.dy)
+            targetSpeed = currentSpeed
+            behavior = stationKeeping.phase == .hovering ? .hovering : .wandering
+            behaviorTimeRemaining = stationKeeping.timeRemaining
+            directionChangeTimeRemaining = stationKeeping.timeRemaining
+            anchorPosition = stationKeeping.start
+            localTarget = stationKeeping.target
+            roamingDestination = nil
+            facingDirection = stationKeeping.facingRight ? .right : .left
+            pendingFacingDirection = facingDirection
+            facingSign = stationKeeping.facingRight ? -1 : 1
+            facingWidth = 1
+            visualTurnTargetSign = nil
+            pendingFacingDirectionDuration = 0
+            randomState = stationKeeping.randomState
+        }
+
         mutating func updateRoamingBounds(_ bounds: FishRoamingBounds) {
             roamingBounds = bounds
+            stationKeeping?.updateGeometry(bounds: bounds)
             position = AquariumFishMotion.clampedPoint(position, bounds: bounds)
             anchorPosition = AquariumFishMotion.clampedPoint(anchorPosition, bounds: bounds)
             localTarget = AquariumFishMotion.clampedPoint(localTarget, bounds: bounds)
@@ -987,7 +1028,9 @@ enum AquariumFishMotion {
         speedVariationProfile: SpeedVariationProfile? = nil,
         roamingBounds: FishRoamingBounds = .legacy,
         initialPosition spawnPosition: CGPoint? = nil,
-        viewingSessionID: UUID? = nil
+        viewingSessionID: UUID? = nil,
+        aquariumSize: CGSize = CGSize(width: 393, height: 852),
+        fishSize: CGFloat = 40
     ) -> State {
         let bytes = mixedIndividualBytes(for: id)
         let angle = CGFloat(bytes[4]) / 255 * .pi * 2
@@ -1026,7 +1069,7 @@ enum AquariumFishMotion {
                     * ($0.changeIntervalRange.upperBound - $0.changeIntervalRange.lowerBound)
         } ?? 0
 
-        return State(
+        var state = State(
             position: initialPosition,
             velocity: CGVector(dx: direction.dx * baseSpeed, dy: direction.dy * baseSpeed),
             desiredDirection: direction,
@@ -1080,12 +1123,21 @@ enum AquariumFishMotion {
             presentationDirectionScale: facingDirection.directionScale,
             randomState: seed(from: bytes)
         )
+        if profile.usesStationKeeping {
+            state.stationKeeping = .init(seed: state.randomState, position: initialPosition,
+                facingRight: direction.dx >= 0, bounds: roamingBounds, aquariumSize: aquariumSize,
+                fishSize: fishSize, startNearBottom: spawnPosition == nil)
+            state.applyStationKeeping()
+        }
+        return state
     }
 
     static func movementProfile(for species: FishSpecies) -> FishMovementProfile {
         switch species {
         case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish:
             .clownfish
+        case .mandarinfish:
+            .mandarinfish
         case .lionfish, .porcupinefish:
             .lionfish
         case .jellyfish:
@@ -1134,7 +1186,8 @@ enum AquariumFishMotion {
 
     /// 体の揺れ・傾きだけを調整し、移動速度やひれのテンポから独立させる。
     static func presentationAmplitude(for species: FishSpecies) -> CGFloat {
-        (species == .lionfish || species == .porcupinefish) ? 0.45 : 1
+        if species == .mandarinfish { return 0 }
+        return (species == .lionfish || species == .porcupinefish) ? 0.45 : 1
     }
 
     static func spriteFrameDuration(
@@ -1144,7 +1197,7 @@ enum AquariumFishMotion {
         baseSpeed: CGFloat
     ) -> TimeInterval {
         switch species {
-        case .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish:
+        case .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .mandarinfish:
             return 0.20
         case .porcupinefish:
             return AquariumPorcupinefishInflation.swimmingFrameDuration

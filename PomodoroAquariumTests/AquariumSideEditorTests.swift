@@ -7,7 +7,7 @@ import Testing
 @MainActor
 struct AquariumSideEditorTests {
     @Test func displayOrderUsesRarityThenDefinitionOrderWithoutMutatingOwnership() {
-        let expected: [FishSpecies] = [.clownfish, .jellyfish, .pufferfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .seahorse, .lionfish, .porcupinefish, .manta, .whaleShark]
+        let expected: [FishSpecies] = [.clownfish, .jellyfish, .pufferfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .seahorse, .lionfish, .porcupinefish, .mandarinfish, .manta, .whaleShark]
         let owned = FishSpecies.allCases.reversed().map { PlayerFish(species: $0) }
             + [PlayerFish(species: .blueTang)]
         let originalIDs = owned.map(\.id)

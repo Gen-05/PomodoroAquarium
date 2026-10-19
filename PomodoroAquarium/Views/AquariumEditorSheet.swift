@@ -266,7 +266,7 @@ enum AquariumEditorFishThumbnailLayout {
     static func imageSize(for species: FishSpecies, isPlacedList: Bool = false) -> CGSize {
         let length: CGFloat
         switch species {
-        case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish: length = 34
+        case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .mandarinfish: length = 34
         case .seahorse: length = 38
         case .pufferfish, .porcupinefish: length = 46
         case .jellyfish: length = 50

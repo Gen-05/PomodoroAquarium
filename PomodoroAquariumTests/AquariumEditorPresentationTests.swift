@@ -173,7 +173,11 @@ struct AquariumEditorPresentationTests {
             let ordinary = AquariumFishMotion.initialState(for: id, profile: profile)
             let spawned = AquariumFishMotion.initialState(for: id, profile: profile,
                 initialPosition: CGPoint(x: 0.5, y: 0.5))
-            #expect(ordinary.position == AquariumFishMotion.initialPosition(for: id))
+            let initial = AquariumFishMotion.initialPosition(for: id)
+            let expected = profile.usesStationKeeping
+                ? AquariumMandarinfishMotion.State.lowerInitialPosition(initial, bounds: .legacy) : initial
+            #expect(ordinary.position == expected)
+            #expect(spawned.position == CGPoint(x: 0.5, y: 0.5))
             #expect(ordinary.anchorPosition == ordinary.position)
             #expect(spawned.baseSpeed == ordinary.baseSpeed)
             #expect(spawned.currentSpeed == ordinary.currentSpeed)

@@ -23,8 +23,8 @@ struct LionfishTests {
 
     @Test func rareCandidatesAreUniformWithoutChangingRarityProbabilities() {
         let rare = FishSpecies.allCases.filter { $0.rarity == .rare }
-        #expect(rare == [.seahorse, .lionfish, .porcupinefish])
-        for (minutes, expected) in [(0, 20.0 / 3), (180, 25.0 / 3), (300, 25.0 / 3)] {
+        #expect(rare == [.seahorse, .lionfish, .porcupinefish, .mandarinfish])
+        for (minutes, expected) in [(0, 20.0 / 4), (180, 25.0 / 4), (300, 25.0 / 4)] {
             let probabilities = FishRewardService.rarityProbabilities(for: minutes)
             #expect(probabilities.total == 100)
             for species in rare {
@@ -44,7 +44,7 @@ struct LionfishTests {
         #expect(profile.accelerationResponseRange.upperBound < clown.accelerationResponseRange.lowerBound)
         #expect(profile.steeringNoiseMultiplier < clown.steeringNoiseMultiplier)
         #expect(AquariumFishMotion.presentationAmplitude(for: .lionfish) == 0.45)
-        for species in FishSpecies.allCases where species != .lionfish && species != .porcupinefish {
+        for species in FishSpecies.allCases where species != .lionfish && species != .porcupinefish && species != .mandarinfish {
             #expect(AquariumFishMotion.presentationAmplitude(for: species) == 1)
         }
         for direction in FishFacingDirection.allCases {

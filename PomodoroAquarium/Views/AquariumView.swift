@@ -726,6 +726,10 @@ enum AquariumFishSizing {
     static func displaySize(for species: FishSpecies, isFavorite _: Bool) -> CGFloat {
         let adjustment: CGFloat
         switch species {
+        case .mandarinfish:
+            // neutralの可視全長（1147/1254）をクマノミ（618/629）の1.2倍へ。
+            // displayScale .48 = クマノミ .40 × 1.2。水槽外のサイズとは独立。
+            adjustment = (618.0 / 629) / (1147.0 / 1254)
         case .porcupinefish:
             // neutralの可視全長をトラフグ（607/768）に合わせる。膨張中も同じ描画枠。
             adjustment = 1.10 * (607.0 / 768) / (1157.0 / 1254)
@@ -945,9 +949,12 @@ struct SwimmingFishView: View {
             speedVariationProfile: AquariumFishMotion.speedVariationProfile(for: species),
             roamingBounds: bounds,
             initialPosition: appearance?.spawnPosition(in: aquariumSize) ?? initialPosition,
-            viewingSessionID: viewingSession?.id ?? viewingSessionID
+            viewingSessionID: viewingSession?.id ?? viewingSessionID,
+            aquariumSize: aquariumSize,
+            fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite)
         )
         initialMotion.updateRoamingBounds(bounds)
+        initialMotion.updateStationKeepingGeometry(size: aquariumSize, fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite))
         self._motion = State(initialValue: initialMotion)
         self._inflation = State(initialValue: saved?.inflation ?? (species == .porcupinefish ? .init(id: fishID) : nil))
         self._elapsedTime = State(initialValue: saved?.elapsedTime ?? 0)
@@ -1030,6 +1037,7 @@ struct SwimmingFishView: View {
                 motion.updateRoamingBounds(motion.movementProfile.roamingStyle.bounds(
                     in: size, fishSize: fishSize
                 ))
+                motion.updateStationKeepingGeometry(size: size, fishSize: fishSize)
                 saveViewingSession()
             }
             .accessibilityElement(children: .combine)
@@ -1083,6 +1091,7 @@ struct SwimmingFishView: View {
             let saved = viewingSession.claim(fishID, owner: ownerID, initial: snapshot,
                 bounds: motion.movementProfile.roamingStyle.bounds(in: aquariumSize, fishSize: fishSize))
             motion = saved.motion
+            motion.updateStationKeepingGeometry(size: aquariumSize, fishSize: fishSize)
             spriteDirectionTransition = saved.direction
             wingCycle = saved.wing
             inflation = saved.inflation
@@ -1111,7 +1120,7 @@ struct SwimmingFishView: View {
         motion = AquariumFishMotion.initialState(for: fishID, profile: profile,
             speedVariationProfile: AquariumFishMotion.speedVariationProfile(for: species),
             roamingBounds: profile.roamingStyle.bounds(in: aquariumSize, fishSize: fishSize),
-            initialPosition: spawn)
+            initialPosition: spawn, aquariumSize: aquariumSize, fishSize: fishSize)
         simulationTiming.pause()
         if species == .porcupinefish { inflation = .init(id: fishID) }
         appliedAppearanceStart = appearance.startedAt
@@ -1300,11 +1309,14 @@ struct SwimmingFishView: View {
 
     /// 小魚型のsideフレームを、flip後に画面内の進行方向へ回転する。
     private var smallFishDirectionRotation: Double {
-        species.swimmingImageRotation(for: motion.facingDirection)
+        if let stationary = motion.stationKeeping {
+            return stationary.headDipDegrees * (stationary.facingRight ? 1 : -1)
+        }
+        return species.swimmingImageRotation(for: motion.facingDirection)
     }
 
     private var swimVerticalScale: CGFloat {
-        guard species != .seahorse else { return 1 }
+        guard species != .seahorse, species != .mandarinfish else { return 1 }
         return 1 + cos(motion.swimPhase * 1.07)
             * min(0.008 + swimIntensity * 0.005, 0.02)
             * motion.presentationMotionIntensity
@@ -1313,6 +1325,7 @@ struct SwimmingFishView: View {
     }
 
     private var swimVerticalOffset: CGFloat {
+        if species == .mandarinfish { return 0 }
         if species == .seahorse {
             // frame1側で上昇、frame3で折り返し、frame5側で下降する描画専用の浮遊。
             return AquariumFishMotion.seahorseVisualOffsetY(swimPhase: motion.swimPhase)

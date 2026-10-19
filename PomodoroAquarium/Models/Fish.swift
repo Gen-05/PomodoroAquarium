@@ -29,6 +29,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     case pennantCoralfish
     case lionfish
     case porcupinefish
+    case mandarinfish
 
     var id: String {
         rawValue
@@ -36,6 +37,8 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
 
     var name: String {
         switch self {
+        case .mandarinfish:
+            "ニシキテグリ"
         case .porcupinefish:
             "ハリセンボン"
         case .lionfish:
@@ -69,6 +72,8 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     /// 未対応魚はnilとし、表示側で既存の魚シンボルへフォールバックする。
     var imageName: String? {
         switch self {
+        case .mandarinfish:
+            "fish_mandarinfish_side_3"
         case .porcupinefish:
             "fish_porcupinefish_side_2"
         case .lionfish:
@@ -100,12 +105,12 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
 
     /// 移動方向に応じた画像切替・左右反転を行う魚種かどうか。
     var usesDirectionalSwimmingSprites: Bool {
-        self == .clownfish || self == .blueTang || self == .yellowTang || self == .blueGreenChromis || self == .orientalButterflyfish || self == .pennantCoralfish || self == .lionfish || self == .porcupinefish || self == .pufferfish || self == .seahorse
+        self == .clownfish || self == .blueTang || self == .yellowTang || self == .blueGreenChromis || self == .orientalButterflyfish || self == .pennantCoralfish || self == .lionfish || self == .porcupinefish || self == .mandarinfish || self == .pufferfish || self == .seahorse
     }
 
     /// 右向きのside素材を、水平方向の進行に合わせて左右反転する魚種。
     var usesHorizontalSwimmingFlip: Bool {
-        self == .clownfish || self == .blueTang || self == .yellowTang || self == .blueGreenChromis || self == .orientalButterflyfish || self == .pennantCoralfish || self == .lionfish || self == .porcupinefish || self == .pufferfish || self == .seahorse
+        self == .clownfish || self == .blueTang || self == .yellowTang || self == .blueGreenChromis || self == .orientalButterflyfish || self == .pennantCoralfish || self == .lionfish || self == .porcupinefish || self == .mandarinfish || self == .pufferfish || self == .seahorse
             || self == .manta || self == .whaleShark
     }
 
@@ -117,6 +122,8 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
 
     func swimmingImageNames(for direction: FishFacingDirection) -> [String] {
         switch self {
+        case .mandarinfish:
+            return (1...5).map { "fish_mandarinfish_side_\($0)" }
         case .porcupinefish:
             return (1...3).map { "fish_porcupinefish_side_\($0)" }
         case .lionfish:
@@ -155,7 +162,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
             swimmingImageNames(for: direction)
         case .sideToDiagonalUp15, .sideToDiagonalDown15:
             switch self {
-            case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .pufferfish, .seahorse:
+            case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .pufferfish, .seahorse:
                 // 小魚型は中間方向でも専用Assetへ切り替えず、魚種ごとのsideフレームを共用する。
                 swimmingImageNames
             case .jellyfish, .manta, .whaleShark:
@@ -166,7 +173,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
 
     /// 小魚型の右向きside素材を、horizontal flip後に進行方向へ回転する角度。
     func swimmingImageRotation(for direction: FishFacingDirection) -> Double {
-        guard usesDirectionalSwimmingSprites else { return 0 }
+        guard usesDirectionalSwimmingSprites, self != .mandarinfish else { return 0 }
         let rotation: Double = switch direction {
         case .right, .left, .front:
             0
@@ -190,6 +197,8 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     /// 共通基準サイズに対する魚種ごとの表示倍率。
     var displayScale: CGFloat {
         switch self {
+        case .mandarinfish:
+            0.48
         case .porcupinefish:
             0.90
         case .lionfish:
@@ -225,7 +234,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .jellyfish, .pufferfish:
             .common
-        case .seahorse, .lionfish, .porcupinefish:
+        case .seahorse, .lionfish, .porcupinefish, .mandarinfish:
             .rare
         case .manta:
             .epic

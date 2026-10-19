@@ -12,6 +12,12 @@ struct AquariumFishColorCorrection: ViewModifier {
     static func correction(for theme: AquariumBackgroundTheme, species: FishSpecies) -> Self {
         // 追加魚を背景別に調整。同じModifier内で値を選び、補正は一度だけ適用する。
         switch (theme, species) {
+        case (.aquarium, .mandarinfish):
+            return Self(saturation: 0.90, brightness: -0.008, red: 0.99, green: 0.99, blue: 1, contrast: 1.03)
+        case (.tropical, .mandarinfish):
+            return Self(saturation: 0.91, brightness: -0.010, red: 1, green: 0.99, blue: 0.98, contrast: 1.06)
+        case (.deepSea, .mandarinfish):
+            return Self(saturation: 0.92, brightness: -0.015, red: 0.97, green: 0.98, blue: 1, contrast: 1.02)
         case (.aquarium, .porcupinefish):
             return Self(saturation: 0.86, brightness: -0.025, red: 0.95, green: 0.98, blue: 1, contrast: 1.01)
         case (.tropical, .porcupinefish):

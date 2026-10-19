@@ -8,7 +8,7 @@ import Testing
 @MainActor
 struct AquariumFishEditingTests {
     private let expectedAquariumSizes: [FishSpecies: CGFloat] = [
-        .porcupinefish: 66.14872015449438, .lionfish: 89.30533781498258, .pennantCoralfish: 59.64139267605634, .orientalButterflyfish: 48.442711409395976, .clownfish: 31.2, .blueGreenChromis: 33.462, .yellowTang: 49.608,
+        .mandarinfish: 40.21682564455835, .porcupinefish: 66.14872015449438, .lionfish: 89.30533781498258, .pennantCoralfish: 59.64139267605634, .orientalButterflyfish: 48.442711409395976, .clownfish: 31.2, .blueGreenChromis: 33.462, .yellowTang: 49.608,
         .blueTang: 54.912, .pufferfish: 77.22, .seahorse: 88.92,
         .jellyfish: 62.4, .manta: 175.5, .whaleShark: 468
     ]
