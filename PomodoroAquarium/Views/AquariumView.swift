@@ -726,6 +726,9 @@ enum AquariumFishSizing {
     static func displaySize(for species: FishSpecies, isFavorite _: Bool) -> CGFloat {
         let adjustment: CGFloat
         switch species {
+        case .seaTurtle:
+            // 後足を除く鼻先〜尾先を合わせた初期サイズの1.95倍（水槽内だけ。直前の1.30倍設定から50%拡大）。
+            adjustment = (618.0 / 629) / (867.0 / 1254) * 1.95
         case .mandarinfish:
             // neutralの可視全長（1147/1254）をクマノミ（618/629）の1.2倍へ。
             // displayScale .48 = クマノミ .40 × 1.2。水槽外のサイズとは独立。
@@ -1180,8 +1183,10 @@ struct SwimmingFishView: View {
         FishImageView(
             species: species,
             facingDirection: motion.facingDirection,
-            spritePose: spriteDirectionTransition.pose,
-            facingHorizontalScale: motion.facingHorizontalScale,
+            spritePose: species == .seaTurtle
+                ? .facing(motion.facingSign < 0 ? .right : .left) : spriteDirectionTransition.pose,
+            facingHorizontalScale: species == .seaTurtle
+                ? (motion.facingSign < 0 ? 1 : -1) : motion.facingHorizontalScale,
             animationTime: inflation == nil ? spriteAnimationTime : nil,
             animationFrameDuration: spriteFrameDuration,
             animationPhase: species == .manta || species == .seahorse ? 0 : spriteAnimationPhase,
@@ -1270,6 +1275,10 @@ struct SwimmingFishView: View {
     }
 
     private var wingSpeedMultiplier: CGFloat {
+        if species == .seaTurtle {
+            return AquariumFishMotion.seaTurtlePropulsionMultiplier(elapsedTime: elapsedTime,
+                frameDuration: spriteFrameDuration, phase: spriteAnimationPhase)
+        }
         guard let wingProfile, let phase = wingCycle?.phase else { return 1 }
         return phase == .flapping
             ? wingProfile.flapSpeedMultiplier
@@ -1316,7 +1325,7 @@ struct SwimmingFishView: View {
     }
 
     private var swimVerticalScale: CGFloat {
-        guard species != .seahorse, species != .mandarinfish else { return 1 }
+        guard species != .seahorse, species != .mandarinfish, species != .seaTurtle else { return 1 }
         return 1 + cos(motion.swimPhase * 1.07)
             * min(0.008 + swimIntensity * 0.005, 0.02)
             * motion.presentationMotionIntensity
@@ -1325,7 +1334,7 @@ struct SwimmingFishView: View {
     }
 
     private var swimVerticalOffset: CGFloat {
-        if species == .mandarinfish { return 0 }
+        if species == .mandarinfish || species == .seaTurtle { return 0 }
         if species == .seahorse {
             // frame1側で上昇、frame3で折り返し、frame5側で下降する描画専用の浮遊。
             return AquariumFishMotion.seahorseVisualOffsetY(swimPhase: motion.swimPhase)

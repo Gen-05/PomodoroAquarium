@@ -5,7 +5,7 @@ import Testing
 
 @MainActor
 struct FishRewardBatchTests {
-    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish])
+    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle])
     func registeredSpeciesCanBeClaimedThroughTheNormalRewardPipelineExactlyOnce(species: FishSpecies) throws {
         let fixture = try BatchFixture()
         let id = try fixture.process(seconds: 1500)

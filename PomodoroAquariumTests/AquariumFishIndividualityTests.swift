@@ -6,7 +6,7 @@ import Testing
 struct AquariumFishIndividualityTests {
     // 保存済みの開発用IDそのもの。Releaseでも同じデータで検証する。
     private func ids(for species: FishSpecies) -> [UUID] {
-        let prefix = species == .mandarinfish ? "A4DAF15A" : species == .porcupinefish ? "B0C0F15A" : species == .lionfish ? "110F15A0" : species == .pennantCoralfish ? "F1A77A7E" : species == .orientalButterflyfish ? "B077E2F1" : species == .blueGreenChromis ? "C470A115" : species == .blueTang ? "B10E7A60" : "E1107A60"
+        let prefix = species == .seaTurtle ? "7A271E50" : species == .mandarinfish ? "A4DAF15A" : species == .porcupinefish ? "B0C0F15A" : species == .lionfish ? "110F15A0" : species == .pennantCoralfish ? "F1A77A7E" : species == .orientalButterflyfish ? "B077E2F1" : species == .blueGreenChromis ? "C470A115" : species == .blueTang ? "B10E7A60" : "E1107A60"
         return (1...5).map { UUID(uuidString: String(format: "\(prefix)-6A60-4A60-8A60-%012d", $0))! }
     }
 
@@ -20,7 +20,7 @@ struct AquariumFishIndividualityTests {
          Double(state.turnResponsiveness), Double(state.wanderingRadiusX), Double(state.wanderingRadiusY)]
     }
 
-    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish])
+    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle])
     func fixedIDsStartIndependentlyAndReplayTheSameFirstFiveSeconds(species: FishSpecies) {
         let ids = ids(for: species)
         let profile = AquariumFishMotion.movementProfile(for: species)
@@ -74,7 +74,7 @@ struct AquariumFishIndividualityTests {
         }
     }
 
-    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish])
+    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle])
     func explicitSpawnAlwaysTakesPriorityOverIndividualPosition(species: FishSpecies) {
         let profile = AquariumFishMotion.movementProfile(for: species)
         for id in ids(for: species) {

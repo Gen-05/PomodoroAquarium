@@ -28,6 +28,9 @@ enum AquariumDeveloperFish {
             (.mandarinfish, (1...5).map {
                 UUID(uuidString: String(format: "A4DAF15A-6A60-4A60-8A60-%012d", $0))!
             }),
+            (.seaTurtle, (1...5).map {
+                UUID(uuidString: String(format: "7A271E50-6A60-4A60-8A60-%012d", $0))!
+            }),
             (.lionfish, (1...5).map {
                 UUID(uuidString: String(format: "110F15A0-6A60-4A60-8A60-%012d", $0))!
             })

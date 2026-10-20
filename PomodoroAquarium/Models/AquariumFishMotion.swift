@@ -213,6 +213,34 @@ struct FishMovementProfile {
         swimPhaseSpeedMultiplier: 0.70
     )
 
+    /// マンタの回遊性格を再利用するウミガメ専用設定。マンタ本体は変更しない。
+    static let seaTurtle = FishMovementProfile(
+        roamingStyle: .small,
+        baseSpeedRange: (manta.baseSpeedRange.lowerBound * 0.64)...(manta.baseSpeedRange.upperBound * 0.64),
+        hoverProbability: 0,
+        burstProbability: manta.burstProbability,
+        gatheringProbability: 0,
+        wanderingRadiusX: manta.wanderingRadiusX,
+        wanderingRadiusY: manta.wanderingRadiusY,
+        turnResponsivenessRange: manta.turnResponsivenessRange,
+        depthRange: manta.depthRange,
+        depthScaleRange: manta.depthScaleRange,
+        depthOpacityRange: manta.depthOpacityRange,
+        depthSpeedRange: manta.depthSpeedRange,
+        depthChangeProbability: manta.depthChangeProbability,
+        depthChangeResponse: manta.depthChangeResponse,
+        directionHoldDurationRange: 9.0...14.0,
+        burstSpeedMultiplierRange: manta.burstSpeedMultiplierRange,
+        burstDurationRange: manta.burstDurationRange,
+        burstCooldownRange: manta.burstCooldownRange,
+        hoverDurationRange: manta.hoverDurationRange,
+        steeringNoiseMultiplier: 0.16,
+        verticalDirectionBias: manta.verticalDirectionBias,
+        accelerationResponseRange: manta.accelerationResponseRange,
+        brakingResponseRange: manta.brakingResponseRange,
+        swimPhaseSpeedMultiplier: manta.swimPhaseSpeedMultiplier
+    )
+
     /// ジンベエザメなど、止まらず長距離を安定巡航する大型魚向けの基準profile。
     static let whaleShark = FishMovementProfile(
         roamingStyle: .legacy,
@@ -1142,6 +1170,8 @@ enum AquariumFishMotion {
             .lionfish
         case .jellyfish:
             .jellyfish
+        case .seaTurtle:
+            .seaTurtle
         case .manta:
             .manta
         case .whaleShark:
@@ -1186,8 +1216,20 @@ enum AquariumFishMotion {
 
     /// 体の揺れ・傾きだけを調整し、移動速度やひれのテンポから独立させる。
     static func presentationAmplitude(for species: FishSpecies) -> CGFloat {
+        if species == .seaTurtle { return 0.20 }
         if species == .mandarinfish { return 0 }
         return (species == .lionfish || species == .porcupinefish) ? 0.45 : 1
+    }
+
+    /// マンタは通常2.20（羽ばたき）/2.00（滑走）を掛ける。その中間を比較基準にする。
+    /// 1→7の振り下ろしで緩やかに増速し、戻りで減速。再生速度と基準移動速度は独立。
+    static func seaTurtlePropulsionMultiplier(elapsedTime: TimeInterval,
+        frameDuration: TimeInterval, phase: TimeInterval) -> CGFloat {
+        let reference = (WingSwimmingProfile.manta.flapSpeedMultiplier
+                         + WingSwimmingProfile.manta.glideSpeedMultiplier) / 2
+        let cycle = max(frameDuration, 0.01) * 12
+        let progress = (elapsedTime + phase).truncatingRemainder(dividingBy: cycle) / cycle
+        return reference * (1 - 0.04 * CGFloat(cos(2 * .pi * progress)))
     }
 
     static func spriteFrameDuration(
@@ -1199,6 +1241,8 @@ enum AquariumFishMotion {
         switch species {
         case .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .mandarinfish:
             return 0.20
+        case .seaTurtle:
+            return 0.22
         case .porcupinefish:
             return AquariumPorcupinefishInflation.swimmingFrameDuration
         case .jellyfish:
