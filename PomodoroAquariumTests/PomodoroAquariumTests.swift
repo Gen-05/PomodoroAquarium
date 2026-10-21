@@ -2661,10 +2661,10 @@ struct PomodoroAquariumTests {
         #expect(indices == [0, 1, 2, 3, 4, 3, 2, 1, 0, 1])
     }
 
-    @Test func reefMantaUsesOfficialSideArtworkAndSevenSwimmingFrames() {
-        let expectedFrames = (1...7).map { "fish_reef_manta_side_\($0)" }
+    @Test func bluefinTunaReusesLegacySlotWithEightSwimmingFrames() {
+        let expectedFrames = (1...8).map { "fish_bluefin_tuna_side_\($0)" }
 
-        #expect(FishSpecies.manta.imageName == "fish_reef_manta")
+        #expect(FishSpecies.manta.imageName == "fish_bluefin_tuna")
         #expect(FishSpecies.manta.displayScale == 2.25)
         #expect(FishSpecies.clownfish.displayScale == 0.40)
         #expect(FishSpecies.jellyfish.displayScale == 0.80)
@@ -2679,7 +2679,7 @@ struct PomodoroAquariumTests {
         }
     }
 
-    @Test func reefMantaUsesSharedSevenFramePingPongAtItsOwnTempo() {
+    @Test func bluefinTunaUsesForwardEightFrameLoopAtItsOwnTempo() {
         let duration = AquariumFishMotion.spriteFrameDuration(
             for: .manta,
             behavior: .cruising,
@@ -2687,15 +2687,15 @@ struct PomodoroAquariumTests {
             baseSpeed: 0.025
         )
         let indices = (0...13).map { step in
-            FishSpriteAnimation.pingPongFrameIndex(
+            FishSpriteAnimation.loopFrameIndex(
                 frameCount: FishSpecies.manta.swimmingImageNames.count,
-                elapsedTime: Double(step) * duration,
+                elapsedTime: Double(step) * duration + 0.000001,
                 frameDuration: duration
             )
         }
 
-        #expect(duration == 0.36)
-        #expect(indices == [0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1, 0, 1])
+        #expect(duration == 0.11)
+        #expect(indices == [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5])
     }
 
     @Test func whaleSharkUsesOfficialSideArtworkAndSevenSwimmingFrames() {
@@ -2765,7 +2765,7 @@ struct PomodoroAquariumTests {
         let clownfish = FishMovementProfile.clownfish
 
         #expect(AquariumFishMotion.movementProfile(for: .manta).baseSpeedRange
-            == manta.baseSpeedRange)
+            == FishMovementProfile.bluefinTuna.baseSpeedRange)
         #expect(manta.baseSpeedRange == 0.042...0.066)
         #expect(manta.baseSpeedRange.lowerBound > clownfish.baseSpeedRange.upperBound)
         #expect(manta.baseSpeedRange.upperBound > FishMovementProfile.jellyfish.baseSpeedRange.upperBound)
@@ -3615,6 +3615,7 @@ struct PomodoroAquariumTests {
             .blueGreenChromis: 1.007,
             .orientalButterflyfish: 0.971,
             .pennantCoralfish: 1.05,
+            .dolphin: 1.00,
             .seaTurtle: 1.20,
             .mandarinfish: 1.007,
             .porcupinefish: 1.00,
@@ -3622,7 +3623,7 @@ struct PomodoroAquariumTests {
             .jellyfish: 1.00,
             .pufferfish: 1.20,
             .seahorse: 1.40,
-            .manta: 1.10,
+            .manta: 1.20,
             .whaleShark: 1.32
         ]
 
@@ -3649,6 +3650,7 @@ struct PomodoroAquariumTests {
             .blueGreenChromis: "fish_blue_green_chromis_side_2",
             .orientalButterflyfish: "fish_oriental_butterflyfish_side_2",
             .pennantCoralfish: "fish_pennant_coralfish_side_2",
+            .dolphin: "fish_dolphin_side_5",
             .seaTurtle: "fish_sea_turtle_side_4",
             .mandarinfish: "fish_mandarinfish_side_3",
             .porcupinefish: "fish_porcupinefish_side_2",
@@ -3656,7 +3658,7 @@ struct PomodoroAquariumTests {
             .jellyfish: "fish_moon_jellyfish",
             .pufferfish: "fish_tiger_puffer_side_3",
             .seahorse: "fish_seahorse_side_3",
-            .manta: "fish_reef_manta",
+            .manta: "fish_bluefin_tuna",
             .whaleShark: "fish_whale_shark"
         ]
 
@@ -3679,6 +3681,7 @@ struct PomodoroAquariumTests {
             .blueGreenChromis: 82.73,
             .orientalButterflyfish: 99.98,
             .pennantCoralfish: 99.98,
+            .dolphin: 111.72,
             .seaTurtle: 111.72,
             .mandarinfish: 87.31,
             .porcupinefish: 118.29,
@@ -3739,6 +3742,7 @@ struct PomodoroAquariumTests {
             .blueGreenChromis: 3,
             .orientalButterflyfish: 3,
             .pennantCoralfish: 3,
+            .dolphin: 9,
             .seaTurtle: 7,
             .mandarinfish: 5,
             .porcupinefish: 3,
@@ -3746,7 +3750,7 @@ struct PomodoroAquariumTests {
             .jellyfish: 5,
             .pufferfish: 5,
             .seahorse: 5,
-            .manta: 7,
+            .manta: 8,
             .whaleShark: 7
         ]
         let expectedDurations: [FishSpecies: TimeInterval] = [
@@ -3756,6 +3760,7 @@ struct PomodoroAquariumTests {
             .blueGreenChromis: 0.20,
             .orientalButterflyfish: 0.20,
             .pennantCoralfish: 0.20,
+            .dolphin: 0.12,
             .seaTurtle: 0.22,
             .mandarinfish: 0.20,
             .porcupinefish: 0.30,
@@ -3763,7 +3768,7 @@ struct PomodoroAquariumTests {
             .jellyfish: 0.30,
             .pufferfish: 0.06975,
             .seahorse: 0.28,
-            .manta: 0.36,
+            .manta: 0.11,
             .whaleShark: 0.30
         ]
 

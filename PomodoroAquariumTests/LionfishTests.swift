@@ -44,7 +44,7 @@ struct LionfishTests {
         #expect(profile.accelerationResponseRange.upperBound < clown.accelerationResponseRange.lowerBound)
         #expect(profile.steeringNoiseMultiplier < clown.steeringNoiseMultiplier)
         #expect(AquariumFishMotion.presentationAmplitude(for: .lionfish) == 0.45)
-        for species in FishSpecies.allCases where species != .lionfish && species != .porcupinefish && species != .mandarinfish && species != .seaTurtle {
+        for species in FishSpecies.allCases where species != .lionfish && species != .porcupinefish && species != .mandarinfish && species != .seaTurtle && species != .dolphin && species != .manta {
             #expect(AquariumFishMotion.presentationAmplitude(for: species) == 1)
         }
         for direction in FishFacingDirection.allCases {

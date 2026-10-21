@@ -22,6 +22,7 @@ final class AquariumFishViewingSession: ObservableObject {
         var elapsedTime: TimeInterval = 0
         var appliedAppearanceStart: Date?
         var inflation: AquariumPorcupinefishInflation.State?
+        var dolphin: AquariumDolphinSwimming.State?
     }
 
     let id: UUID
@@ -79,9 +80,9 @@ final class AquariumFishViewingSession: ObservableObject {
         requestInflation(for: fishID)
     }
 
-    /// 画面遷移のreleaseでは残すが、収納・削除した個体の膨張処理は破棄する。
+    /// 画面遷移のreleaseでは残すが、収納・削除した個体の専用アニメーション状態は破棄する。
     func stopInflation(except activeIDs: Set<UUID>) {
-        let removed = snapshots.keys.filter { !activeIDs.contains($0) && snapshots[$0]?.inflation != nil }
+        let removed = snapshots.keys.filter { !activeIDs.contains($0) && (snapshots[$0]?.inflation != nil || snapshots[$0]?.dolphin != nil) }
         for id in removed {
             snapshots[id] = nil
             owners[id] = nil

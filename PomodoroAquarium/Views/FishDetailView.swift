@@ -45,6 +45,8 @@ enum FishDetailImageLayout {
     /// 透明余白だけを考慮し、displayScaleによる体格差はpreferredDisplaySizeで扱う。
     static func visibleContentRatio(for species: FishSpecies) -> CGSize {
         switch species {
+        case .dolphin:
+            CGSize(width: 0.960, height: 0.293)
         case .seaTurtle:
             CGSize(width: 0.774, height: 0.348)
         case .mandarinfish:
@@ -72,7 +74,7 @@ enum FishDetailImageLayout {
         case .seahorse:
             CGSize(width: 0.40, height: 0.70)
         case .manta:
-            CGSize(width: 0.92, height: 0.49)
+            CGSize(width: 0.763, height: 0.288)
         case .whaleShark:
             CGSize(width: 0.95, height: 0.28)
         }
@@ -83,6 +85,8 @@ struct FishDetailStrokeAnimationState {
     let frameCount: Int
     let frameDuration: TimeInterval
 
+    private var usesForwardLoop = false
+    private var strokeFrameIndices: [Int] { usesForwardLoop ? Array(0..<frameCount) : Self.oneStrokeFrameIndices(frameCount: frameCount) }
     private(set) var currentStepIndex: Int?
 
     init(frameCount: Int, frameDuration: TimeInterval) {
@@ -95,6 +99,7 @@ struct FishDetailStrokeAnimationState {
             frameCount: species.swimmingImageNames.count,
             frameDuration: Self.frameDuration(for: species)
         )
+        usesForwardLoop = species == .manta
     }
 
     var isAnimating: Bool {
@@ -103,7 +108,7 @@ struct FishDetailStrokeAnimationState {
 
     var currentFrameIndex: Int? {
         guard let currentStepIndex else { return nil }
-        return Self.oneStrokeFrameIndices(frameCount: frameCount)[currentStepIndex]
+        return strokeFrameIndices[currentStepIndex]
     }
 
     @discardableResult
@@ -118,7 +123,7 @@ struct FishDetailStrokeAnimationState {
     mutating func advance() -> Bool {
         guard let currentStepIndex else { return false }
         let nextStepIndex = currentStepIndex + 1
-        guard nextStepIndex < Self.oneStrokeFrameIndices(frameCount: frameCount).count else {
+        guard nextStepIndex < strokeFrameIndices.count else {
             reset()
             return false
         }

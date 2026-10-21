@@ -37,11 +37,11 @@ struct SeaTurtleTests {
 
     @Test func epicPoolIsUniformWithoutChangingRarityWeights() {
         let epic = FishSpecies.allCases.filter { $0.rarity == .epic }
-        #expect(epic == [.manta, .seaTurtle])
+        #expect(epic == [.manta, .seaTurtle, .dolphin])
         for (minutes, expected) in [(0, [70.0, 20, 8, 2]), (180, [58.0, 25, 13, 4]), (300, [58.0, 25, 13, 4])] {
             let p = FishRewardService.rarityProbabilities(for: minutes)
             #expect([p.common, p.rare, p.epic, p.legendary] == expected && p.total == 100)
-            #expect(p.epic / Double(epic.count) == (minutes == 0 ? 4 : 6.5))
+            #expect(p.epic / Double(epic.count) == (minutes == 0 ? 8.0 / 3 : 13.0 / 3))
         }
         #expect(AquariumFishEditorPresentation.speciesInRarityOrder.filter { $0.rarity == .epic } == epic)
     }
@@ -60,8 +60,8 @@ struct SeaTurtleTests {
         #expect(turtle.hoverProbability == 0 && turtle.burstProbability == 0 && turtle.gatheringProbability == 0)
         #expect(turtle.directionHoldDurationRange == 9...14 && turtle.roamingStyle == .small)
         #expect(AquariumFishMotion.wingSwimmingProfile(for: .seaTurtle) == nil)
-        #expect(AquariumFishMotion.wingSwimmingProfile(for: .manta)?.flapSpeedMultiplier == 2.2)
-        #expect(AquariumFishMotion.wingSwimmingProfile(for: .manta)?.glideSpeedMultiplier == 2.0)
+        #expect(WingSwimmingProfile.manta.flapSpeedMultiplier == 2.2)
+        #expect(WingSwimmingProfile.manta.glideSpeedMultiplier == 2.0)
         #expect(AquariumFishMotion.presentationAmplitude(for: .seaTurtle) == 0.20)
     }
 

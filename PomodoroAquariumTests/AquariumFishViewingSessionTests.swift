@@ -4,6 +4,8 @@ import Combine
 import CoreGraphics
 import Foundation
 import Testing
+import ImageIO
+import UniformTypeIdentifiers
 @testable import PomodoroAquarium
 
 @MainActor
@@ -18,7 +20,7 @@ struct AquariumFishViewingSessionTests {
                          CGSize(width: 1024, height: 768)] {
                 let bounds = profile.roamingStyle.bounds(in: size,
                     fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: false))
-                let prefix = species == .seaTurtle ? "7A271E50" : species == .mandarinfish ? "A4DAF15A" : species == .porcupinefish ? "B0C0F15A" : species == .lionfish ? "110F15A0" : species == .pennantCoralfish ? "F1A77A7E" : species == .orientalButterflyfish ? "B077E2F1" : species == .blueGreenChromis ? "C470A115" : species == .yellowTang ? "E1107A60" : "B10E7A60"
+                let prefix = species == .manta ? "B10F17A0" : species == .dolphin ? "D01F1150" : species == .seaTurtle ? "7A271E50" : species == .mandarinfish ? "A4DAF15A" : species == .porcupinefish ? "B0C0F15A" : species == .lionfish ? "110F15A0" : species == .pennantCoralfish ? "F1A77A7E" : species == .orientalButterflyfish ? "B077E2F1" : species == .blueGreenChromis ? "C470A115" : species == .yellowTang ? "E1107A60" : "B10E7A60"
                 let ids = (1...5).map {
                     UUID(uuidString: String(format: "\(prefix)-6A60-4A60-8A60-%012d", $0))!
                 }
@@ -182,7 +184,7 @@ struct AquariumFishViewingSessionTests {
         #expect(adjusted.elapsedTime == 8)
     }
 
-    @Test(arguments: [FishSpecies.blueTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle])
+    @Test(arguments: [FishSpecies.blueTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle, .dolphin, .manta])
     func actualFishViewsResumeAcrossRemountBackgroundAndCentralAddition(species: FishSpecies) async throws {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = try #require(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
@@ -222,6 +224,7 @@ struct AquariumFishViewingSessionTests {
         let before = try #require(session.snapshot(for: probe.ids[0]))
         #expect(before.elapsedTime > 0)
         if species == .porcupinefish { #expect(before.inflation?.phase == .holding) }
+        if species == .dolphin { #expect(before.dolphin != nil) }
         // ホーム→水槽→タイマー相当のView作り直し。位置・行動・向き・位相を丸ごと引き継ぐ。
         for _ in 0..<3 {
             probe.screen += 1
@@ -256,6 +259,94 @@ struct AquariumFishViewingSessionTests {
         #expect(String(reflecting: session.snapshot(for: probe.ids[1])) == String(reflecting: Optional(otherBefore)))
         let fish = try #require(probe.fishFrame), ring = try #require(probe.ringFrame)
         #expect(hypot(fish.midX - ring.midX, fish.midY - ring.midY) < 0.001)
+    }
+
+    @Test func tunaRendersContinuousUndistortedTurnsInBothDirections() async throws {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = try #require(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
+        let session = AquariumFishViewingSession()
+        let probe = ViewingSessionRenderProbe(species: .manta)
+        let size = CGSize(width: 393, height: 852)
+        let bounds = FishMovementProfile.bluefinTuna.roamingStyle.bounds(in: size,
+            fishSize: AquariumFishSizing.displaySize(for: .manta, isFavorite: false))
+        var motion = AquariumFishMotion.initialState(for: probe.ids[0], profile: .bluefinTuna,
+            roamingBounds: bounds, initialPosition: CGPoint(x: 0.5, y: 0.5), aquariumSize: size)
+        motion.currentDepth = 0.5; motion.targetDepth = 0.5
+        let owner = UUID()
+        _ = session.claim(probe.ids[0], owner: owner,
+            initial: .init(motion: motion, direction: .init(direction: motion.facingDirection)), bounds: bounds)
+        session.release(probe.ids[0], owner: owner)
+        let host = UIHostingController(rootView: ViewingSessionRenderHost(session: session, probe: probe, preview: true))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        func settle() async throws {
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(20))
+            host.view.layoutIfNeeded()
+        }
+        try await settle()
+        let url = URL(fileURLWithPath: "/private/tmp/TunaRigidTurnsActualView.gif")
+        let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, UTType.gif.identifier as CFString, 200, nil))
+        CGImageDestinationSetProperties(destination, [kCGImagePropertyGIFDictionary:
+            [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        var directions: Set<Int> = []
+        var records: [[String: Any]] = []
+        var contact: [UIImage] = []
+        var priorSign = motion.facingSign
+        var stoppedTime = 0.0, maximumStoppedTime = 0.0
+        for tick in 1...400 {
+            probe.date = Date(timeIntervalSince1970: 100 + Double(tick) / 20)
+            try await settle()
+            let actual = try #require(session.snapshot(for: probe.ids[0]))
+            let state = actual.motion
+            #expect(abs(state.facingHorizontalScale) == 1 && state.facingWidth == 1)
+            #expect(bounds.horizontal.contains(state.position.x) && bounds.vertical.contains(state.position.y))
+            if state.facingSign != priorSign {
+                directions.insert(state.facingSign < 0 ? 1 : -1)
+                #expect(abs(state.translationVelocity.dx * state.depthSpeedMultiplier * size.width) < 0.00001)
+                priorSign = state.facingSign
+            }
+            let xSpeed = state.translationVelocity.dx * state.depthSpeedMultiplier * size.width
+            if abs(xSpeed) < 0.00001 { stoppedTime += 0.05 } else { stoppedTime = 0 }
+            maximumStoppedTime = max(maximumStoppedTime, stoppedTime)
+            #expect(maximumStoppedTime <= 0.15)
+            if abs(xSpeed) > 0.00001 { #expect(xSpeed * state.facingHorizontalScale > 0) }
+            records.append(["time": actual.elapsedTime, "x": state.position.x * size.width,
+                "y": state.position.y * size.height, "xSpeed": xSpeed,
+                "phase": state.bluefinCruise?.turnPhase.map { String(describing: $0) } ?? "straight",
+                "horizontalScale": state.facingHorizontalScale])
+            if tick.isMultiple(of: 2) {
+                let image = renderer.image { _ in
+                    host.view.drawHierarchy(in: CGRect(origin: .zero, size: size), afterScreenUpdates: true)
+                }
+                CGImageDestinationAddImage(destination, try #require(image.cgImage),
+                    [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.1]] as CFDictionary)
+                if tick.isMultiple(of: 20), contact.count < 10 { contact.append(image) }
+            }
+        }
+        #expect(directions == [-1, 1])
+        #expect(CGImageDestinationFinalize(destination))
+        try JSONSerialization.data(withJSONObject: records, options: .prettyPrinted)
+            .write(to: URL(fileURLWithPath: "/private/tmp/TunaRigidTurnsActualView.json"))
+        let comparison = ImageRenderer(content: VStack(spacing: 4) {
+            ForEach(0..<2) { row in
+                HStack(spacing: 4) {
+                    ForEach(0..<5) { column in
+                        VStack {
+                            Text("\(row * 5 + column + 1)s")
+                            Image(uiImage: contact[row * 5 + column]).resizable().frame(width: 196.5, height: 426)
+                        }
+                    }
+                }
+            }
+        }.padding().background(.white))
+        comparison.scale = 1
+        try #require(comparison.uiImage?.pngData()).write(to: URL(fileURLWithPath: "/private/tmp/TunaRigidTurnsActualView.png"))
     }
 
     @Test func porcupinefishReceivesOverlayTapsWithoutRestartingInflation() async throws {
@@ -306,7 +397,9 @@ struct AquariumFishViewingSessionTests {
 private final class ViewingSessionRenderProbe: ObservableObject {
     let species: FishSpecies
     init(species: FishSpecies) { self.species = species }
-    var ids: [UUID] { [UUID(uuidString: species == .seaTurtle
+    var ids: [UUID] { [UUID(uuidString: species == .manta
+        ? "B10F17A0-6A60-4A60-8A60-000000000001" : species == .dolphin
+        ? "D01F1150-6A60-4A60-8A60-000000000001" : species == .seaTurtle
         ? "7A271E50-6A60-4A60-8A60-000000000001" : species == .mandarinfish
         ? "A4DAF15A-6A60-4A60-8A60-000000000001" : species == .porcupinefish
         ? "B0C0F15A-6A60-4A60-8A60-000000000001" : species == .lionfish
@@ -328,11 +421,13 @@ private final class ViewingSessionRenderProbe: ObservableObject {
 private struct ViewingSessionRenderHost: View {
     let session: AquariumFishViewingSession
     @ObservedObject var probe: ViewingSessionRenderProbe
+    var preview = false
 
     var body: some View {
         ZStack {
+            if preview { AquariumBackground(theme: .aquarium) }
             if probe.visible {
-                ForEach(probe.ids, id: \.self) { id in fish(id: id) }
+                ForEach(preview ? Array(probe.ids.prefix(1)) : probe.ids, id: \.self) { id in fish(id: id) }
                     .id(probe.screen)
             }
         }

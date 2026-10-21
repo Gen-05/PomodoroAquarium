@@ -20,6 +20,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     case jellyfish
     case pufferfish
     case seahorse
+    // 保存互換枠。旧マンタのrawValue/個体参照を保ったままクロマグロとして表示する。
     case manta
     case whaleShark
     case blueTang
@@ -31,6 +32,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     case porcupinefish
     case mandarinfish
     case seaTurtle
+    case dolphin
 
     var id: String {
         rawValue
@@ -38,6 +40,8 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
 
     var name: String {
         switch self {
+        case .dolphin:
+            "イルカ"
         case .seaTurtle:
             "ウミガメ"
         case .mandarinfish:
@@ -65,7 +69,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
         case .seahorse:
             "タツノオトシゴ"
         case .manta:
-            "マンタ"
+            "クロマグロ"
         case .whaleShark:
             "ジンベエザメ"
         }
@@ -75,6 +79,8 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     /// 未対応魚はnilとし、表示側で既存の魚シンボルへフォールバックする。
     var imageName: String? {
         switch self {
+        case .dolphin:
+            "fish_dolphin_side_5"
         case .seaTurtle:
             "fish_sea_turtle_side_4"
         case .mandarinfish:
@@ -98,7 +104,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
         case .jellyfish:
             "fish_moon_jellyfish"
         case .manta:
-            "fish_reef_manta"
+            "fish_bluefin_tuna"
         case .whaleShark:
             "fish_whale_shark"
         case .pufferfish:
@@ -116,7 +122,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     /// 右向きのside素材を、水平方向の進行に合わせて左右反転する魚種。
     var usesHorizontalSwimmingFlip: Bool {
         self == .clownfish || self == .blueTang || self == .yellowTang || self == .blueGreenChromis || self == .orientalButterflyfish || self == .pennantCoralfish || self == .lionfish || self == .porcupinefish || self == .mandarinfish || self == .pufferfish || self == .seahorse
-            || self == .manta || self == .whaleShark || self == .seaTurtle
+            || self == .manta || self == .whaleShark || self == .seaTurtle || self == .dolphin
     }
 
     /// side方向の泳ぎフレーム候補。実在する画像が2枚以上ある時だけアニメーションする。
@@ -127,6 +133,8 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
 
     func swimmingImageNames(for direction: FishFacingDirection) -> [String] {
         switch self {
+        case .dolphin:
+            return (1...9).map { "fish_dolphin_side_\($0)" }
         case .seaTurtle:
             return (1...7).map { "fish_sea_turtle_side_\($0)" }
         case .mandarinfish:
@@ -154,7 +162,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
         case .jellyfish:
             return (1...5).map { "fish_moon_jellyfish_\($0)" }
         case .manta:
-            return (1...7).map { "fish_reef_manta_side_\($0)" }
+            return (1...8).map { "fish_bluefin_tuna_side_\($0)" }
         case .whaleShark:
             return (1...7).map { "fish_whale_shark_side_\($0)" }
         }
@@ -172,7 +180,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
             case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .pufferfish, .seahorse:
                 // 小魚型は中間方向でも専用Assetへ切り替えず、魚種ごとのsideフレームを共用する。
                 swimmingImageNames
-            case .jellyfish, .manta, .whaleShark, .seaTurtle:
+            case .jellyfish, .manta, .whaleShark, .seaTurtle, .dolphin:
                 []
             }
         }
@@ -204,6 +212,8 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
     /// 共通基準サイズに対する魚種ごとの表示倍率。
     var displayScale: CGFloat {
         switch self {
+        case .dolphin:
+            0.80
         case .seaTurtle:
             0.80
         case .mandarinfish:
@@ -245,7 +255,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
             .common
         case .seahorse, .lionfish, .porcupinefish, .mandarinfish:
             .rare
-        case .manta, .seaTurtle:
+        case .manta, .seaTurtle, .dolphin:
             .epic
         case .whaleShark:
             .legendary

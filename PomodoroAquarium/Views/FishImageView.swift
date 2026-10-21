@@ -2,6 +2,11 @@ import SwiftUI
 import UIKit
 
 enum FishSpriteAnimation {
+    static func loopFrameIndex(frameCount: Int, elapsedTime: TimeInterval, frameDuration: TimeInterval, phase: TimeInterval = 0) -> Int {
+        guard frameCount > 1 else { return 0 }
+        return Int(floor(max(elapsedTime + phase, 0) / max(frameDuration, 0.01))) % frameCount
+    }
+
     static func pingPongFrameIndex(
         frameCount: Int,
         elapsedTime: TimeInterval,
@@ -108,7 +113,10 @@ struct FishImageView: View {
         }
         guard frames.count > 1 else { return frames[0] }
         guard let animationTime else { return frames[0] }
-        let index = FishSpriteAnimation.pingPongFrameIndex(
+        let index = species == .manta
+            ? FishSpriteAnimation.loopFrameIndex(frameCount: frames.count, elapsedTime: animationTime,
+                frameDuration: animationFrameDuration, phase: animationPhase)
+            : FishSpriteAnimation.pingPongFrameIndex(
             frameCount: frames.count,
             elapsedTime: animationTime,
             frameDuration: animationFrameDuration,

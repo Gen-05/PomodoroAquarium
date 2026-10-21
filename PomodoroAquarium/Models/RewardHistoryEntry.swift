@@ -67,7 +67,8 @@ struct RewardHistorySnapshot: Identifiable, Equatable {
         id = entry.id
         fishID = entry.fishID
         fishSpecies = FishSpecies(rawValue: entry.fishSpeciesRawValue) ?? .clownfish
-        fishName = entry.fishName
+        // 保存済みの旧名称は書き換えず、互換枠だけ現在の名称で表示する。
+        fishName = fishSpecies == .manta ? fishSpecies.name : entry.fishName
         rarity = FishRarity(rawValue: entry.rarityRawValue) ?? .common
         fishCountDelta = entry.fishCountDelta
         pointDelta = entry.pointDelta

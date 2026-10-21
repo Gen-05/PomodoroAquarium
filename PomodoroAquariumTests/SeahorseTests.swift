@@ -100,7 +100,7 @@ struct SeahorseTests {
         #expect(AquariumFishMotion.movementProfile(for: .clownfish).baseSpeedRange == 0.020...0.032)
         #expect(AquariumFishMotion.movementProfile(for: .pufferfish).baseSpeedRange == 0.020...0.032)
         #expect(AquariumFishMotion.movementProfile(for: .jellyfish).baseSpeedRange == 0.008...0.015)
-        #expect(AquariumFishMotion.movementProfile(for: .manta).baseSpeedRange == 0.042...0.066)
+        #expect(FishMovementProfile.manta.baseSpeedRange == 0.042...0.066)
         #expect(AquariumFishMotion.movementProfile(for: .whaleShark).baseSpeedRange == 0.026...0.040)
     }
 
@@ -203,7 +203,7 @@ struct SeahorseTests {
         #expect(FishSpecies.clownfish.swimmingImageNames.count == 3)
         #expect(FishSpecies.pufferfish.swimmingImageNames.count == 5)
         #expect(FishSpecies.jellyfish.swimmingImageNames.count == 5)
-        #expect(FishSpecies.manta.swimmingImageNames.count == 7)
+        #expect(FishSpecies.manta.swimmingImageNames.count == 8)
         #expect(FishSpecies.whaleShark.swimmingImageNames.count == 7)
     }
 

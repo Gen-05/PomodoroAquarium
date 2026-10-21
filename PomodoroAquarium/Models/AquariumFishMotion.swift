@@ -3,12 +3,12 @@ import Foundation
 
 /// 大型魚の従来設定と、小魚・浮遊系の広い回遊域を分離する。
 enum FishRoamingStyle {
-    case legacy, small, drifting
+    case legacy, small, drifting, bluefinTuna
 
     var distantTargetProbability: CGFloat {
         switch self {
         case .legacy: 0
-        case .small: 0.28
+        case .small, .bluefinTuna: 0.28
         case .drifting: 0.24
         }
     }
@@ -19,11 +19,15 @@ enum FishRoamingStyle {
         }
         // 回転時の半対角と微小な泳動offsetを確保。画像のframe/scaleは変えない。
         let radius = fishSize * 0.72 + 6
-        let xMargin = min(0.45, max(0.05, radius / aquariumSize.width))
-        let yMargin = min(0.45, max(0.07, radius / aquariumSize.height))
+        // クロマグロは追加回転・上下動がなく、実画像の最大半幅/半高で余白を確保する。
+        let horizontalRadius = self == .bluefinTuna ? fishSize * 0.40 + 6 : radius
+        let verticalRadius = self == .bluefinTuna ? fishSize * 0.20 + 6 : radius
+        let xMargin = min(0.45, max(0.05, horizontalRadius / aquariumSize.width))
+        let yMargin = min(0.45, max(0.07, verticalRadius / aquariumSize.height))
         return FishRoamingBounds(
             horizontal: xMargin...(1 - xMargin), vertical: yMargin...(1 - yMargin),
-            horizontalWallMargin: 0.07, verticalWallMargin: 0.06
+            horizontalWallMargin: self == .bluefinTuna ? 0.15 : 0.07,
+            verticalWallMargin: self == .bluefinTuna ? 0.15 : 0.06
         )
     }
 }
@@ -43,6 +47,7 @@ struct FishRoamingBounds {
 struct FishMovementProfile {
     var roamingStyle: FishRoamingStyle = .legacy
     var usesStationKeeping = false
+    var wallAvoidanceStrength: CGFloat = 1
     let baseSpeedRange: ClosedRange<CGFloat>
     let hoverProbability: CGFloat
     let burstProbability: CGFloat
@@ -241,6 +246,50 @@ struct FishMovementProfile {
         swimPhaseSpeedMultiplier: manta.swimPhaseSpeedMultiplier
     )
 
+    /// ウミガメと同じ穏やかな旋回。画像の推進/滑走とは独立した基本移動速度。
+    static let dolphin: FishMovementProfile = {
+        let profile = seaTurtle
+        return FishMovementProfile(
+            roamingStyle: profile.roamingStyle,
+            baseSpeedRange: (profile.baseSpeedRange.lowerBound * 1.10)...(profile.baseSpeedRange.upperBound * 1.10),
+            hoverProbability: profile.hoverProbability, burstProbability: profile.burstProbability,
+            gatheringProbability: profile.gatheringProbability, wanderingRadiusX: profile.wanderingRadiusX,
+            wanderingRadiusY: profile.wanderingRadiusY, turnResponsivenessRange: profile.turnResponsivenessRange,
+            depthRange: profile.depthRange, depthScaleRange: profile.depthScaleRange,
+            depthOpacityRange: profile.depthOpacityRange, depthSpeedRange: profile.depthSpeedRange,
+            depthChangeProbability: profile.depthChangeProbability, depthChangeResponse: profile.depthChangeResponse,
+            directionHoldDurationRange: profile.directionHoldDurationRange,
+            burstSpeedMultiplierRange: profile.burstSpeedMultiplierRange, burstDurationRange: profile.burstDurationRange,
+            burstCooldownRange: profile.burstCooldownRange, hoverDurationRange: profile.hoverDurationRange,
+            steeringNoiseMultiplier: profile.steeringNoiseMultiplier, verticalDirectionBias: profile.verticalDirectionBias,
+            accelerationResponseRange: profile.accelerationResponseRange, brakingResponseRange: profile.brakingResponseRange,
+            swimPhaseSpeedMultiplier: profile.swimPhaseSpeedMultiplier)
+    }()
+
+    // 全体速度は従来値のまま、画面X方向の移動成分だけを調整する。
+    static let bluefinTunaHorizontalSpeedMultiplier: CGFloat = 6.76
+
+    /// 保存上はmanta枠。基準速度はイルカの通常推進（2.30倍を含む）に対する1.2倍。
+    static let bluefinTuna: FishMovementProfile = {
+        let profile = dolphin
+        var result = FishMovementProfile(
+            roamingStyle: .bluefinTuna,
+            baseSpeedRange: (profile.baseSpeedRange.lowerBound * AquariumDolphinSwimming.propulsionSpeed * 1.20)...(profile.baseSpeedRange.upperBound * AquariumDolphinSwimming.propulsionSpeed * 1.20),
+            hoverProbability: 0, burstProbability: 0, gatheringProbability: 0,
+            wanderingRadiusX: profile.wanderingRadiusX, wanderingRadiusY: profile.wanderingRadiusY,
+            turnResponsivenessRange: 1.20...1.50, depthRange: profile.depthRange,
+            depthScaleRange: profile.depthScaleRange, depthOpacityRange: profile.depthOpacityRange,
+            depthSpeedRange: profile.depthSpeedRange, depthChangeProbability: profile.depthChangeProbability,
+            depthChangeResponse: profile.depthChangeResponse, directionHoldDurationRange: 16...24,
+            burstSpeedMultiplierRange: profile.burstSpeedMultiplierRange, burstDurationRange: profile.burstDurationRange,
+            burstCooldownRange: profile.burstCooldownRange, hoverDurationRange: profile.hoverDurationRange,
+            steeringNoiseMultiplier: 0, verticalDirectionBias: profile.verticalDirectionBias,
+            accelerationResponseRange: profile.accelerationResponseRange, brakingResponseRange: profile.brakingResponseRange,
+            swimPhaseSpeedMultiplier: profile.swimPhaseSpeedMultiplier)
+        result.wallAvoidanceStrength = 5
+        return result
+    }()
+
     /// ジンベエザメなど、止まらず長距離を安定巡航する大型魚向けの基準profile。
     static let whaleShark = FishMovementProfile(
         roamingStyle: .legacy,
@@ -421,6 +470,43 @@ enum AquariumFishMotion {
         }
     }
 
+    /// Stateと一緒に共有Snapshotへ保持。高さ変更と折り返しの時計は独立させる。
+    struct BluefinTunaCruise {
+        static let levelDuration: ClosedRange<TimeInterval> = 1...2 // 横進行1〜2回に加える最小保持時間
+        static let heightDistance: ClosedRange<CGFloat> = 40...60
+        static let heightDuration: ClosedRange<TimeInterval> = 5...8
+        static let heightRampFraction: CGFloat = 0.20
+        static let maneuverHorizontalSpeedMultiplier: CGFloat = 2.60 // 高さ変更時の横速度。折り返しはturningSpeedで制御。
+        static let horizontalModeResponse: CGFloat = 3
+        static let maximumVerticalSpeed: CGFloat = 10 // 実際の描画座標でpt/秒
+        // 横向きPNGを変形させず、低速の折り返しと画像反転の時刻を分離する。
+        static let turnDuration: TimeInterval = 1.6
+        static let facingSwitchTime: TimeInterval = 0.8
+        static let turningSpeed: CGFloat = 18 // 低速の折り返し上限。pt/秒、直進倍率とは独立。
+        static let accelerationDuration: TimeInterval = 0.30
+        static let brakingDuration: TimeInterval = 0.45
+        static let edgeSlowingTime: CGFloat = 0.325
+        enum TurnPhase { case braking, turning, accelerating }
+        var aquariumSize: CGSize
+        var levelTimeRemaining: TimeInterval
+        var levelCrossingsRemaining: Int = 1
+        var nextHeightDirection: CGFloat = 1
+        var horizontalSpeedMultiplier: CGFloat = FishMovementProfile.bluefinTunaHorizontalSpeedMultiplier
+        var heightStart: CGFloat = 0
+        var heightTarget: CGFloat?
+        var heightElapsed: TimeInterval = 0
+        var heightTime: TimeInterval = 0
+        var turnElapsed: TimeInterval?
+        var turnPhase: TurnPhase?
+        var phaseElapsed: TimeInterval = 0
+        var countsAsLevelCrossing = false
+        var turnEntryVelocity: CGFloat = 0
+        var turnSpeed: CGFloat = 0 // 開始時に確保した余裕に収まる低速。正規化座標/秒。
+        var brakingTime: TimeInterval = BluefinTunaCruise.brakingDuration
+        var direction: CGFloat
+        var horizontalVelocity: CGFloat?
+    }
+
     struct State {
         var position: CGPoint
         var velocity: CGVector
@@ -473,6 +559,7 @@ enum AquariumFishMotion {
 
         var randomState: UInt64
         var stationKeeping: AquariumMandarinfishMotion.State?
+        var bluefinCruise: BluefinTunaCruise?
 
         mutating func advance(
             deltaTime rawDeltaTime: TimeInterval,
@@ -541,8 +628,9 @@ enum AquariumFishMotion {
                 behavior: behavior,
                 speedRatio: speedRatio
             )
-            let wallForce = AquariumFishMotion.wallSteering(
-                at: position, strength: wallStrength, bounds: roamingBounds
+            // クロマグロの壁回避は予測進路で行う。壁の力を毎フレーム重ねて上下へ流さない。
+            let wallForce = movementProfile.roamingStyle == .bluefinTuna ? CGVector.zero : AquariumFishMotion.wallSteering(
+                at: position, strength: wallStrength * movementProfile.wallAvoidanceStrength, bounds: roamingBounds
             )
             let headingWeight: CGFloat
             switch behavior {
@@ -572,15 +660,29 @@ enum AquariumFishMotion {
                 responseMultiplier: speedResponseMultiplier,
                 minimumSpeedMultiplier: minimumSpeedMultiplier
             )
+            if movementProfile.roamingStyle == .bluefinTuna {
+                advanceBluefinTuna(deltaTime: deltaTime)
+                updateFacing(deltaTime: deltaTime)
+                updateSwimPhase(deltaTime: deltaTime)
+                return
+            }
             velocity = CGVector(dx: blendedDirection.dx * currentSpeed, dy: blendedDirection.dy * currentSpeed)
             updateDepth(deltaTime: deltaTime)
             let depthSpeed = movementProfile.depthSpeedMultiplier(at: currentDepth)
-            position.x += velocity.dx * CGFloat(deltaTime) * depthSpeed
-            position.y += velocity.dy * CGFloat(deltaTime) * depthSpeed
+            let translation = translationVelocity
+            position.x += translation.dx * CGFloat(deltaTime) * depthSpeed
+            position.y += translation.dy * CGFloat(deltaTime) * depthSpeed
             position = AquariumFishMotion.clampedPoint(position, bounds: roamingBounds)
 
             updateFacing(deltaTime: deltaTime)
             updateSwimPhase(deltaTime: deltaTime)
+        }
+
+        /// 操舵用velocityを変えずに、座標へ適用するX成分だけを調整する。
+        /// この後に正規化や速度全体の再計算を行わず、Y成分を維持する。
+        var translationVelocity: CGVector {
+            CGVector(dx: velocity.dx * (movementProfile.roamingStyle == .bluefinTuna
+                ? FishMovementProfile.bluefinTunaHorizontalSpeedMultiplier : 1), dy: velocity.dy)
         }
 
         var depthScale: CGFloat {
@@ -596,7 +698,10 @@ enum AquariumFishMotion {
         }
 
         var facingHorizontalScale: CGFloat {
-            switch facingDirection {
+            if movementProfile.roamingStyle == .bluefinTuna {
+                return facingSign < 0 ? 1 : -1
+            }
+            return switch facingDirection {
             case .right, .upRight, .downRight, .up, .down, .front:
                 abs(facingWidth)
             case .left, .upLeft, .downLeft:
@@ -672,15 +777,19 @@ enum AquariumFishMotion {
 
                 // 手前へ来る時は少し下、奥へ抜ける時は少し上へ向く傾向だけを加える。
                 let depthDelta = targetDepth - currentDepth
-                desiredDirection = AquariumFishMotion.normalized(CGVector(
-                    dx: desiredDirection.dx,
-                    dy: desiredDirection.dy + depthDelta * 0.45
-                ))
+                if movementProfile.roamingStyle != .bluefinTuna {
+                    desiredDirection = AquariumFishMotion.normalized(CGVector(
+                        dx: desiredDirection.dx,
+                        dy: desiredDirection.dy + depthDelta * 0.45
+                    ))
+                }
             }
             depthChangeTimeRemaining = random(in: interval)
         }
 
         private mutating func steeringForCurrentBehavior(noise: CGVector) -> CGVector {
+            // クロマグロは目標点への逐次追従をせず、決めた進路を維持する。
+            if movementProfile.roamingStyle == .bluefinTuna { return .zero }
             let noise = CGVector(
                 dx: noise.dx * movementProfile.steeringNoiseMultiplier,
                 dy: noise.dy * movementProfile.steeringNoiseMultiplier
@@ -767,8 +876,22 @@ enum AquariumFishMotion {
         }
 
         private mutating func updateFacing(deltaTime: TimeInterval) {
-            updateFacingWidth(deltaTime: deltaTime)
+            if movementProfile.roamingStyle == .bluefinTuna {
+                // 横向き素材は等倍のまま最も低速の地点で反転。擬似的な立体変形は加えない。
+                if let cruise = bluefinCruise, cruise.turnPhase == .turning,
+                   cruise.phaseElapsed >= BluefinTunaCruise.facingSwitchTime {
+                    facingSign = cruise.direction // 元が右進行なら、新しい左向きの内部signは+1。
+                }
+                facingWidth = 1
+                visualTurnTargetSign = nil
+                visualTurnProgress = 0
+                facingDirection = facingSign < 0 ? .right : .left
+                pendingFacingDirection = facingDirection
+                pendingFacingDirectionDuration = 0
+                return
+            }
 
+            updateFacingWidth(deltaTime: deltaTime)
             let speedThreshold = max(baseSpeed * 0.18, 0.005)
             let planarSpeed = hypot(velocity.dx, velocity.dy)
             if behavior == .hovering, planarSpeed < baseSpeed * 0.55 {
@@ -800,7 +923,8 @@ enum AquariumFishMotion {
             }
 
             // 約0.2秒同じ方向が続いた場合だけ表示を変え、小さな揺れによる切替を抑える。
-            guard pendingFacingDirectionDuration >= 0.20 else { return }
+            let confirmation: TimeInterval = 0.20
+            guard pendingFacingDirectionDuration >= confirmation else { return }
             facingDirection = candidate
             pendingFacingDirectionDuration = 0
 
@@ -914,13 +1038,19 @@ enum AquariumFishMotion {
                 targetSpeed = baseSpeed * random(in: 0.38...0.68)
                 directionChangeTimeRemaining = behaviorTimeRemaining
                 let turnAngle = random(in: 0.75...1.5) * (chance(0.5) ? 1 : -1)
-                desiredDirection = AquariumFishMotion.rotated(desiredDirection, by: turnAngle)
+                if movementProfile.roamingStyle != .bluefinTuna {
+                    desiredDirection = AquariumFishMotion.rotated(desiredDirection, by: turnAngle)
+                }
             }
         }
 
         private mutating func updateLocalCourse<NeighborPositions: RandomAccessCollection>(
             neighborPositions: NeighborPositions
         ) where NeighborPositions.Index == Int, NeighborPositions.Element == CGPoint {
+            if movementProfile.roamingStyle == .bluefinTuna {
+                directionChangeTimeRemaining = random(in: movementProfile.directionHoldDurationRange)
+                return
+            }
             if behavior == .wandering || behavior == .cruising {
                 chooseLocalTarget(neighborPositions: neighborPositions, permitsGathering: true)
             }
@@ -939,6 +1069,10 @@ enum AquariumFishMotion {
             neighborPositions: NeighborPositions,
             permitsGathering: Bool
         ) where NeighborPositions.Index == Int, NeighborPositions.Element == CGPoint {
+            if movementProfile.roamingStyle == .bluefinTuna {
+                if roamingDestination == nil { chooseBluefinTunaForwardTarget() }
+                return
+            }
             // 遠い目標は短いbehavior遷移で捨てず、同じ速度で時間をかけて回遊する。
             // hoverの停留・既存の方向転換は維持し、大型魚はこの分岐を通さない。
             if movementProfile.roamingStyle != .legacy {
@@ -991,8 +1125,162 @@ enum AquariumFishMotion {
             desiredDirection = AquariumFishMotion.direction(from: position, to: localTarget)
         }
 
+        private mutating func chooseBluefinTunaForwardTarget() {
+            let sign = bluefinCruise?.direction ?? (velocity.dx >= 0 ? 1.0 : -1.0)
+            localTarget = CGPoint(x: sign > 0 ? roamingBounds.horizontal.upperBound : roamingBounds.horizontal.lowerBound,
+                                  y: bluefinCruise?.heightTarget ?? position.y)
+            roamingDestination = localTarget
+            desiredDirection = CGVector(dx: sign, dy: 0)
+        }
+
+        private mutating func advanceBluefinTuna(deltaTime dt: TimeInterval) {
+            guard var cruise = bluefinCruise else { return }
+            updateDepth(deltaTime: dt)
+            let height = max(cruise.aquariumSize.height, 1)
+            let width = max(cruise.aquariumSize.width, 1)
+            let depthSpeed = max(depthSpeedMultiplier, 0.001)
+            let targetMultiplier = cruise.heightTarget != nil || cruise.turnPhase == .braking || cruise.turnPhase == .turning
+                ? BluefinTunaCruise.maneuverHorizontalSpeedMultiplier : FishMovementProfile.bluefinTunaHorizontalSpeedMultiplier
+            cruise.horizontalSpeedMultiplier += (targetMultiplier - cruise.horizontalSpeedMultiplier)
+                * (1 - exp(-BluefinTunaCruise.horizontalModeResponse * CGFloat(dt)))
+            let fullXSpeed = currentSpeed * depthSpeed * cruise.horizontalSpeedMultiplier
+            let x = roamingBounds.horizontal
+            let remainingX = max(0, cruise.direction > 0 ? x.upperBound - position.x : position.x - x.lowerBound)
+            // 減速の積分距離＋低速前進分＋余裕を先読み。直進倍率で折り返し時間を短縮しない。
+            let predictionSpeed = max(fullXSpeed, abs(cruise.horizontalVelocity ?? 0))
+            let wantedTurnSpeed = min(fullXSpeed, BluefinTunaCruise.turningSpeed / width)
+            let turnForwardDistance = wantedTurnSpeed * CGFloat(BluefinTunaCruise.facingSwitchTime / 2)
+            let brakingDistance = (predictionSpeed + wantedTurnSpeed) * CGFloat(BluefinTunaCruise.brakingDuration / 2)
+                + turnForwardDistance + predictionSpeed * 0.1 + 0.01
+            if cruise.turnElapsed == nil, remainingX <= brakingDistance {
+                cruise.turnElapsed = 0
+                cruise.turnPhase = .braking
+                cruise.phaseElapsed = 0
+                cruise.countsAsLevelCrossing = cruise.heightTarget == nil
+                cruise.turnEntryVelocity = cruise.horizontalVelocity ?? (cruise.direction * fullXSpeed)
+                // 減速後の低速前進分も予約。画面サイズ変更で端に近い場合は低速区間も抑える。
+                cruise.turnSpeed = min(wantedTurnSpeed, remainingX
+                    / CGFloat(BluefinTunaCruise.brakingDuration / 2 + BluefinTunaCruise.facingSwitchTime / 2 + 0.1))
+                let reserved = cruise.turnSpeed * CGFloat(BluefinTunaCruise.facingSwitchTime / 2) + 0.001
+                cruise.brakingTime = min(BluefinTunaCruise.brakingDuration,
+                    Double(max(0, remainingX - reserved) * 2 / max(abs(cruise.turnEntryVelocity) + cruise.turnSpeed, 0.001)))
+            }
+            func smooth(_ value: CGFloat) -> CGFloat {
+                let u = min(max(value, 0), 1)
+                return u * u * (3 - 2 * u)
+            }
+            var horizontal = cruise.direction * fullXSpeed
+            if let phase = cruise.turnPhase {
+                cruise.turnElapsed = (cruise.turnElapsed ?? 0) + dt
+                cruise.phaseElapsed += dt
+                switch phase {
+                case .braking:
+                    if cruise.phaseElapsed < cruise.brakingTime {
+                        let progress = smooth(CGFloat(cruise.phaseElapsed / cruise.brakingTime))
+                        horizontal = cruise.turnEntryVelocity * (1 - progress) + cruise.direction * cruise.turnSpeed * progress
+                    } else {
+                        horizontal = cruise.direction * cruise.turnSpeed
+                        cruise.turnPhase = .turning
+                        cruise.phaseElapsed = 0
+                    }
+                case .turning:
+                    let facingReady = facingSign == cruise.direction
+                        && facingDirection == (cruise.direction > 0 ? .left : .right)
+                    if cruise.phaseElapsed < BluefinTunaCruise.facingSwitchTime {
+                        // 向きが変わる地点へ向けて低速前進をなだらかに弱める。
+                        horizontal = cruise.direction * cruise.turnSpeed
+                            * (1 - smooth(CGFloat(cruise.phaseElapsed / BluefinTunaCruise.facingSwitchTime)))
+                    } else if facingReady {
+                        // 前tickで表示方向が切り替わったことを確認してから、低速で新方向へ。
+                        let progress = (cruise.phaseElapsed - BluefinTunaCruise.facingSwitchTime)
+                            / (BluefinTunaCruise.turnDuration - BluefinTunaCruise.facingSwitchTime)
+                        horizontal = -cruise.direction * wantedTurnSpeed * smooth(CGFloat(progress))
+                    } else {
+                        horizontal = 0
+                    }
+                    if cruise.phaseElapsed >= BluefinTunaCruise.turnDuration, facingReady {
+                        // 外向きの余裕がない開始位置でも、内向きには低速で動き出せる。
+                        cruise.turnSpeed = wantedTurnSpeed
+                        cruise.direction *= -1
+                        cruise.turnPhase = .accelerating
+                        cruise.phaseElapsed = 0
+                    }
+                case .accelerating:
+                    let multiplier = cruise.heightTarget != nil
+                        ? BluefinTunaCruise.maneuverHorizontalSpeedMultiplier : FishMovementProfile.bluefinTunaHorizontalSpeedMultiplier
+                    cruise.horizontalSpeedMultiplier = multiplier
+                    let progress = smooth(CGFloat(cruise.phaseElapsed / BluefinTunaCruise.accelerationDuration))
+                    let fastSpeed = currentSpeed * depthSpeed * multiplier
+                    horizontal = cruise.direction * (cruise.turnSpeed + (fastSpeed - cruise.turnSpeed) * progress)
+                    if cruise.phaseElapsed >= BluefinTunaCruise.accelerationDuration {
+                        cruise.turnPhase = nil
+                        cruise.turnElapsed = nil
+                        if cruise.heightTarget == nil, cruise.countsAsLevelCrossing {
+                            cruise.levelCrossingsRemaining = max(0, cruise.levelCrossingsRemaining - 1)
+                        }
+                    }
+                }
+            }
+            // 再加速中も反対側の端を先読みし、座標の切り詰めに頼らず滑らかに減速する。
+            let forwardRoom = max(0, horizontal >= 0 ? x.upperBound - position.x : position.x - x.lowerBound)
+            let safeSpeed = forwardRoom / BluefinTunaCruise.edgeSlowingTime
+            horizontal = (horizontal >= 0 ? 1 : -1) * min(abs(horizontal), safeSpeed)
+            cruise.horizontalVelocity = horizontal
+
+            if cruise.heightTarget == nil {
+                cruise.levelTimeRemaining -= dt
+                if cruise.levelTimeRemaining <= 0, cruise.levelCrossingsRemaining == 0 {
+                    let y = roamingBounds.vertical
+                    let maximumDistance = (y.upperBound - y.lowerBound) * height * 0.45
+                    let distance = min(random(in: BluefinTunaCruise.heightDistance), maximumDistance) / height
+                    var sign = cruise.nextHeightDirection
+                    if position.y + distance > y.upperBound { sign = -1 }
+                    else if position.y - distance < y.lowerBound { sign = 1 }
+                    let target = min(max(position.y + distance * sign, y.lowerBound), y.upperBound)
+                    if abs(target - position.y) * height >= max(1, min(BluefinTunaCruise.heightDistance.lowerBound, maximumDistance)) - 0.001 {
+                        cruise.heightStart = position.y
+                        cruise.heightTarget = target
+                        cruise.heightElapsed = 0
+                        cruise.nextHeightDirection = -sign
+                        // 上下それぞれ20%の加減速区間を持つ補間。最大速度は平均の1.25倍。
+                        // 60ptでも7.5秒以上なら従来の10pt/秒を超えない。横速度とは連動させない。
+                        cruise.heightTime = max(random(in: BluefinTunaCruise.heightDuration),
+                            Double(abs(target - position.y) * height
+                                / ((1 - BluefinTunaCruise.heightRampFraction) * BluefinTunaCruise.maximumVerticalSpeed)))
+                    } else { cruise.levelTimeRemaining = random(in: BluefinTunaCruise.levelDuration) }
+                }
+            }
+            var nextY = position.y
+            if let target = cruise.heightTarget {
+                cruise.heightElapsed = min(cruise.heightElapsed + dt, cruise.heightTime)
+                let u = min(max(CGFloat(cruise.heightElapsed / cruise.heightTime), 0), 1)
+                let ramp = BluefinTunaCruise.heightRampFraction
+                let progress: CGFloat
+                if u < ramp { progress = u * u / (2 * ramp * (1 - ramp)) }
+                else if u > 1 - ramp { progress = 1 - (1 - u) * (1 - u) / (2 * ramp * (1 - ramp)) }
+                else { progress = (u - ramp / 2) / (1 - ramp) }
+                let wanted = cruise.heightStart + (target - cruise.heightStart) * progress
+                let limit = BluefinTunaCruise.maximumVerticalSpeed / height * CGFloat(dt)
+                nextY += min(max(wanted - position.y, -limit), limit)
+                if cruise.heightElapsed >= cruise.heightTime, abs(nextY - target) < 0.0000001 {
+                    nextY = target
+                    cruise.heightTarget = nil
+                    cruise.levelTimeRemaining = random(in: BluefinTunaCruise.levelDuration)
+                    cruise.levelCrossingsRemaining = 1 + (chance(0.5) ? 0 : 1)
+                }
+            }
+            // Yはここでだけ進める。端の回避や旋回から上下成分を足さない。
+            velocity = CGVector(dx: horizontal / (depthSpeed * FishMovementProfile.bluefinTunaHorizontalSpeedMultiplier),
+                                dy: (nextY - position.y) / CGFloat(dt) / depthSpeed)
+            position.x = min(max(position.x + horizontal * CGFloat(dt), x.lowerBound), x.upperBound)
+            position.y = nextY
+            bluefinCruise = cruise
+            chooseBluefinTunaForwardTarget()
+        }
+
         mutating func updateStationKeepingGeometry(size: CGSize, fishSize: CGFloat) {
             stationKeeping?.updateGeometry(bounds: roamingBounds, size: size, fishSize: fishSize)
+            bluefinCruise?.aquariumSize = size
         }
 
         fileprivate mutating func applyStationKeeping() {
@@ -1018,8 +1306,23 @@ enum AquariumFishMotion {
 
         mutating func updateRoamingBounds(_ bounds: FishRoamingBounds) {
             roamingBounds = bounds
+            if let target = bluefinCruise?.heightTarget {
+                bluefinCruise?.heightTarget = min(max(target, bounds.vertical.lowerBound), bounds.vertical.upperBound)
+            }
             stationKeeping?.updateGeometry(bounds: bounds)
-            position = AquariumFishMotion.clampedPoint(position, bounds: bounds)
+            let bounded = AquariumFishMotion.clampedPoint(position, bounds: bounds)
+            if bluefinCruise != nil {
+                position.x = bounded.x
+                if position.y != bounded.y, bluefinCruise?.heightTarget != bounded.y {
+                    // 画面寸法変更で必要になった高さ補正も、通常の縦速度上限で移動する。
+                    bluefinCruise?.heightStart = position.y
+                    bluefinCruise?.heightTarget = bounded.y
+                    bluefinCruise?.heightElapsed = 0
+                    let height = max(bluefinCruise?.aquariumSize.height ?? 1, 1)
+                    bluefinCruise?.heightTime = max(3,
+                        Double(abs(bounded.y - position.y) * height * 1.5 / BluefinTunaCruise.maximumVerticalSpeed))
+                }
+            } else { position = bounded }
             anchorPosition = AquariumFishMotion.clampedPoint(anchorPosition, bounds: bounds)
             localTarget = AquariumFishMotion.clampedPoint(localTarget, bounds: bounds)
             if let destination = roamingDestination {
@@ -1063,18 +1366,19 @@ enum AquariumFishMotion {
         let bytes = mixedIndividualBytes(for: id)
         let angle = CGFloat(bytes[4]) / 255 * .pi * 2
         let baseSpeed = interpolated(profile.baseSpeedRange, byte: bytes[5])
+        // 追加時の座標を優先。通常表示は個体IDと表示セッションから位置を決める。
+        let initialPosition = spawnPosition.map { clampedPoint($0, bounds: roamingBounds) }
+            ?? initialPosition(for: id, bounds: roamingBounds, viewingSessionID: viewingSessionID)
         let direction = normalized(CGVector(
-            dx: cos(angle),
-            dy: sin(angle) * profile.verticalDirectionBias
+            // 水平姿勢に限定しても、混合済みIDから左右の個体差を維持する。
+            dx: profile.roamingStyle == .bluefinTuna ? (bytes[4].isMultiple(of: 2) ? 1 : -1) : cos(angle),
+            dy: profile.roamingStyle == .bluefinTuna ? 0 : sin(angle) * profile.verticalDirectionBias
         ))
         let facingSign: CGFloat = direction.dx >= 0 ? -1 : 1
         let facingDirection = FishFacingDirection.quantized(velocity: direction)
         let initialBehavior: Behavior = profile.hoverProbability > 0 && bytes[11].isMultiple(of: 3)
             ? .hovering
             : .wandering
-        // 追加時の座標を優先。通常表示は個体IDと表示セッションから位置を決める。
-        let initialPosition = spawnPosition.map { clampedPoint($0, bounds: roamingBounds) }
-            ?? initialPosition(for: id, bounds: roamingBounds, viewingSessionID: viewingSessionID)
         let wanderingRadiusX = interpolated(profile.wanderingRadiusX, byte: bytes[12])
         let wanderingRadiusY = interpolated(profile.wanderingRadiusY, byte: bytes[13])
         let initialDepth = interpolated(profile.depthRange, byte: bytes[14])
@@ -1151,6 +1455,14 @@ enum AquariumFishMotion {
             presentationDirectionScale: facingDirection.directionScale,
             randomState: seed(from: bytes)
         )
+        if profile.roamingStyle == .bluefinTuna {
+            state.bluefinCruise = .init(aquariumSize: aquariumSize,
+                levelTimeRemaining: BluefinTunaCruise.levelDuration.lowerBound + Double(bytes[12]) / 255
+                    * (BluefinTunaCruise.levelDuration.upperBound - BluefinTunaCruise.levelDuration.lowerBound),
+                levelCrossingsRemaining: 1 + Int(bytes[13] % 2),
+                nextHeightDirection: bytes[15].isMultiple(of: 2) ? 1 : -1,
+                direction: direction.dx >= 0 ? 1 : -1)
+        }
         if profile.usesStationKeeping {
             state.stationKeeping = .init(seed: state.randomState, position: initialPosition,
                 facingRight: direction.dx >= 0, bounds: roamingBounds, aquariumSize: aquariumSize,
@@ -1170,10 +1482,12 @@ enum AquariumFishMotion {
             .lionfish
         case .jellyfish:
             .jellyfish
+        case .dolphin:
+            .dolphin
         case .seaTurtle:
             .seaTurtle
         case .manta:
-            .manta
+            .bluefinTuna
         case .whaleShark:
             .whaleShark
         case .seahorse:
@@ -1188,7 +1502,8 @@ enum AquariumFishMotion {
     }
 
     static func wingSwimmingProfile(for species: FishSpecies) -> WingSwimmingProfile? {
-        species == .manta ? .manta : nil
+        // マンタのテンプレート自体はウミガメ等が参照するため残す。
+        nil
     }
 
     /// Frame tempoと実移動の印象を揃えるクマノミ型の目標速度倍率。
@@ -1216,8 +1531,8 @@ enum AquariumFishMotion {
 
     /// 体の揺れ・傾きだけを調整し、移動速度やひれのテンポから独立させる。
     static func presentationAmplitude(for species: FishSpecies) -> CGFloat {
-        if species == .seaTurtle { return 0.20 }
-        if species == .mandarinfish { return 0 }
+        if species == .seaTurtle || species == .dolphin { return 0.20 }
+        if species == .mandarinfish || species == .manta { return 0 }
         return (species == .lionfish || species == .porcupinefish) ? 0.45 : 1
     }
 
@@ -1241,6 +1556,8 @@ enum AquariumFishMotion {
         switch species {
         case .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .mandarinfish:
             return 0.20
+        case .dolphin:
+            return AquariumDolphinSwimming.propulsionFrameDuration
         case .seaTurtle:
             return 0.22
         case .porcupinefish:
@@ -1248,7 +1565,7 @@ enum AquariumFishMotion {
         case .jellyfish:
             return 0.30
         case .manta:
-            return 0.36
+            return 0.11
         case .whaleShark:
             return 0.30
         case .pufferfish:
