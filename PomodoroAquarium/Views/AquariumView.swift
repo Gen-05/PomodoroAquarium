@@ -950,9 +950,12 @@ struct SwimmingFishView: View {
         self.spriteTempoMultiplier = AquariumFishMotion.spriteTempoMultiplier(for: fishID)
 
         let profile = AquariumFishMotion.movementProfile(for: species)
-        let bounds = profile.roamingStyle.bounds(in: aquariumSize,
-            fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite))
         let saved = viewingSession?.snapshot(for: fishID)
+        let bounds = species == .mandarinfish && !AquariumMandarinfishMotion.hasValidGeometry(aquariumSize)
+            ? saved?.motion.roamingBounds ?? profile.roamingStyle.bounds(in: aquariumSize,
+                fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite))
+            : profile.roamingStyle.bounds(in: aquariumSize,
+                fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite))
         var initialMotion = saved?.motion ?? AquariumFishMotion.initialState(
             for: fishID,
             profile: profile,
@@ -1041,6 +1044,10 @@ struct SwimmingFishView: View {
                 else { resumeViewingSession() }
             }
             .onChange(of: aquariumSize) { _, size in
+                if species == .mandarinfish, !AquariumMandarinfishMotion.hasValidGeometry(size) {
+                    simulationTiming.pause()
+                    return
+                }
                 if let appearance, appearance.progress(at: updateDate) < 1 {
                     applyAppearancePositionIfNeeded(force: true)
                 }
@@ -1100,7 +1107,8 @@ struct SwimmingFishView: View {
         guard isVisible, !isSimulationPaused, scenePhase == .active else { return }
         if let viewingSession {
             let saved = viewingSession.claim(fishID, owner: ownerID, initial: snapshot,
-                bounds: motion.movementProfile.roamingStyle.bounds(in: aquariumSize, fishSize: fishSize))
+                bounds: species == .mandarinfish && !AquariumMandarinfishMotion.hasValidGeometry(aquariumSize)
+                    ? motion.roamingBounds : motion.movementProfile.roamingStyle.bounds(in: aquariumSize, fishSize: fishSize))
             motion = saved.motion
             motion.updateStationKeepingGeometry(size: aquariumSize, fishSize: fishSize)
             spriteDirectionTransition = saved.direction
@@ -1112,6 +1120,8 @@ struct SwimmingFishView: View {
         }
         simulationTiming.pause()
         applyAppearancePositionIfNeeded()
+        // 初回Geometry確定を、次の泳動tickを待たずに共有側へ反映する。
+        if species == .mandarinfish { saveViewingSession() }
         reportPosition(motion.position)
     }
 
@@ -1144,7 +1154,9 @@ struct SwimmingFishView: View {
         guard canUpdateSession else { simulationTiming.pause(); return }
         guard let deltaTime = simulationTiming.nextDeltaTime(
             at: date,
-            isPaused: isSimulationPaused || (viewingSession != nil && (!isVisible || scenePhase != .active)) || (appearance?.progress(at: date) ?? 1) < 1
+            isPaused: isSimulationPaused || (viewingSession != nil && (!isVisible || scenePhase != .active))
+                || (species == .mandarinfish && !AquariumMandarinfishMotion.hasValidGeometry(aquariumSize))
+                || (appearance?.progress(at: date) ?? 1) < 1
         ) else { return }
         if viewingSession?.takeInflationRequest(for: fishID, owner: ownerID) == true {
             inflation?.request()

@@ -3615,7 +3615,7 @@ struct PomodoroAquariumTests {
             .blueGreenChromis: 1.007,
             .orientalButterflyfish: 0.971,
             .pennantCoralfish: 1.05,
-            .dolphin: 1.00,
+            .dolphin: 1.10,
             .seaTurtle: 1.20,
             .mandarinfish: 1.007,
             .porcupinefish: 1.00,

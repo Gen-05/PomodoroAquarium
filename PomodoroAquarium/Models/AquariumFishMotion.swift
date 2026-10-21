@@ -1280,6 +1280,7 @@ enum AquariumFishMotion {
 
         mutating func updateStationKeepingGeometry(size: CGSize, fishSize: CGFloat) {
             stationKeeping?.updateGeometry(bounds: roamingBounds, size: size, fishSize: fishSize)
+            if stationKeeping != nil { applyStationKeeping() }
             bluefinCruise?.aquariumSize = size
         }
 

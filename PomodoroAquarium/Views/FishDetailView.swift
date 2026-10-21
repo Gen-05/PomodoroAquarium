@@ -32,13 +32,22 @@ enum FishDetailImageLayout {
             + normalizedScale * (maximumPreferredSize - minimumPreferredSize)
     }
 
-    static func displaySize(for species: FishSpecies, availableSize: CGSize) -> CGFloat {
+    /// 図鑑詳細だけの体格調整。報酬は従来のdisplaySizeを使い続ける。
+    static func catalogDisplaySize(for species: FishSpecies, availableSize: CGSize) -> CGFloat {
+        let preferred: CGFloat? = species == .dolphin
+            ? preferredDisplaySize(for: .manta) * visibleContentRatio(for: .manta).width
+                / visibleContentRatio(for: .dolphin).width
+            : nil
+        return displaySize(for: species, availableSize: availableSize, preferredSize: preferred)
+    }
+
+    static func displaySize(for species: FishSpecies, availableSize: CGSize, preferredSize: CGFloat? = nil) -> CGFloat {
         let visibleRatio = visibleContentRatio(for: species)
         let maximumWidth = availableSize.width
             * maximumVisibleContentRatio / max(visibleRatio.width, 0.01)
         let maximumHeight = availableSize.height
             * maximumVisibleContentRatio / max(visibleRatio.height, 0.01)
-        return min(preferredDisplaySize(for: species), maximumWidth, maximumHeight)
+        return min(preferredSize ?? preferredDisplaySize(for: species), maximumWidth, maximumHeight)
     }
 
     /// neutral Assetのcanvasに対する可視魚体のおおよその占有率。
@@ -183,7 +192,7 @@ struct FishDetailView: View {
             VStack(spacing: 28) {
                 GeometryReader { geometry in
                     let availableSize = FishDetailImageLayout.availableSize(in: geometry.size)
-                    let imageSize = FishDetailImageLayout.displaySize(
+                    let imageSize = FishDetailImageLayout.catalogDisplaySize(
                         for: species,
                         availableSize: availableSize
                     )

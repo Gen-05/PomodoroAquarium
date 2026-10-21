@@ -61,7 +61,8 @@ struct AquariumEditorPresentationTests {
                      CGSize(width: 1024, height: 768)] {
             let probe = SpawnRenderProbe()
             let recorder = SpawnRenderRecorder()
-            let host = UIHostingController(rootView: SpawnRenderHost(probe: probe, recorder: recorder, size: size))
+            let session = AquariumFishViewingSession()
+            let host = UIHostingController(rootView: SpawnRenderHost(probe: probe, recorder: recorder, size: size, session: session))
             let window = UIWindow(windowScene: windowScene)
             window.frame = CGRect(origin: .zero, size: size)
             window.rootViewController = host
@@ -109,7 +110,16 @@ struct AquariumEditorPresentationTests {
                     probe.date = start.addingTimeInterval(Double(frame) / 30)
                     try await settle(host)
                     let fish = try #require(recorder.fish)
-                    #expect(hypot(fish.midX - previous.midX, fish.midY - previous.midY) < 5)
+                    if species == .manta {
+                        // 高速直進のクロマグロは1tickで5pt以上進める。描画と共有座標を直接照合する。
+                        let motion = try #require(session.snapshot(for: added.id)?.motion)
+                        let canvas = try #require(recorder.canvas)
+                        #expect(abs(fish.midX - canvas.minX - motion.position.x * size.width) < 0.5)
+                        #expect(abs(fish.midY - canvas.minY - motion.position.y * size.height) < 0.5)
+                    } else {
+                        #expect(hypot(fish.midX - previous.midX, fish.midY - previous.midY) < 5,
+                            "species=\(species) size=\(size) frame=\(frame) previous=\(previous) actual=\(fish) motion=\(String(describing: session.snapshot(for: added.id)?.motion.position))")
+                    }
                     previous = fish
                 }
                 #expect(AquariumFishEditing.store(id: added.id, player: player))
@@ -159,7 +169,16 @@ struct AquariumEditorPresentationTests {
                     let previous = motion.position
                     elapsed += delta
                     motion.advance(deltaTime: delta, elapsedTime: elapsed)
-                    #expect(hypot(motion.position.x - previous.x, motion.position.y - previous.y) < 0.01)
+                    if species == .manta {
+                        // 固定の距離上限ではなく、採用済み横速度の1tick分と連続していることを確認。
+                        let translated = CGPoint(x: previous.x + motion.translationVelocity.dx * motion.depthSpeedMultiplier * delta,
+                            y: previous.y + motion.translationVelocity.dy * motion.depthSpeedMultiplier * delta)
+                        let expected = AquariumFishMotion.clampedPoint(translated, bounds: bounds)
+                        #expect(abs(motion.position.x - expected.x) < 0.00000001)
+                        #expect(abs(motion.position.y - expected.y) < 0.00000001)
+                    } else {
+                        #expect(hypot(motion.position.x - previous.x, motion.position.y - previous.y) < 0.01)
+                    }
                 }
                 #expect(motion.position != spawn)
             }
@@ -215,6 +234,7 @@ private struct SpawnRenderHost: View {
     @ObservedObject var probe: SpawnRenderProbe
     let recorder: SpawnRenderRecorder
     let size: CGSize
+    let session: AquariumFishViewingSession
 
     var body: some View {
         ZStack {
@@ -229,16 +249,19 @@ private struct SpawnRenderHost: View {
             }
         }
         .ignoresSafeArea()
+        .environment(\.scenePhase, .active) // 共有セッションの更新権を取れる実表示と同じ条件。
     }
 
     private var measuredFish: some View {
-        var fish = SwimmingFishView(fishID: probe.id,
+        let observedID = probe.id
+        var fish = SwimmingFishView(fishID: observedID, viewingSession: session,
             initialPosition: probe.appearance?.spawnPosition(in: size), appearance: probe.appearance,
             species: probe.species, backgroundTheme: .aquarium, isFavorite: false,
             aquariumSize: size, updateDate: probe.date, isSimulationPaused: false,
             isSelectionEnabled: true, isSelected: false, neighborPositions: .empty,
             reportPosition: { _ in }, select: {})
         fish.onRenderedFrames = { isRing, frame in
+            guard probe.id == observedID else { return }
             if isRing { recorder.ring = frame } else { recorder.fish = frame }
         }
         return fish

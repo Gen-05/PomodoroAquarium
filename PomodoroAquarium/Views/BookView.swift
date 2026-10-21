@@ -16,7 +16,7 @@ enum BookFishThumbnailLayout {
     static func imageScale(for species: FishSpecies) -> CGFloat {
         switch species {
         case .dolphin:
-            1.00
+            1.10
         case .seaTurtle:
             1.20
         case .mandarinfish:

@@ -18,6 +18,48 @@ struct MandarinfishMotionTests {
             aquariumSize: size, fishSize: fishSize)
     }
 
+    @Test func unresolvedGeometryDoesNotChooseOrAdvanceTheFirstTargetAcrossOneHundredSeeds() throws {
+        let size = CGSize(width: 393, height: 746), fishSize: CGFloat = 40.2
+        let bounds = FishMovementProfile.mandarinfish.roamingStyle.bounds(in: size, fishSize: fishSize)
+        var maximum: CGFloat = 0
+        for seed in 1...100 {
+            for invalidSize in [CGSize.zero, CGSize(width: 0, height: 746), CGSize(width: 393, height: 0)] {
+                let origin = CGPoint(x: 0.5, y: 0.7)
+                var action = AquariumMandarinfishMotion.State(seed: UInt64(seed), position: origin,
+                    facingRight: true, bounds: bounds, aquariumSize: invalidSize, fishSize: fishSize, startNearBottom: false)
+                #expect(!action.isGeometryReady && action.target == origin && action.start == origin)
+                action.advance(deltaTime: 100)
+                #expect(action.position == origin && action.elapsed == 0 && action.randomState == UInt64(seed))
+                action.updateGeometry(bounds: bounds, size: size, fishSize: fishSize)
+                let direct = AquariumMandarinfishMotion.State(seed: UInt64(seed), position: origin,
+                    facingRight: true, bounds: bounds, aquariumSize: size, fishSize: fishSize, startNearBottom: false)
+                #expect(String(reflecting: action) == String(reflecting: direct))
+                let distance = hypot((action.target.x - origin.x) * size.width, (action.target.y - origin.y) * size.height)
+                maximum = max(maximum, distance)
+                #expect(distance <= fishSize * AquariumMandarinfishMotion.visibleLengthRatio
+                    * AquariumMandarinfishMotion.correctionBodyLengths.upperBound + 0.000001)
+                let ready = String(reflecting: action)
+                action.updateGeometry(bounds: bounds, size: .zero)
+                #expect(String(reflecting: action) == ready)
+            }
+        }
+        try JSONSerialization.data(withJSONObject: ["seeds": 100, "maximumFirstHoverPoints": maximum])
+            .write(to: URL(fileURLWithPath: "/private/tmp/MandarinFirstHoverMeasurements.json"))
+    }
+
+    @Test func firstGeometryResolutionSynchronizesThePublicMotionBeforeItsFirstTick() throws {
+        var state = initial(1, size: .zero)
+        let before = state.position
+        let size = CGSize(width: 393, height: 746)
+        let fish = AquariumFishSizing.displaySize(for: .mandarinfish, isFavorite: false)
+        state.updateRoamingBounds(state.movementProfile.roamingStyle.bounds(in: size, fishSize: fish))
+        state.updateStationKeepingGeometry(size: size, fishSize: fish)
+        let action = try #require(state.stationKeeping)
+        #expect(action.isGeometryReady && action.position == before && state.position == before)
+        #expect(state.localTarget == action.target && state.anchorPosition == action.start)
+        #expect(state.randomState == action.randomState && state.behaviorTimeRemaining == action.timeRemaining)
+    }
+
     @Test func thirtySecondsAlternateHoverAndShortSmoothMovesAcrossScreenSizes() throws {
         for size in [CGSize(width: 320, height: 568), CGSize(width: 393, height: 746), CGSize(width: 1024, height: 768)] {
             for index in 1...5 {

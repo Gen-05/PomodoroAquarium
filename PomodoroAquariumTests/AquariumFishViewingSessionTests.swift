@@ -261,6 +261,71 @@ struct AquariumFishViewingSessionTests {
         #expect(hypot(fish.midX - ring.midX, fish.midY - ring.midY) < 0.001)
     }
 
+    @Test func mandarinFirstGeometryAndBackgroundResumeUseTheSameRenderedAndSharedState() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let session = AquariumFishViewingSession()
+        let probe = ViewingSessionRenderProbe(species: .mandarinfish)
+        probe.aquariumSize = .zero
+        let host = UIHostingController(rootView: ViewingSessionRenderHost(session: session, probe: probe))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        func settle() async throws {
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(30))
+            host.view.layoutIfNeeded()
+        }
+        try await settle()
+        let unresolved = try #require(session.snapshot(for: probe.ids[0])?.motion.stationKeeping)
+        #expect(!unresolved.isGeometryReady && unresolved.target == unresolved.position)
+        probe.aquariumSize = CGSize(width: 393, height: 852)
+        try await settle()
+        let initial = try #require(session.snapshot(for: probe.ids[0]))
+        let action = try #require(initial.motion.stationKeeping)
+        #expect(action.isGeometryReady && action.position == initial.motion.position && action.elapsed == 0)
+        let frame = try #require(probe.fishFrame)
+        // 内部座標は上で完全一致、Geometryは各軸の半ピクセル丸めだけを許容する。
+        let pixelTolerance = sqrt(2) / (2 * max(host.traitCollection.displayScale, 1))
+        #expect(hypot(frame.midX - initial.motion.position.x * 393, frame.midY - initial.motion.position.y * 852) <= pixelTolerance)
+        for tick in 1...30 {
+            probe.date = Date(timeIntervalSince1970: 100 + Double(tick) / 30)
+            try await settle()
+            let current = try #require(session.snapshot(for: probe.ids[0]))
+            let distance = hypot((current.motion.position.x - initial.motion.position.x) * 393,
+                (current.motion.position.y - initial.motion.position.y) * 852)
+            #expect(distance < 1)
+            #expect(current.motion.position == current.motion.stationKeeping?.position)
+        }
+        let beforeBackground = try #require(session.snapshot(for: probe.ids[0]))
+        probe.phase = .background
+        try await settle()
+        probe.aquariumSize = .zero
+        probe.date = Date(timeIntervalSince1970: 3700)
+        try await settle()
+        probe.phase = .active
+        try await settle()
+        probe.aquariumSize = CGSize(width: 393, height: 852)
+        try await settle()
+        probe.date = Date(timeIntervalSince1970: 3700 + 1.0 / 30)
+        try await settle()
+        #expect(String(reflecting: session.snapshot(for: probe.ids[0])) == String(reflecting: Optional(beforeBackground)))
+        probe.screen += 1
+        try await settle()
+        #expect(String(reflecting: session.snapshot(for: probe.ids[0])) == String(reflecting: Optional(beforeBackground)))
+        session.beginEditing()
+        let edit = try #require(session.editingSession)
+        let owner = UUID()
+        var edited = edit.claim(probe.ids[0], owner: owner, initial: initial, bounds: initial.motion.roamingBounds)
+        edited.motion.advance(deltaTime: 1.0 / 30, elapsedTime: 1.1)
+        #expect(edit.update(probe.ids[0], owner: owner, snapshot: edited))
+        session.finishEditing(commit: [probe.ids[0]])
+        probe.screen += 1
+        try await settle()
+        #expect(String(reflecting: session.snapshot(for: probe.ids[0])) == String(reflecting: Optional(edited)))
+    }
+
     @Test func tunaRendersContinuousUndistortedTurnsInBothDirections() async throws {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = try #require(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
@@ -408,6 +473,7 @@ private final class ViewingSessionRenderProbe: ObservableObject {
         ? "B077E2F1-6A60-4A60-8A60-000000000001" : species == .blueGreenChromis
         ? "C470A115-6A60-4A60-8A60-000000000001" : "B10E7A60-6A60-4A60-8A60-000000000001")!,
                UUID(uuidString: "E1107A60-6A60-4A60-8A60-000000000002")!] }
+    @Published var aquariumSize = CGSize(width: 393, height: 852)
     @Published var screen = 0
     @Published var visible = true
     @Published var phase = ScenePhase.active
@@ -441,7 +507,7 @@ private struct ViewingSessionRenderHost: View {
             appearance: id == probe.ids[0] ? probe.appearance : nil,
             viewingTapRequest: probe.tapRequest,
             species: id == probe.ids[0] ? probe.species : .yellowTang,
-            backgroundTheme: .aquarium, isFavorite: false, aquariumSize: CGSize(width: 393, height: 852),
+            backgroundTheme: .aquarium, isFavorite: false, aquariumSize: probe.aquariumSize,
             updateDate: probe.date, isSimulationPaused: false, isSelectionEnabled: false,
             isSelected: false, neighborPositions: .empty, reportPosition: { _ in }, select: {})
         if id == probe.ids[0] {

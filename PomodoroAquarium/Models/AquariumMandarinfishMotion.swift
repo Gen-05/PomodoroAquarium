@@ -11,6 +11,10 @@ enum AquariumMandarinfishMotion {
     static let visibleLengthRatio: CGFloat = 1147.0 / 1254
     static let maximumHeadDip: Double = 5
 
+    static func hasValidGeometry(_ size: CGSize) -> Bool {
+        size.width.isFinite && size.height.isFinite && size.width > 0 && size.height > 0
+    }
+
     struct State {
         enum Phase { case hovering, moving }
         private(set) var phase: Phase = .hovering
@@ -25,6 +29,7 @@ enum AquariumMandarinfishMotion {
         private(set) var completedMoves = 0
         private(set) var aquariumSize: CGSize
         private(set) var fishSize: CGFloat
+        private(set) var isGeometryReady: Bool
         private var bounds: FishRoamingBounds
         private var dip: Double = 0
 
@@ -35,11 +40,13 @@ enum AquariumMandarinfishMotion {
             self.aquariumSize = aquariumSize
             self.fishSize = fishSize
             self.facingRight = facingRight
+            self.isGeometryReady = hasValidGeometry(aquariumSize)
             let position = startNearBottom ? Self.lowerInitialPosition(position, bounds: bounds) : position
             self.position = position
             self.start = position
             self.target = position
-            beginHover()
+            // SwiftUIの最初のlayoutが0サイズなら、移動先の抽選も時計もまだ開始しない。
+            if isGeometryReady { beginHover() }
         }
 
         var timeRemaining: TimeInterval { max(duration - elapsed, 0) }
@@ -61,7 +68,7 @@ enum AquariumMandarinfishMotion {
         }
 
         mutating func advance(deltaTime: TimeInterval) {
-            guard deltaTime.isFinite, deltaTime > 0 else { return }
+            guard isGeometryReady, deltaTime.isFinite, deltaTime > 0 else { return }
             var remaining = deltaTime
             while remaining > 0.000000001 {
                 let step = min(remaining, max(duration - elapsed, 0))
@@ -84,11 +91,22 @@ enum AquariumMandarinfishMotion {
             }
         }
 
-        /// 画面サイズ変更時だけ必要な安全補正。行動と残り時間、正規化した経路は継続する。
+        /// 初回の実寸確定で開始し、その後のサイズ変更では行動・残り時間・経路を継続する。
         mutating func updateGeometry(bounds: FishRoamingBounds, size: CGSize? = nil, fishSize: CGFloat? = nil) {
+            // 復帰・一時的な未layoutで、有効な経路を0サイズへ戻さない。
+            if let size, !hasValidGeometry(size) { return }
             self.bounds = bounds
             if let size { aquariumSize = size }
             if let fishSize { self.fishSize = fishSize }
+            if !isGeometryReady {
+                guard hasValidGeometry(aquariumSize) else { return }
+                isGeometryReady = true
+                position = AquariumFishMotion.clampedPoint(position, bounds: bounds)
+                start = position
+                target = position
+                beginHover() // 初回確定時だけ、実寸を使った最初の滞留目標を作る。
+                return
+            }
             let correctedPosition = AquariumFishMotion.clampedPoint(position, bounds: bounds)
             let correctedTarget = AquariumFishMotion.clampedPoint(target, bounds: bounds)
             if correctedPosition != position || correctedTarget != target {

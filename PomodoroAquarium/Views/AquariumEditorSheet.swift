@@ -268,9 +268,9 @@ enum AquariumEditorFishThumbnailLayout {
         switch species {
         case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .mandarinfish: length = 34
         case .seahorse: length = 38
-        case .pufferfish, .porcupinefish, .seaTurtle, .dolphin: length = 46
+        case .pufferfish, .porcupinefish, .seaTurtle: length = 46
         case .jellyfish: length = 50
-        case .manta: length = 74
+        case .manta, .dolphin: length = 74
         case .whaleShark: length = 100
         }
         let ratio = FishDetailImageLayout.visibleContentRatio(for: species)
