@@ -113,7 +113,7 @@ struct FishImageView: View {
         }
         guard frames.count > 1 else { return frames[0] }
         guard let animationTime else { return frames[0] }
-        let index = species == .manta
+        let index = species.usesForwardSwimmingLoop
             ? FishSpriteAnimation.loopFrameIndex(frameCount: frames.count, elapsedTime: animationTime,
                 frameDuration: animationFrameDuration, phase: animationPhase)
             : FishSpriteAnimation.pingPongFrameIndex(

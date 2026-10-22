@@ -726,6 +726,9 @@ enum AquariumFishSizing {
     static func displaySize(for species: FishSpecies, isFavorite _: Bool) -> CGFloat {
         let adjustment: CGFloat
         switch species {
+        case .whaleShark:
+            // 旧泳ぎ1番1177px→新neutral1001px。同じ描画枠を12枚すべてに適用。
+            adjustment = 1177.0 / 1001
         case .manta:
             // クロマグロの静止画可視956pxを、現在のイルカの可視全長の90%に合わせる。
             adjustment = (618.0 / 629) / (956.0 / 1254) * 2.6325 * (0.80 / 2.25)
@@ -908,6 +911,7 @@ struct SwimmingFishView: View {
     @State private var wingCycle: AquariumFishMotion.WingCycle?
     @State private var inflation: AquariumPorcupinefishInflation.State?
     @State private var dolphin: AquariumDolphinSwimming.State?
+    @State private var whaleSharkTempo: AquariumWhaleSharkAnimationTempo.State?
     @State private var simulationTiming = AquariumSimulationTiming()
     @State private var elapsedTime: TimeInterval = 0
     @State private var positionReportTimeRemaining: TimeInterval = 0
@@ -971,6 +975,8 @@ struct SwimmingFishView: View {
         self._motion = State(initialValue: initialMotion)
         self._dolphin = State(initialValue: saved?.dolphin ?? (species == .dolphin ? .init(id: fishID) : nil))
         self._inflation = State(initialValue: saved?.inflation ?? (species == .porcupinefish ? .init(id: fishID) : nil))
+        self._whaleSharkTempo = State(initialValue: saved?.whaleSharkTempo
+            ?? (species == .whaleShark ? .init(id: fishID, playbackTime: saved?.elapsedTime ?? 0) : nil))
         self._elapsedTime = State(initialValue: saved?.elapsedTime ?? 0)
         self._appliedAppearanceStart = State(initialValue: saved?.appliedAppearanceStart)
 
@@ -1096,7 +1102,8 @@ struct SwimmingFishView: View {
 
     private var snapshot: AquariumFishViewingSession.Snapshot {
         .init(motion: motion, direction: spriteDirectionTransition, wing: wingCycle,
-              elapsedTime: elapsedTime, appliedAppearanceStart: appliedAppearanceStart, inflation: inflation, dolphin: dolphin)
+              elapsedTime: elapsedTime, appliedAppearanceStart: appliedAppearanceStart, inflation: inflation, dolphin: dolphin,
+              whaleSharkTempo: whaleSharkTempo)
     }
 
     private var canUpdateSession: Bool {
@@ -1115,13 +1122,15 @@ struct SwimmingFishView: View {
             wingCycle = saved.wing
             inflation = saved.inflation
             dolphin = saved.dolphin
+            whaleSharkTempo = saved.whaleSharkTempo
+                ?? (species == .whaleShark ? .init(id: fishID, playbackTime: saved.elapsedTime) : nil)
             elapsedTime = saved.elapsedTime
             appliedAppearanceStart = saved.appliedAppearanceStart
         }
         simulationTiming.pause()
         applyAppearancePositionIfNeeded()
-        // 初回Geometry確定を、次の泳動tickを待たずに共有側へ反映する。
-        if species == .mandarinfish { saveViewingSession() }
+        // 初回Geometryや専用の再生状態を、次の泳動tickを待たずに共有側へ反映する。
+        if species == .mandarinfish || species == .whaleShark { saveViewingSession() }
         reportPosition(motion.position)
     }
 
@@ -1146,6 +1155,7 @@ struct SwimmingFishView: View {
         simulationTiming.pause()
         if species == .porcupinefish { inflation = .init(id: fishID) }
         if species == .dolphin { dolphin = .init(id: fishID) }
+        if species == .whaleShark { whaleSharkTempo = .init(id: fishID) }
         appliedAppearanceStart = appearance.startedAt
         saveViewingSession()
     }
@@ -1163,6 +1173,7 @@ struct SwimmingFishView: View {
         }
         inflation?.advance(deltaTime: min(deltaTime, AquariumFishMotion.maximumDeltaTime))
         dolphin?.advance(deltaTime: min(deltaTime, AquariumFishMotion.maximumDeltaTime))
+        whaleSharkTempo?.advance(deltaTime: min(deltaTime, AquariumFishMotion.maximumDeltaTime))
         elapsedTime += min(max(deltaTime, 0), AquariumFishMotion.maximumDeltaTime)
         if var wingCycle, let wingProfile {
             wingCycle.advance(
@@ -1266,7 +1277,8 @@ struct SwimmingFishView: View {
         min(max(motion.currentSpeed / max(motion.baseSpeed, 0.001), 0.15), 2.4)
     }
 
-    private var spriteFrameDuration: TimeInterval {
+    /// 描画に使う、既存の個体別テンポを含めた実効間隔。
+    var spriteFrameDuration: TimeInterval {
         AquariumFishMotion.spriteFrameDuration(
             for: species,
             behavior: motion.behavior,
@@ -1279,7 +1291,8 @@ struct SwimmingFishView: View {
         AquariumFishMotion.wingSwimmingProfile(for: species)
     }
 
-    private var spriteAnimationTime: TimeInterval? {
+    var spriteAnimationTime: TimeInterval? {
+        if let whaleSharkTempo { return whaleSharkTempo.playbackTime }
         if species == .seahorse {
             return AquariumFishMotion.seahorseSpriteAnimationTime(
                 swimPhase: motion.swimPhase,

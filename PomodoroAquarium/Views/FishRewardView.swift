@@ -88,7 +88,8 @@ enum FishRewardPresentationTiming {
     }
 
     static func rewardFrameDuration(for species: FishSpecies) -> TimeInterval {
-        rewardFrameDuration(frameCount: species.swimmingImageNames.count)
+        if species == .whaleShark { return AquariumFishMotion.whaleSharkSpriteFrameDuration }
+        return rewardFrameDuration(frameCount: species.swimmingImageNames.count)
     }
 
     static func oneStrokeDuration(frameCount: Int) -> TimeInterval {
@@ -100,7 +101,10 @@ enum FishRewardPresentationTiming {
     }
 
     static func oneStrokeDuration(for species: FishSpecies) -> TimeInterval {
-        oneStrokeDuration(frameCount: species.swimmingImageNames.count)
+        if species == .whaleShark {
+            return Double(species.swimmingImageNames.count) * rewardFrameDuration(for: species)
+        }
+        return oneStrokeDuration(frameCount: species.swimmingImageNames.count)
     }
 }
 

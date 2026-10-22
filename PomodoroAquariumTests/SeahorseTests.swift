@@ -204,7 +204,7 @@ struct SeahorseTests {
         #expect(FishSpecies.pufferfish.swimmingImageNames.count == 5)
         #expect(FishSpecies.jellyfish.swimmingImageNames.count == 5)
         #expect(FishSpecies.manta.swimmingImageNames.count == 8)
-        #expect(FishSpecies.whaleShark.swimmingImageNames.count == 7)
+        #expect(FishSpecies.whaleShark.swimmingImageNames.count == 12)
     }
 
     @Test func existingOwnershipUsesTheSameSpeciesIdentifier() throws {

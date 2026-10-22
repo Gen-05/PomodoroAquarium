@@ -406,6 +406,7 @@ enum AquariumFishMotion {
     static let horizontalRange: ClosedRange<CGFloat> = 0.18...0.82
     static let verticalRange: ClosedRange<CGFloat> = 0.16...0.62
     static let maximumDeltaTime: TimeInterval = 1.0 / 15.0
+    static let whaleSharkSpriteFrameDuration: TimeInterval = 0.24 // 移動はFishMovementProfile.whaleSharkで独立調整。
 
     struct WingCycle {
         enum Phase: Equatable {
@@ -1533,7 +1534,7 @@ enum AquariumFishMotion {
     /// 体の揺れ・傾きだけを調整し、移動速度やひれのテンポから独立させる。
     static func presentationAmplitude(for species: FishSpecies) -> CGFloat {
         if species == .seaTurtle || species == .dolphin { return 0.20 }
-        if species == .mandarinfish || species == .manta { return 0 }
+        if species == .mandarinfish || species == .manta || species == .whaleShark { return 0 }
         return (species == .lionfish || species == .porcupinefish) ? 0.45 : 1
     }
 
@@ -1568,7 +1569,7 @@ enum AquariumFishMotion {
         case .manta:
             return 0.11
         case .whaleShark:
-            return 0.30
+            return whaleSharkSpriteFrameDuration
         case .pufferfish:
             // 小さな胸びれを素早く見せつつ、30fpsでのちらつきを避ける。
             let sharedDuration = spriteFrameDuration(

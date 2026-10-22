@@ -10,7 +10,7 @@ struct AquariumFishEditingTests {
     private let expectedAquariumSizes: [FishSpecies: CGFloat] = [
         .dolphin: 186.9305134619731, .seaTurtle: 172.9161151055391, .mandarinfish: 40.21682564455835, .porcupinefish: 66.14872015449438, .lionfish: 89.30533781498258, .pennantCoralfish: 59.64139267605634, .orientalButterflyfish: 48.442711409395976, .clownfish: 31.2, .blueGreenChromis: 33.462, .yellowTang: 49.608,
         .blueTang: 54.912, .pufferfish: 77.22, .seahorse: 88.92,
-        .jellyfish: 62.4, .manta: 211.70467251598145, .whaleShark: 468
+        .jellyfish: 62.4, .manta: 211.70467251598145, .whaleShark: 468 * (1177.0 / 1001)
     ]
 
     private func player() -> Player {
@@ -21,7 +21,7 @@ struct AquariumFishEditingTests {
         let small = AquariumFishSizing.displaySize(for: .clownfish, isFavorite: false)
         let manta = AquariumFishSizing.displaySize(for: .manta, isFavorite: false)
         let whale = AquariumFishSizing.displaySize(for: .whaleShark, isFavorite: false)
-        #expect(small < manta && manta < whale && whale == 468)
+        #expect(small < manta && manta < whale && whale == 468 * (1177.0 / 1001))
         for species in FishSpecies.allCases {
             #expect(AquariumFishSizing.displaySize(for: species, isFavorite: true) == AquariumFishSizing.displaySize(for: species, isFavorite: false))
         }
@@ -80,8 +80,14 @@ struct AquariumFishEditingTests {
         for species in FishSpecies.allCases {
             let card = AquariumEditorFishThumbnailLayout.imageSize(for: species)
             let row = AquariumEditorFishThumbnailLayout.imageSize(for: species, isPlacedList: true)
-            #expect(card.width <= 112 && card.height <= 112)
-            #expect(row.width <= 60)
+            // ジンベイザメは余白を補正したcanvasより、可視魚体が枠内に収まるかで判定。
+            if species != .whaleShark {
+                #expect(card.width <= 112 && card.height <= 112)
+                #expect(row.width <= 60)
+            }
+            let visible = FishDetailImageLayout.visibleContentRatio(for: species)
+            #expect(card.width * visible.width <= 112 && card.height * visible.height <= 86)
+            #expect(row.width * visible.width <= 60 && row.height * visible.height <= 50)
             #expect(abs(row.width / card.width - 0.52) < 0.0001)
             #expect(abs(AquariumFishSizing.displaySize(for: species, isFavorite: false) - expectedAquariumSizes[species]!) < 0.000001)
         }

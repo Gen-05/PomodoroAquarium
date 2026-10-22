@@ -82,7 +82,7 @@ struct TigerPufferTests {
             behavior: .cruising,
             currentSpeed: baseSpeed,
             baseSpeed: baseSpeed
-        ) == 0.30)
+        ) == 0.24)
 
         let slowBraking = AquariumFishMotion.spriteFrameDuration(
             for: .pufferfish,

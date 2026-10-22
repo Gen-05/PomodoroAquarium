@@ -144,6 +144,6 @@ struct ClownfishThreeFrameTests {
         }
         #expect(FishSpecies.jellyfish.swimmingImageNames.count == 5)
         #expect(FishSpecies.manta.swimmingImageNames.count == 7)
-        #expect(FishSpecies.whaleShark.swimmingImageNames.count == 7)
+        #expect(FishSpecies.whaleShark.swimmingImageNames.count == 12)
     }
 }

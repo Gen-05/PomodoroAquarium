@@ -2698,8 +2698,8 @@ struct PomodoroAquariumTests {
         #expect(indices == [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5])
     }
 
-    @Test func whaleSharkUsesOfficialSideArtworkAndSevenSwimmingFrames() {
-        let expectedFrames = (1...7).map { "fish_whale_shark_side_\($0)" }
+    @Test func whaleSharkUsesOfficialSideArtworkAndTwelveSwimmingFrames() {
+        let expectedFrames = (1...12).map { "fish_whale_shark_side_\($0)" }
 
         #expect(FishSpecies.whaleShark.imageName == "fish_whale_shark")
         #expect(FishSpecies.whaleShark.displayScale == 6.00)
@@ -2712,23 +2712,23 @@ struct PomodoroAquariumTests {
         }
     }
 
-    @Test func whaleSharkUsesSharedSevenFramePingPongAtPowerfulCruisingTempo() {
+    @Test func whaleSharkUsesTwelveFrameForwardLoopAtIndependentTempo() {
         let duration = AquariumFishMotion.spriteFrameDuration(
             for: .whaleShark,
             behavior: .cruising,
             currentSpeed: 0.033,
             baseSpeed: 0.033
         )
-        let indices = (0...13).map { step in
-            FishSpriteAnimation.pingPongFrameIndex(
+        let indices = (0...25).map { step in
+            FishSpriteAnimation.loopFrameIndex(
                 frameCount: FishSpecies.whaleShark.swimmingImageNames.count,
-                elapsedTime: Double(step) * duration,
+                elapsedTime: Double(step) * duration + 0.000001,
                 frameDuration: duration
             )
         }
 
-        #expect(duration == 0.30)
-        #expect(indices == [0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1, 0, 1])
+        #expect(duration == 0.24)
+        #expect(indices == Array(0..<12) + Array(0..<12) + [0, 1])
     }
 
     @Test func whaleSharkProfileIsStableLongRangeAndNeverStopsOrBursts() {
@@ -3624,7 +3624,7 @@ struct PomodoroAquariumTests {
             .pufferfish: 1.20,
             .seahorse: 1.40,
             .manta: 1.20,
-            .whaleShark: 1.32
+            .whaleShark: 1.32 * (1168.0 / 1001)
         ]
 
         #expect(expectedScales.count == FishSpecies.allCases.count)
@@ -3690,7 +3690,7 @@ struct PomodoroAquariumTests {
             .pufferfish: 118.29,
             .seahorse: 136.06,
             .manta: 185.04,
-            .whaleShark: 300
+            .whaleShark: 350.05
         ]
 
         for species in FishSpecies.allCases {
@@ -3751,7 +3751,7 @@ struct PomodoroAquariumTests {
             .pufferfish: 5,
             .seahorse: 5,
             .manta: 8,
-            .whaleShark: 7
+            .whaleShark: 12
         ]
         let expectedDurations: [FishSpecies: TimeInterval] = [
             .clownfish: 0.155,
@@ -3769,7 +3769,7 @@ struct PomodoroAquariumTests {
             .pufferfish: 0.06975,
             .seahorse: 0.28,
             .manta: 0.11,
-            .whaleShark: 0.30
+            .whaleShark: 0.24
         ]
 
         for species in FishSpecies.allCases {

@@ -144,11 +144,22 @@ struct FishRewardPresentationTests {
         #expect(legendary.usesSparkles)
     }
 
-    @Test func rewardAnimationReusesTheDetailSequenceWithAUniformStrokeDuration() {
+    @Test func rewardAnimationPreservesExistingTimingAndUsesTheWhaleSharkForwardCycle() {
         #expect(FishRewardPresentationTiming.rewardStrokeDuration == 3.0)
 
         for species in FishSpecies.allCases {
             let state = FishDetailStrokeAnimationState(species: species)
+            if species == .whaleShark {
+                var playing = state
+                let started = playing.start()
+                #expect(started)
+                var frames: [Int] = []
+                while let index = playing.currentFrameIndex { frames.append(index); playing.advance() }
+                #expect(frames == Array(0..<12))
+                #expect(FishRewardPresentationTiming.rewardFrameDuration(for: species) == 0.24)
+                #expect(abs(FishRewardPresentationTiming.oneStrokeDuration(for: species) - 2.88) < 0.000001)
+                continue
+            }
             let expected = FishDetailStrokeAnimationState.oneStrokeFrameIndices(
                 frameCount: species.swimmingImageNames.count
             )

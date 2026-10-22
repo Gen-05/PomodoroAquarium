@@ -125,6 +125,9 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
             || self == .manta || self == .whaleShark || self == .seaTurtle || self == .dolphin
     }
 
+    /// 素材が1周期として制作されている魚。ほかの魚は既存の往復再生を維持する。
+    var usesForwardSwimmingLoop: Bool { self == .manta || self == .whaleShark }
+
     /// side方向の泳ぎフレーム候補。実在する画像が2枚以上ある時だけアニメーションする。
     /// 現在の静止画imageNameは、未追加・不足時の互換fallbackとして維持する。
     var swimmingImageNames: [String] {
@@ -164,7 +167,7 @@ enum FishSpecies: String, Codable, CaseIterable, Identifiable {
         case .manta:
             return (1...8).map { "fish_bluefin_tuna_side_\($0)" }
         case .whaleShark:
-            return (1...7).map { "fish_whale_shark_side_\($0)" }
+            return (1...12).map { "fish_whale_shark_side_\($0)" }
         }
     }
 

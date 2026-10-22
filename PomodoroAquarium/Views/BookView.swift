@@ -46,7 +46,7 @@ enum BookFishThumbnailLayout {
         case .manta:
             1.20
         case .whaleShark:
-            1.32
+            1.32 * (1168.0 / 1001) // 旧静止画と同じ可視全長にする透明余白補正。
         }
     }
 

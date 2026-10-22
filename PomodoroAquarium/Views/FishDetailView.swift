@@ -28,8 +28,10 @@ enum FishDetailImageLayout {
             max((speciesScale - minimumScale) / (maximumScale - minimumScale), 0),
             1
         )
-        return minimumPreferredSize
+        let preferred = minimumPreferredSize
             + normalizedScale * (maximumPreferredSize - minimumPreferredSize)
+        // 旧静止画1168px→新neutral1001px。ほかの魚の表示設定には波及させない。
+        return species == .whaleShark ? preferred * (1168.0 / 1001) : preferred
     }
 
     /// 図鑑詳細だけの体格調整。報酬は従来のdisplaySizeを使い続ける。
@@ -85,7 +87,7 @@ enum FishDetailImageLayout {
         case .manta:
             CGSize(width: 0.763, height: 0.288)
         case .whaleShark:
-            CGSize(width: 0.95, height: 0.28)
+            CGSize(width: 1001.0 / 1254, height: 376.0 / 1254)
         }
     }
 }
@@ -108,7 +110,7 @@ struct FishDetailStrokeAnimationState {
             frameCount: species.swimmingImageNames.count,
             frameDuration: Self.frameDuration(for: species)
         )
-        usesForwardLoop = species == .manta
+        usesForwardLoop = species.usesForwardSwimmingLoop
     }
 
     var isAnimating: Bool {
