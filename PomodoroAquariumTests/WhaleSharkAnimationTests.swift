@@ -48,7 +48,7 @@ struct WhaleSharkAnimationTests {
         #expect(UIImage(named: species.imageName!)?.pngData() == UIImage(named: species.swimmingImageNames[0])?.pngData())
         #expect(UIImage(named: species.swimmingImageNames[6])?.pngData() == UIImage(named: species.swimmingImageNames[0])?.pngData())
         for species in FishSpecies.allCases where species != .whaleShark {
-            #expect(species.usesForwardSwimmingLoop == (species == .manta))
+            #expect(species.usesForwardSwimmingLoop == (species == .manta || species == .orca))
         }
     }
 
@@ -307,8 +307,8 @@ struct WhaleSharkAnimationTests {
 
     @Test func ownershipPlacementDiscoveryAndLegendaryCandidatesStayCompatible() throws {
         let restored = try JSONDecoder().decode(FishSpecies.self, from: Data("\"whaleShark\"".utf8))
-        #expect(restored == .whaleShark && FishSpecies.allCases.count == 16)
-        #expect(FishSpecies.allCases.filter { $0.rarity == .legendary } == [.whaleShark])
+        #expect(restored == .whaleShark && FishSpecies.allCases.count == 17)
+        #expect(FishSpecies.allCases.filter { $0.rarity == .legendary } == [.whaleShark, .orca])
         let container = try ModelContainer(for: Player.self, PlayerFish.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let id = UUID(), fish = PlayerFish(id: id, species: restored)
         let player = Player(ownedFish: [fish], activeAquariumFishIDs: [id], hasInitializedActiveAquariumFish: true)

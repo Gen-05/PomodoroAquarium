@@ -184,12 +184,22 @@ struct AquariumFishViewingSessionTests {
         #expect(adjusted.elapsedTime == 8)
     }
 
-    @Test(arguments: [FishSpecies.blueTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle, .dolphin, .manta, .whaleShark])
+    @Test(arguments: [FishSpecies.blueTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle, .dolphin, .manta, .whaleShark, .orca])
     func actualFishViewsResumeAcrossRemountBackgroundAndCentralAddition(species: FishSpecies) async throws {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = try #require(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
         let session = AquariumFishViewingSession(id: firstSession)
         let probe = ViewingSessionRenderProbe(species: species)
+        if species == .orca {
+            let id = probe.ids[0], owner = UUID()
+            let profile = FishMovementProfile.orca
+            let motion = AquariumFishMotion.initialState(for: id, profile: profile)
+            var cycle = AquariumOrcaSwimming.State(id: id, staggered: false)
+            cycle.advance(deltaTime: 5.42)
+            _ = session.claim(id, owner: owner, initial: .init(motion: motion,
+                direction: .init(direction: motion.facingDirection), orca: cycle), bounds: .legacy)
+            session.release(id, owner: owner)
+        }
         if species == .whaleShark {
             let id = probe.ids[0], owner = UUID()
             let motion = AquariumFishMotion.initialState(for: id, profile: .whaleShark)
@@ -235,6 +245,7 @@ struct AquariumFishViewingSessionTests {
         #expect(before.elapsedTime > 0)
         if species == .porcupinefish { #expect(before.inflation?.phase == .holding) }
         if species == .dolphin { #expect(before.dolphin != nil) }
+        if species == .orca { #expect(before.orca?.phase == .gliding) }
         if species == .whaleShark { #expect(before.whaleSharkTempo?.phase == .slowing) }
         // ホーム→水槽→タイマー相当のView作り直し。位置・行動・向き・位相を丸ごと引き継ぐ。
         for _ in 0..<3 {
@@ -265,6 +276,7 @@ struct AquariumFishViewingSessionTests {
         try await settle()
         let added = try #require(session.snapshot(for: probe.ids[0]))
         if species == .porcupinefish { #expect(added.inflation?.phase == .swimming) }
+        if species == .orca { #expect(added.orca == AquariumOrcaSwimming.State(id: probe.ids[0])) }
         if species == .whaleShark {
             #expect(added.whaleSharkTempo?.phase == .normal)
             #expect(added.whaleSharkTempo?.playbackTime == 0)

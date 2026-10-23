@@ -98,7 +98,7 @@ struct DolphinCatalogLayoutTests {
         #expect(abs(AquariumFishSizing.displaySize(for: .dolphin, isFavorite: false) - 186.9305134619731) < 0.000001)
         for width: CGFloat in [320, 393, 768] {
             let available = FishDetailImageLayout.availableSize(in: CGSize(width: width, height: 240))
-            for species in FishSpecies.allCases where species != .dolphin {
+            for species in FishSpecies.allCases where species != .dolphin && species != .orca {
                 #expect(FishDetailImageLayout.catalogDisplaySize(for: species, availableSize: available)
                     == FishDetailImageLayout.displaySize(for: species, availableSize: available))
             }

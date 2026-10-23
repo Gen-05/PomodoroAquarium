@@ -7,6 +7,9 @@ enum AquariumDeveloperFish {
     private static let grants: [(species: FishSpecies, ids: [UUID])] = {
 #if DEBUG
         return [
+            (.orca, (1...5).map {
+                UUID(uuidString: String(format: "0ACA1150-6A60-4A60-8A60-%012d", $0))!
+            }),
             (.manta, (1...5).map {
                 UUID(uuidString: String(format: "B10F17A0-6A60-4A60-8A60-%012d", $0))!
             }),

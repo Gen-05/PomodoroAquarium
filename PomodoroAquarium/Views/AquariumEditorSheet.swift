@@ -266,6 +266,7 @@ enum AquariumEditorFishThumbnailLayout {
     static func imageSize(for species: FishSpecies, isPlacedList: Bool = false) -> CGSize {
         let length: CGFloat
         switch species {
+        case .orca: length = 88.8 // イルカ74ptの1.2倍。水槽内サイズとは独立。
         case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .mandarinfish: length = 34
         case .seahorse: length = 38
         case .pufferfish, .porcupinefish, .seaTurtle: length = 46

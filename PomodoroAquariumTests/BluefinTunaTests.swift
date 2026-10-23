@@ -12,7 +12,7 @@ struct BluefinTunaTests {
         let legacy = try JSONDecoder().decode(FishSpecies.self, from: Data("\"manta\"".utf8))
         #expect(legacy == .manta && legacy.rawValue == "manta" && legacy.name == "クロマグロ")
         #expect(try JSONEncoder().encode(legacy) == Data("\"manta\"".utf8))
-        #expect(FishSpecies.allCases.count == 16)
+        #expect(FishSpecies.allCases.count == 17)
         #expect(!FishSpecies.allCases.contains { $0.name == "マンタ" })
         #expect(FishSpecies.allCases.filter { $0.rarity == .epic } == [.manta, .seaTurtle, .dolphin])
         #expect(legacy.imageName == "fish_bluefin_tuna")

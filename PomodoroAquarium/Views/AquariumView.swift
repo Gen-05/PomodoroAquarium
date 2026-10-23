@@ -726,6 +726,9 @@ enum AquariumFishSizing {
     static func displaySize(for species: FishSpecies, isFavorite _: Bool) -> CGFloat {
         let adjustment: CGFloat
         switch species {
+        case .orca:
+            // 初期のイルカ比1.2倍から10%拡大（1.32倍）。16枚とも同じcanvas。
+            return displaySize(for: .dolphin, isFavorite: false) * (1203.0 / 1193) * 1.32
         case .whaleShark:
             // 旧泳ぎ1番1177px→新neutral1001px。同じ描画枠を12枚すべてに適用。
             adjustment = 1177.0 / 1001
@@ -911,6 +914,7 @@ struct SwimmingFishView: View {
     @State private var wingCycle: AquariumFishMotion.WingCycle?
     @State private var inflation: AquariumPorcupinefishInflation.State?
     @State private var dolphin: AquariumDolphinSwimming.State?
+    @State private var orca: AquariumOrcaSwimming.State?
     @State private var whaleSharkTempo: AquariumWhaleSharkAnimationTempo.State?
     @State private var simulationTiming = AquariumSimulationTiming()
     @State private var elapsedTime: TimeInterval = 0
@@ -974,6 +978,7 @@ struct SwimmingFishView: View {
         initialMotion.updateStationKeepingGeometry(size: aquariumSize, fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite))
         self._motion = State(initialValue: initialMotion)
         self._dolphin = State(initialValue: saved?.dolphin ?? (species == .dolphin ? .init(id: fishID) : nil))
+        self._orca = State(initialValue: saved?.orca ?? (species == .orca ? .init(id: fishID) : nil))
         self._inflation = State(initialValue: saved?.inflation ?? (species == .porcupinefish ? .init(id: fishID) : nil))
         self._whaleSharkTempo = State(initialValue: saved?.whaleSharkTempo
             ?? (species == .whaleShark ? .init(id: fishID, playbackTime: saved?.elapsedTime ?? 0) : nil))
@@ -1103,7 +1108,7 @@ struct SwimmingFishView: View {
     private var snapshot: AquariumFishViewingSession.Snapshot {
         .init(motion: motion, direction: spriteDirectionTransition, wing: wingCycle,
               elapsedTime: elapsedTime, appliedAppearanceStart: appliedAppearanceStart, inflation: inflation, dolphin: dolphin,
-              whaleSharkTempo: whaleSharkTempo)
+              whaleSharkTempo: whaleSharkTempo, orca: orca)
     }
 
     private var canUpdateSession: Bool {
@@ -1122,6 +1127,7 @@ struct SwimmingFishView: View {
             wingCycle = saved.wing
             inflation = saved.inflation
             dolphin = saved.dolphin
+            orca = saved.orca ?? (species == .orca ? .init(id: fishID) : nil)
             whaleSharkTempo = saved.whaleSharkTempo
                 ?? (species == .whaleShark ? .init(id: fishID, playbackTime: saved.elapsedTime) : nil)
             elapsedTime = saved.elapsedTime
@@ -1130,7 +1136,7 @@ struct SwimmingFishView: View {
         simulationTiming.pause()
         applyAppearancePositionIfNeeded()
         // 初回Geometryや専用の再生状態を、次の泳動tickを待たずに共有側へ反映する。
-        if species == .mandarinfish || species == .whaleShark { saveViewingSession() }
+        if species == .mandarinfish || species == .whaleShark || species == .orca { saveViewingSession() }
         reportPosition(motion.position)
     }
 
@@ -1155,6 +1161,7 @@ struct SwimmingFishView: View {
         simulationTiming.pause()
         if species == .porcupinefish { inflation = .init(id: fishID) }
         if species == .dolphin { dolphin = .init(id: fishID) }
+        if species == .orca { orca = .init(id: fishID) }
         if species == .whaleShark { whaleSharkTempo = .init(id: fishID) }
         appliedAppearanceStart = appearance.startedAt
         saveViewingSession()
@@ -1173,6 +1180,7 @@ struct SwimmingFishView: View {
         }
         inflation?.advance(deltaTime: min(deltaTime, AquariumFishMotion.maximumDeltaTime))
         dolphin?.advance(deltaTime: min(deltaTime, AquariumFishMotion.maximumDeltaTime))
+        orca?.advance(deltaTime: min(deltaTime, AquariumFishMotion.maximumDeltaTime))
         whaleSharkTempo?.advance(deltaTime: min(deltaTime, AquariumFishMotion.maximumDeltaTime))
         elapsedTime += min(max(deltaTime, 0), AquariumFishMotion.maximumDeltaTime)
         if var wingCycle, let wingProfile {
@@ -1217,15 +1225,15 @@ struct SwimmingFishView: View {
         FishImageView(
             species: species,
             facingDirection: motion.facingDirection,
-            spritePose: (species == .seaTurtle || species == .dolphin || species == .manta)
+            spritePose: (species == .seaTurtle || species == .dolphin || species == .orca || species == .manta)
                 ? .facing(motion.facingSign < 0 ? .right : .left) : spriteDirectionTransition.pose,
-            facingHorizontalScale: (species == .seaTurtle || species == .dolphin)
+            facingHorizontalScale: (species == .seaTurtle || species == .dolphin || species == .orca)
                 ? (motion.facingSign < 0 ? 1 : -1) : motion.facingHorizontalScale,
-            animationTime: inflation == nil && dolphin == nil ? spriteAnimationTime : nil,
+            animationTime: inflation == nil && dolphin == nil && orca == nil ? spriteAnimationTime : nil,
             animationFrameDuration: spriteFrameDuration,
             animationPhase: species == .seahorse ? 0 : spriteAnimationPhase,
             fixedAnimationFrameIndex: fixedSpriteFrameIndex,
-            runtimeImageName: dolphin?.imageName ?? inflation?.imageName
+            runtimeImageName: orca?.imageName ?? dolphin?.imageName ?? inflation?.imageName
         )
     }
 
@@ -1284,7 +1292,7 @@ struct SwimmingFishView: View {
             behavior: motion.behavior,
             currentSpeed: motion.currentSpeed,
             baseSpeed: motion.baseSpeed
-        ) * (species == .manta ? 1 : spriteTempoMultiplier)
+        ) * ((species == .manta || species == .orca) ? 1 : spriteTempoMultiplier)
     }
 
     private var wingProfile: WingSwimmingProfile? {
@@ -1309,6 +1317,7 @@ struct SwimmingFishView: View {
     }
 
     private var wingSpeedMultiplier: CGFloat {
+        if let orca { return orca.speedMultiplier }
         if let dolphin { return dolphin.speedMultiplier }
         if species == .seaTurtle {
             return AquariumFishMotion.seaTurtlePropulsionMultiplier(elapsedTime: elapsedTime,

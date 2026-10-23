@@ -36,6 +36,11 @@ enum FishDetailImageLayout {
 
     /// 図鑑詳細だけの体格調整。報酬は従来のdisplaySizeを使い続ける。
     static func catalogDisplaySize(for species: FishSpecies, availableSize: CGSize) -> CGFloat {
+        if species == .orca {
+            let preferred = preferredDisplaySize(for: .manta) * visibleContentRatio(for: .manta).width
+                * 1.2 / visibleContentRatio(for: .orca).width
+            return displaySize(for: species, availableSize: availableSize, preferredSize: preferred)
+        }
         let preferred: CGFloat? = species == .dolphin
             ? preferredDisplaySize(for: .manta) * visibleContentRatio(for: .manta).width
                 / visibleContentRatio(for: .dolphin).width
@@ -56,6 +61,8 @@ enum FishDetailImageLayout {
     /// 透明余白だけを考慮し、displayScaleによる体格差はpreferredDisplaySizeで扱う。
     static func visibleContentRatio(for species: FishSpecies) -> CGSize {
         switch species {
+        case .orca:
+            CGSize(width: 1193.0 / 1254, height: 447.0 / 1254)
         case .dolphin:
             CGSize(width: 0.960, height: 0.293)
         case .seaTurtle:

@@ -20,7 +20,7 @@ struct AquariumFishIndividualityTests {
          Double(state.turnResponsiveness), Double(state.wanderingRadiusX), Double(state.wanderingRadiusY)]
     }
 
-    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle, .dolphin, .manta])
+    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle, .dolphin, .manta, .orca])
     func fixedIDsStartIndependentlyAndReplayTheSameFirstFiveSeconds(species: FishSpecies) {
         let ids = ids(for: species)
         let profile = AquariumFishMotion.movementProfile(for: species)
@@ -74,7 +74,7 @@ struct AquariumFishIndividualityTests {
         }
     }
 
-    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle, .dolphin, .manta])
+    @Test(arguments: [FishSpecies.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle, .dolphin, .manta, .orca])
     func explicitSpawnAlwaysTakesPriorityOverIndividualPosition(species: FishSpecies) {
         let profile = AquariumFishMotion.movementProfile(for: species)
         for id in ids(for: species) {

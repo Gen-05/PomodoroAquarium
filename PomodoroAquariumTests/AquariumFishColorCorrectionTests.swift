@@ -56,7 +56,7 @@ struct AquariumFishColorCorrectionTests {
         }
     }
 
-    private let targetSpecies: [FishSpecies] = [.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle, .dolphin, .manta]
+    private let targetSpecies: [FishSpecies] = [.blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .porcupinefish, .mandarinfish, .seaTurtle, .dolphin, .manta, .orca]
 
     // 今回の変更前の値を独立して保持。比較・回帰検証に現在の値を流用しない。
     private func legacy(_ theme: AquariumBackgroundTheme, _ species: FishSpecies) -> AquariumFishColorCorrection {
@@ -79,7 +79,7 @@ struct AquariumFishColorCorrectionTests {
     @Test func renderThreeFishOnAllActualBackgroundsAtMatchedPositionsAndSizes() throws {
         for theme in [AquariumBackgroundTheme.aquarium, .tropical, .deepSea] {
             // ハタタテダイは専用テストで別画像へ出力し、縦連結が描画上限を超えないようにする。
-            let speciesList = targetSpecies.filter { $0 != .pennantCoralfish && $0 != .lionfish && $0 != .porcupinefish && $0 != .mandarinfish && $0 != .seaTurtle && $0 != .dolphin && $0 != .manta } + [.clownfish]
+            let speciesList = targetSpecies.filter { $0 != .pennantCoralfish && $0 != .lionfish && $0 != .porcupinefish && $0 != .mandarinfish && $0 != .seaTurtle && $0 != .dolphin && $0 != .manta && $0 != .orca } + [.clownfish]
             let full = ImageRenderer(content: VStack(spacing: 0) {
                 ForEach(speciesList, id: \.self) { species in
                     HStack(spacing: 0) {

@@ -3,12 +3,12 @@ import Foundation
 
 /// 大型魚の従来設定と、小魚・浮遊系の広い回遊域を分離する。
 enum FishRoamingStyle {
-    case legacy, small, drifting, bluefinTuna
+    case legacy, small, drifting, bluefinTuna, orca
 
     var distantTargetProbability: CGFloat {
         switch self {
         case .legacy: 0
-        case .small, .bluefinTuna: 0.28
+        case .small, .bluefinTuna, .orca: 0.28
         case .drifting: 0.24
         }
     }
@@ -20,13 +20,16 @@ enum FishRoamingStyle {
         // 回転時の半対角と微小な泳動offsetを確保。画像のframe/scaleは変えない。
         let radius = fishSize * 0.72 + 6
         // クロマグロは追加回転・上下動がなく、実画像の最大半幅/半高で余白を確保する。
-        let horizontalRadius = self == .bluefinTuna ? fishSize * 0.40 + 6 : radius
-        let verticalRadius = self == .bluefinTuna ? fishSize * 0.20 + 6 : radius
+        // シャチ16枚の可視範囲は中心から横0.476・縦0.263以内。両向きで余白を取る。
+        let horizontalRadius = self == .orca ? fishSize * 0.49 + 6
+            : self == .bluefinTuna ? fishSize * 0.40 + 6 : radius
+        let verticalRadius = self == .orca ? fishSize * 0.28 + 6
+            : self == .bluefinTuna ? fishSize * 0.20 + 6 : radius
         let xMargin = min(0.45, max(0.05, horizontalRadius / aquariumSize.width))
         let yMargin = min(0.45, max(0.07, verticalRadius / aquariumSize.height))
         return FishRoamingBounds(
             horizontal: xMargin...(1 - xMargin), vertical: yMargin...(1 - yMargin),
-            horizontalWallMargin: self == .bluefinTuna ? 0.15 : 0.07,
+            horizontalWallMargin: (self == .bluefinTuna || self == .orca) ? 0.15 : 0.07,
             verticalWallMargin: self == .bluefinTuna ? 0.15 : 0.06
         )
     }
@@ -264,6 +267,13 @@ struct FishMovementProfile {
             steeringNoiseMultiplier: profile.steeringNoiseMultiplier, verticalDirectionBias: profile.verticalDirectionBias,
             accelerationResponseRange: profile.accelerationResponseRange, brakingResponseRange: profile.brakingResponseRange,
             swimPhaseSpeedMultiplier: profile.swimPhaseSpeedMultiplier)
+    }()
+
+    /// イルカの穏やかな回遊を再利用。画像・推進/滑走の速度係数はシャチ専用。
+    static let orca: FishMovementProfile = {
+        var profile = dolphin
+        profile.roamingStyle = .orca
+        return profile
     }()
 
     // 全体速度は従来値のまま、画面X方向の移動成分だけを調整する。
@@ -1484,6 +1494,8 @@ enum AquariumFishMotion {
             .lionfish
         case .jellyfish:
             .jellyfish
+        case .orca:
+            .orca
         case .dolphin:
             .dolphin
         case .seaTurtle:
@@ -1534,7 +1546,7 @@ enum AquariumFishMotion {
     /// 体の揺れ・傾きだけを調整し、移動速度やひれのテンポから独立させる。
     static func presentationAmplitude(for species: FishSpecies) -> CGFloat {
         if species == .seaTurtle || species == .dolphin { return 0.20 }
-        if species == .mandarinfish || species == .manta || species == .whaleShark { return 0 }
+        if species == .mandarinfish || species == .manta || species == .whaleShark || species == .orca { return 0 }
         return (species == .lionfish || species == .porcupinefish) ? 0.45 : 1
     }
 
@@ -1558,6 +1570,8 @@ enum AquariumFishMotion {
         switch species {
         case .yellowTang, .blueGreenChromis, .orientalButterflyfish, .pennantCoralfish, .lionfish, .mandarinfish:
             return 0.20
+        case .orca:
+            return AquariumOrcaSwimming.frameDuration
         case .dolphin:
             return AquariumDolphinSwimming.propulsionFrameDuration
         case .seaTurtle:
