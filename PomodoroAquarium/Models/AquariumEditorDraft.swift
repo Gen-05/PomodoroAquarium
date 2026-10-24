@@ -49,14 +49,20 @@ struct AquariumEditorDraft: Codable, Equatable {
         }
         self.background = background.rawValue
         normalizeLegacyStacking()
+        self.placements.removeAll { AquariumDecorationKind.isLegacyPlaceholder(rawValue: $0.kind) }
     }
     /// 旧データは従来の見た目順に一度だけ番号を補完。過去の履歴も同じ規則で読み込む。
     private mutating func normalizeLegacyStacking() {
-        guard placements.contains(where: { $0.isPlaced && !$0.isStackingOrderInitialized && $0.kind != AquariumDecorationKind.shipwreck.rawValue }) else { return }
-        let ordered = placements.indices.filter { placements[$0].isPlaced && placements[$0].kind != AquariumDecorationKind.shipwreck.rawValue }.sorted { a, b in
+        guard placements.contains(where: { $0.isPlaced && !$0.isStackingOrderInitialized
+            && $0.kind != AquariumDecorationKind.shipwreck.rawValue
+            && AquariumDecorationKind(rawValue: $0.kind)?.isAvailable == true }) else { return }
+        let ordered = placements.indices.filter {
+            placements[$0].isPlaced && placements[$0].kind != AquariumDecorationKind.shipwreck.rawValue
+                && AquariumDecorationKind(rawValue: placements[$0].kind)?.isAvailable == true
+        }.sorted { a, b in
             func decoration(_ index: Int) -> AquariumDecoration {
                 let p = placements[index]
-                return AquariumDecoration(id: p.id, kind: AquariumDecorationKind(rawValue: p.kind) ?? .rock,
+                return AquariumDecoration(id: p.id, kind: AquariumDecorationKind(rawValue: p.kind) ?? .unsupported,
                     relativeX: p.x, relativeY: p.y, scale: p.scale, zOrder: p.zOrder,
                     rockIsForeground: p.rockIsForeground, isStackingOrderInitialized: p.isStackingOrderInitialized)
             }
@@ -71,7 +77,15 @@ struct AquariumEditorDraft: Codable, Equatable {
     var snapshot: Self {
         var copy = self
         copy.history = nil
+        copy.placements.removeAll { AquariumDecorationKind.isLegacyPlaceholder(rawValue: $0.kind) }
         copy.placements.sort { $0.id < $1.id }
+        return copy
+    }
+    /// 魚・背景・正式装飾の値と履歴位置は保持し、旧2種だけを各snapshotから取り除く。
+    func removingLegacyPlaceholders() -> Self {
+        var copy = self
+        copy.placements.removeAll { AquariumDecorationKind.isLegacyPlaceholder(rawValue: $0.kind) }
+        copy.history = history?.removingLegacyPlaceholders()
         return copy
     }
     var isValid: Bool {
@@ -101,15 +115,17 @@ struct AquariumEditorDraftStore {
     }
     func load() throws -> AquariumEditorDraft? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let draft = try JSONDecoder().decode(AquariumEditorDraft.self, from: Data(contentsOf: url))
+        let decoded = try JSONDecoder().decode(AquariumEditorDraft.self, from: Data(contentsOf: url))
+        let draft = decoded.removingLegacyPlaceholders()
         guard draft.isValid else {
             throw CocoaError(.fileReadCorruptFile)
         }
+        if decoded != draft { try save(draft) }
         return draft
     }
     func save(_ draft: AquariumEditorDraft) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(draft).write(to: url, options: .atomic)
+        try JSONEncoder().encode(draft.removingLegacyPlaceholders()).write(to: url, options: .atomic)
     }
     func remove() throws {
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
@@ -127,14 +143,18 @@ final class AquariumEditorWorkingState {
                         hasInitializedActiveAquariumFish: true,
                         coreTutorialRewardFishID: official.coreTutorialRewardFishID)
         let states = Dictionary(uniqueKeysWithValues: draft.placements.map { ($0.id, $0) })
-        self.placements = placements.map { original in
+        self.placements = placements.filter { !$0.kind.isLegacyPlaceholder }.map { original in
             let state = states[original.decorationID]
-            return AquariumDecorationPlacement(decorationID: original.decorationID, kind: original.kind,
+            let copy = AquariumDecorationPlacement(decorationID: original.decorationID, kind: original.kind,
                 relativeX: state?.x ?? original.relativeX, relativeY: state?.y ?? original.relativeY,
                 scale: state?.scale ?? original.scale, isPlaced: state?.isPlaced ?? original.isPlaced,
                 facingDirection: state?.facingDirection ?? original.facingDirection,
                 zOrder: state?.zOrder ?? original.zOrder, rockIsForeground: state?.rockIsForeground ?? original.rockIsForeground,
                 isStackingOrderInitialized: state?.isStackingOrderInitialized ?? original.isStackingOrderInitialized)
+            // 未対応種別も保存値は保持する。仮岩や正式素材へ置換しない。
+            copy.kindRawValue = original.kindRawValue
+            if original.kind == .unsupported { copy.facingDirectionRawValue = original.facingDirectionRawValue }
+            return copy
         }
     }
     func apply(_ draft: AquariumEditorDraft) {

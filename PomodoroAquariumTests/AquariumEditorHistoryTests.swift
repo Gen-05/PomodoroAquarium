@@ -34,7 +34,7 @@ struct AquariumEditorHistoryTests {
     @Test func IDsCoordinatesDepthScaleAndOwnershipSurviveUndoRedo() {
         let fish = PlayerFish(species: .clownfish)
         let official = Player(ownedFish: [fish], coins: 80)
-        let rock = AquariumDecorationPlacement(kind: .rock, relativeX: 0.2, relativeY: 0.8, scale: 1, isPlaced: false)
+        let rock = AquariumDecorationPlacement(kind: .smallRockA, relativeX: 0.2, relativeY: 0.8, scale: 1, isPlaced: false)
         let start = AquariumEditorDraft(player: official, placements: [rock], background: .aquarium)
         let work = AquariumEditorWorkingState(official: official, placements: [rock], draft: start)
         var history = AquariumEditorHistory(initial: start)

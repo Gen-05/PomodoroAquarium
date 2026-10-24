@@ -7,7 +7,7 @@ struct AquariumEditorDraftTests {
     private func fixture() -> (Player, AquariumDecorationPlacement) {
         let fish = PlayerFish(species: .clownfish)
         return (Player(ownedFish: [fish], activeAquariumFishIDs: [fish.id], hasInitializedActiveAquariumFish: true, coins: 123),
-                AquariumDecorationPlacement(kind: .seaweed, relativeX: 0.2, relativeY: 0.8, scale: 1.1))
+                AquariumDecorationPlacement(kind: .seaweedA, relativeX: 0.2, relativeY: 0.8, scale: 1.1))
     }
 
     @Test func editsAreIndependentAndRoundTripWithoutDuplicatingIndividuals() throws {

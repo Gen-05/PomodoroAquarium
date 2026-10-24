@@ -31,20 +31,6 @@ enum ShopCatalog {
     // 仮価格はここだけを変更すれば、表示・購入判定の両方へ反映される。
     static let items: [ShopItem] = [
         ShopItem(
-            id: "decoration-seaweed",
-            name: AquariumDecorationKind.seaweed.displayName,
-            price: 100,
-            category: .decoration,
-            content: .decoration(.seaweed)
-        ),
-        ShopItem(
-            id: "decoration-rock",
-            name: AquariumDecorationKind.rock.displayName,
-            price: 120,
-            category: .decoration,
-            content: .decoration(.rock)
-        ),
-        ShopItem(
             id: "background-aquarium",
             name: AquariumBackgroundTheme.aquarium.displayName,
             price: 200,

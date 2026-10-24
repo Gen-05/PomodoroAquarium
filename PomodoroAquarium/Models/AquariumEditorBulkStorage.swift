@@ -26,8 +26,9 @@ enum AquariumEditorBulkStorage: Equatable, Identifiable {
 
     /// 一覧・件数・Draft更新が同じ既存カテゴリー定義を使用する。
     func includes(_ kind: AquariumDecorationKind?) -> Bool {
+        guard let kind, kind.isAvailable else { return false }
         guard case .decorationCategory(let category) = self else { return true }
-        return kind?.category == category
+        return kind.category == category
     }
 
     func applying(to draft: AquariumEditorDraft) -> AquariumEditorDraft? {

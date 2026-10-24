@@ -192,15 +192,6 @@ private final class CoreTutorialPreviewDataStore {
         for placement in try context.fetch(FetchDescriptor<AquariumDecorationPlacement>()) {
             context.delete(placement)
         }
-        for decoration in AquariumDecorationService.defaultDecorations {
-            context.insert(AquariumDecorationPlacement(
-                decorationID: decoration.id,
-                kind: decoration.kind,
-                relativeX: Double(decoration.relativeX),
-                relativeY: Double(decoration.relativeY),
-                scale: Double(decoration.scale)
-            ))
-        }
         try context.save()
     }
 }

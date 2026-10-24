@@ -7,7 +7,7 @@ struct AquariumEditorBulkStorageTests {
     private func fixture() -> (Player, [AquariumDecorationPlacement], AquariumEditorDraft) {
         let fish = [FishSpecies.clownfish, .clownfish, .clownfish, .whaleShark, .manta, .manta].map { PlayerFish(species: $0) }
         let player = Player(ownedFish: fish, activeAquariumFishIDs: fish.map(\.id), hasInitializedActiveAquariumFish: true, coins: 130)
-        let placements = [AquariumDecorationKind.seaweedA, .smallRockA, .mediumRockC, .coralAPink, .rock].enumerated().map { index, kind in
+        let placements = [AquariumDecorationKind.seaweedA, .smallRockA, .mediumRockC, .coralAPink, .smallRockB].enumerated().map { index, kind in
             AquariumDecorationPlacement(kind: kind, relativeX: -0.1 + Double(index) * 0.2,
                 relativeY: 0.7 + Double(index) * 0.04, scale: 1 + Double(index) * 0.1, isPlaced: index != 4)
         }
@@ -16,7 +16,7 @@ struct AquariumEditorBulkStorageTests {
     @Test(arguments: AquariumDecorationCategory.allCases)
     func categoryStoragePreservesOtherKindsOwnershipAndOneStepHistory(category: AquariumDecorationCategory) throws {
         let official = Player(ownedFish: [PlayerFish(species: .clownfish)], coins: 130)
-        let placements = AquariumDecorationKind.allCases.flatMap { kind in
+        let placements = AquariumDecorationKind.availableKinds.flatMap { kind in
             [AquariumDecorationPlacement(kind: kind, relativeX: 0.3, relativeY: 0.8,
                 scale: 1.2, isPlaced: true),
              AquariumDecorationPlacement(kind: kind, relativeX: 0.6, relativeY: 0.9,
@@ -29,10 +29,10 @@ struct AquariumEditorBulkStorageTests {
         let expectedTitle: String
         switch category {
         case .plant:
-            expectedKinds = [.seaweed, .seaweedA, .seaweedB, .seaweedC]
+            expectedKinds = [.seaweedA, .seaweedB, .seaweedC]
             expectedTitle = "海藻を全部しまう"
         case .rock:
-            expectedKinds = [.rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC]
+            expectedKinds = [.smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC]
             expectedTitle = "岩を全部しまう"
         case .coral:
             expectedKinds = [.coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange,

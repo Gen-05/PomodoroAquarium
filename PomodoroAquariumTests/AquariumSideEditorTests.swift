@@ -48,7 +48,7 @@ struct AquariumSideEditorTests {
         let rocks = (0..<4).map { index in
             AquariumDecorationPlacement(
                 decorationID: "rock-\(index)",
-                kind: .rock,
+                kind: .smallRockA,
                 relativeX: 0.2 + Double(index) * 0.1,
                 relativeY: 0.82,
                 scale: 1,
@@ -92,7 +92,7 @@ struct AquariumSideEditorTests {
         let rocks = (0..<4).map { index in
             AquariumDecorationPlacement(
                 decorationID: "persisted-rock-\(index)",
-                kind: .rock,
+                kind: .smallRockA,
                 relativeX: 0.2 + Double(index) * 0.15,
                 relativeY: 0.8 + Double(index) * 0.02,
                 scale: 1,
@@ -305,7 +305,7 @@ struct AquariumSideEditorTests {
         )
         let placement = AquariumDecorationPlacement(
             decorationID: "snapshot-rock",
-            kind: .rock,
+            kind: .smallRockA,
             relativeX: 0.25,
             relativeY: 0.8,
             scale: 1.1,
@@ -348,7 +348,7 @@ struct AquariumSideEditorTests {
         let context = ModelContext(container)
         let placement = AquariumDecorationPlacement(
             decorationID: "draft-seaweed",
-            kind: .seaweed,
+            kind: .seaweedA,
             relativeX: 0.1,
             relativeY: 0.8,
             scale: 1,
@@ -520,7 +520,7 @@ struct AquariumSideEditorTests {
         let context = ModelContext(container)
         let placement = AquariumDecorationPlacement(
             decorationID: "dragged-rock",
-            kind: .rock,
+            kind: .smallRockA,
             relativeX: 0.2,
             relativeY: 0.75,
             scale: 1,
@@ -550,12 +550,12 @@ struct AquariumSideEditorTests {
         let first = AquariumDecorationEditor.relativePosition(
             forDropLocation: CGPoint(x: 150, y: 720),
             aquariumSize: CGSize(width: 300, height: 800),
-            kind: .rock
+            kind: .smallRockA
         )
         let second = AquariumDecorationEditor.relativePosition(
             forDropLocation: CGPoint(x: 125, y: 720),
             aquariumSize: CGSize(width: 250, height: 800),
-            kind: .rock
+            kind: .smallRockA
         )
 
         #expect(abs(first.x - second.x) < 0.000_001)
@@ -567,7 +567,7 @@ struct AquariumSideEditorTests {
         let context = ModelContext(container)
         let placement = AquariumDecorationPlacement(
             decorationID: "owned-rock",
-            kind: .rock,
+            kind: .smallRockA,
             relativeX: 0.2,
             relativeY: 0.75,
             scale: 1,

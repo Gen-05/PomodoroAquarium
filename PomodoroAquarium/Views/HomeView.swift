@@ -128,7 +128,7 @@ struct HomeView: View {
     @State private var editorPersistenceError: String?
     @State private var showsEditorCancelConfirmation = false
     private var decorationPlacements: [AquariumDecorationPlacement] {
-        editorWorkingState?.placements ?? officialDecorationPlacements
+        (editorWorkingState?.placements ?? officialDecorationPlacements).filter { $0.kind.isAvailable }
     }
     @State private var showsInterruptionBanner = false
     @State private var showsTimerScreen = false
@@ -1333,7 +1333,7 @@ struct HomeView: View {
               editorWorkingState == nil,
               let player else { return }
 
-        _ = try? AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
+        _ = try? AquariumDecorationService.removeLegacyPlaceholders(in: modelContext)
         _ = try? AquariumDeveloperDecorations.seedIfNeeded(in: modelContext)
         let currentPlacements = (try? modelContext.fetch(
             FetchDescriptor<AquariumDecorationPlacement>()
@@ -1393,7 +1393,7 @@ struct HomeView: View {
         guard mode == .aquariumEditor, allowsEditorDraftRestoration, editorWorkingState == nil, let official = players.first else { return }
         do {
             guard let draft = try AquariumEditorDraftStore.standard.load() else { return }
-            _ = try AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
+            _ = try AquariumDecorationService.removeLegacyPlaceholders(in: modelContext)
             _ = try AquariumDeveloperDecorations.seedIfNeeded(in: modelContext)
             let currentPlacements = try modelContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
             let work = AquariumEditorWorkingState(official: official, placements: currentPlacements, draft: draft)

@@ -297,15 +297,9 @@ enum AquariumDecorationEditorPresentation {
     static func inventory(
         from placements: [AquariumDecorationPlacement]
     ) -> [AquariumDecorationInventoryItem] {
-        let hasSmallRocks = placements.contains { $0.kind.usesBackgroundVariants }
-        return AquariumDecorationKind.allCases.compactMap { kind in
+        return AquariumDecorationKind.availableKinds.compactMap { kind in
             let ownedPlacements = placements.filter { $0.kind == kind }
             guard let firstOwnedPlacement = ownedPlacements.first else { return nil }
-            // 配置済みの初期仮岩だけを小岩所持時に省く。保存・収納済み旧岩の操作は維持。
-            if kind == .rock, hasSmallRocks,
-               ownedPlacements.allSatisfy({ $0.decorationID == "default-rock" && $0.isPlaced }) {
-                return nil
-            }
             let placedCount = ownedPlacements.count(where: \.isPlaced)
             let nextStoredPlacement = ownedPlacements.first { !$0.isPlaced }
 
@@ -375,7 +369,7 @@ enum AquariumEditorDropCoordinator {
         in aquariumSize: CGSize,
         kind: AquariumDecorationKind
     ) -> Bool {
-        guard kind != .shipwreck else { return false }
+        guard kind.isAvailable, kind != .shipwreck else { return false }
         guard kind.groundAnchorY != nil else {
             return AquariumSideEditorLayout.acceptsDrop(at: location, in: aquariumSize)
         }
@@ -436,7 +430,7 @@ enum AquariumEditorDropCoordinator {
         in context: ModelContext,
         persistChanges: Bool = true
     ) throws {
-        guard item.kind == .decoration, placement.kind != .shipwreck,
+        guard item.kind == .decoration, placement.kind.isAvailable, placement.kind != .shipwreck,
               item.identifier == placement.decorationID else {
             throw AquariumEditorDropError.invalidDecoration
         }

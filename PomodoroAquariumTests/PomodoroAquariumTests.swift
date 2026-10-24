@@ -2181,71 +2181,42 @@ struct PomodoroAquariumTests {
         #expect(!restored.shouldBeginPomodoroBreak)
     }
 
-    @Test @MainActor func defaultAquariumDecorationsAreCreatedOnFirstLaunch() throws {
+    @Test @MainActor func retiredDecorationsAreNotCreatedOnFirstLaunch() throws {
         let container = try makeDecorationContainer()
-        let context = container.mainContext
-
-        let didCreate = try AquariumDecorationService.createDefaultsIfNeeded(in: context)
-        let placements = try context.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-
-        #expect(didCreate)
-        #expect(placements.count == AquariumDecorationService.defaultDecorations.count)
-        #expect(Set(placements.map(\.decorationID)) == Set(["default-seaweed", "default-rock"]))
+        #expect(try AquariumDecorationService.removeLegacyPlaceholders(in: container.mainContext) == false)
+        #expect(try container.mainContext.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 0)
     }
 
     @Test @MainActor func aquariumDecorationRelativePositionIsPersistedAndRefetched() throws {
         let container = try makeDecorationContainer()
         let context = container.mainContext
-        try AquariumDecorationService.createDefaultsIfNeeded(in: context)
-        let placement = try #require(
-            context.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-                .first { $0.decorationID == "default-rock" }
-        )
-
-        placement.relativeX = 0.42
-        placement.relativeY = 0.79
+        let placement = AquariumDecorationPlacement(decorationID: "formal-rock", kind: .smallRockA,
+            relativeX: 0.82, relativeY: 0.88, scale: 1.1)
+        context.insert(placement)
+        placement.relativeX = 0.42; placement.relativeY = 0.79
         try context.save()
-
-        let refetchContext = ModelContext(container)
-        let refetched = try #require(
-            refetchContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-                .first { $0.decorationID == "default-rock" }
-        )
-        #expect(refetched.relativeX == 0.42)
-        #expect(refetched.relativeY == 0.79)
+        let refetched = try #require(ModelContext(container).fetch(FetchDescriptor<AquariumDecorationPlacement>()).first)
+        #expect(refetched.relativeX == 0.42 && refetched.relativeY == 0.79)
     }
 
-    @Test @MainActor func defaultAquariumDecorationsAreNotDuplicated() throws {
-        let container = try makeDecorationContainer()
-        let context = container.mainContext
-
-        let firstCreation = try AquariumDecorationService.createDefaultsIfNeeded(in: context)
-        let secondCreation = try AquariumDecorationService.createDefaultsIfNeeded(in: context)
-        let count = try context.fetchCount(FetchDescriptor<AquariumDecorationPlacement>())
-
-        #expect(firstCreation)
-        #expect(!secondCreation)
-        #expect(count == AquariumDecorationService.defaultDecorations.count)
+    @Test @MainActor func emptyAquariumInitializationRemainsEmpty() throws {
+        let container = try makeDecorationContainer(), context = container.mainContext
+        #expect(try AquariumDecorationService.removeLegacyPlaceholders(in: context) == false)
+        #expect(try AquariumDecorationService.removeLegacyPlaceholders(in: context) == false)
+        #expect(try context.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 0)
     }
 
-    @Test @MainActor func defaultAquariumDecorationsUseStableIDsForDeduplication() throws {
-        let container = try makeDecorationContainer()
-        let context = container.mainContext
-        context.insert(AquariumDecorationPlacement(
-            kind: .seaweed,
-            relativeX: 0.5,
-            relativeY: 0.8,
-            scale: 1
-        ))
+    @Test @MainActor func retirementUsesKindsWithoutDeletingFormalDecorationIDs() throws {
+        let container = try makeDecorationContainer(), context = container.mainContext
+        context.insert(AquariumDecorationPlacement(kind: .seaweed, relativeX: 0.5, relativeY: 0.8, scale: 1))
+        context.insert(AquariumDecorationPlacement(decorationID: "default-seaweed", kind: .seaweedA,
+            relativeX: 0.2, relativeY: 0.9, scale: 1))
         try context.save()
-
-        #expect(try AquariumDecorationService.createDefaultsIfNeeded(in: context))
-        #expect(!(try AquariumDecorationService.createDefaultsIfNeeded(in: context)))
-
-        let placements = try context.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-        #expect(placements.count == 3)
-        #expect(placements.filter { $0.decorationID == "default-seaweed" }.count == 1)
-        #expect(placements.filter { $0.decorationID == "default-rock" }.count == 1)
+        #expect(try AquariumDecorationService.removeLegacyPlaceholders(in: context))
+        #expect(try AquariumDecorationService.removeLegacyPlaceholders(in: context) == false)
+        let remaining = try context.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+        #expect(remaining.count == 1 && remaining.first?.kind == .seaweedA)
+        #expect(remaining.first?.decorationID == "default-seaweed")
     }
 
     @Test @MainActor func multipleDecorationsOfTheSameKindCanBeOwnedAndPlaced() throws {
@@ -2255,7 +2226,7 @@ struct PomodoroAquariumTests {
 
         let seaweeds = try positions.map { x in
             try AquariumDecorationService.addPlacement(
-                kind: .seaweed,
+                kind: .seaweedA,
                 at: CGPoint(x: CGFloat(x), y: 0.82),
                 isPlaced: true,
                 in: context
@@ -2263,7 +2234,7 @@ struct PomodoroAquariumTests {
         }
 
         #expect(Set(seaweeds.map(\.decorationID)).count == 3)
-        #expect(seaweeds.allSatisfy { $0.kind == .seaweed && $0.isPlaced })
+        #expect(seaweeds.allSatisfy { $0.kind == .seaweedA && $0.isPlaced })
         #expect(Set(seaweeds.map(\.relativeX)) == Set(positions))
         #expect(try context.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 3)
     }
@@ -2273,7 +2244,7 @@ struct PomodoroAquariumTests {
         let context = container.mainContext
         let seaweeds = try (0..<3).map { index in
             try AquariumDecorationService.addPlacement(
-                kind: .seaweed,
+                kind: .seaweedA,
                 at: CGPoint(x: 0.2 + CGFloat(index) * 0.3, y: 0.82),
                 isPlaced: true,
                 in: context
@@ -2293,12 +2264,12 @@ struct PomodoroAquariumTests {
         let container = try makeDecorationContainer()
         let context = container.mainContext
         let first = try AquariumDecorationService.addPlacement(
-            kind: .seaweed,
+            kind: .seaweedA,
             isPlaced: false,
             in: context
         )
         let second = try AquariumDecorationService.addPlacement(
-            kind: .seaweed,
+            kind: .seaweedA,
             isPlaced: false,
             in: context
         )
@@ -2325,7 +2296,7 @@ struct PomodoroAquariumTests {
             originalY: original.y,
             translation: CGSize(width: 180, height: -100),
             aquariumSize: CGSize(width: 390, height: 844),
-            kind: .seaweed,
+            kind: .seaweedA,
             isEditing: false
         )
 
@@ -2338,7 +2309,7 @@ struct PomodoroAquariumTests {
             originalY: 0.8,
             translation: CGSize(width: 100, height: 50),
             aquariumSize: CGSize(width: 400, height: 500),
-            kind: .rock,
+            kind: .smallRockA,
             isEditing: true
         )
 
@@ -2351,7 +2322,7 @@ struct PomodoroAquariumTests {
         let context = container.mainContext
         let placed = AquariumDecorationPlacement(
             decorationID: "placed",
-            kind: .rock,
+            kind: .smallRockA,
             relativeX: 0.3,
             relativeY: 0.8,
             scale: 1,
@@ -2359,7 +2330,7 @@ struct PomodoroAquariumTests {
         )
         let stored = AquariumDecorationPlacement(
             decorationID: "stored",
-            kind: .seaweed,
+            kind: .seaweedA,
             relativeX: 0.7,
             relativeY: 0.8,
             scale: 1,
@@ -2374,8 +2345,8 @@ struct PomodoroAquariumTests {
     }
 
     @Test func aquariumDecorationKindsHaveExpectedCategories() {
-        #expect(AquariumDecorationKind.seaweed.category == .plant)
-        #expect(AquariumDecorationKind.rock.category == .rock)
+        #expect(AquariumDecorationKind.seaweedA.category == .plant)
+        #expect(AquariumDecorationKind.smallRockA.category == .rock)
     }
 
     @Test @MainActor func decorationStorageCategoryFilterReturnsMatchingItemsOnly() throws {
@@ -2383,7 +2354,7 @@ struct PomodoroAquariumTests {
         let context = container.mainContext
         let seaweed = AquariumDecorationPlacement(
             decorationID: "stored-seaweed-filter",
-            kind: .seaweed,
+            kind: .seaweedA,
             relativeX: 0.3,
             relativeY: 0.8,
             scale: 1,
@@ -2391,7 +2362,7 @@ struct PomodoroAquariumTests {
         )
         let rock = AquariumDecorationPlacement(
             decorationID: "stored-rock-filter",
-            kind: .rock,
+            kind: .smallRockA,
             relativeX: 0.7,
             relativeY: 0.85,
             scale: 1,
@@ -2423,7 +2394,7 @@ struct PomodoroAquariumTests {
         let context = container.mainContext
         let placement = AquariumDecorationPlacement(
             decorationID: "stored-rock",
-            kind: .rock,
+            kind: .smallRockA,
             relativeX: 0.2,
             relativeY: 0.8,
             scale: 1,
@@ -2453,7 +2424,7 @@ struct PomodoroAquariumTests {
         let context = container.mainContext
         let placement = AquariumDecorationPlacement(
             decorationID: "stored-seaweed",
-            kind: .seaweed,
+            kind: .seaweedA,
             relativeX: 0.14,
             relativeY: 0.82,
             scale: 1,
@@ -4500,13 +4471,9 @@ struct PomodoroAquariumTests {
         #expect(streakCalendar.component(.day, from: next) == 1)
     }
 
-    @Test func shopCatalogKeepsPricesAndCategoriesInOneDefinition() throws {
-        let seaweed = try #require(ShopCatalog.items.first { $0.id == "decoration-seaweed" })
-        let rock = try #require(ShopCatalog.items.first { $0.id == "decoration-rock" })
-
-        #expect(seaweed.price == 100)
-        #expect(rock.price == 120)
-        #expect(ShopCatalog.items(in: .decoration).count == 2)
+    @Test func shopCatalogContainsNoRetiredPlaceholderProducts() {
+        #expect(!ShopCatalog.items.contains { $0.id == "decoration-seaweed" || $0.id == "decoration-rock" })
+        #expect(ShopCatalog.items(in: .decoration).isEmpty)
         #expect(ShopCatalog.items(in: .background).count == AquariumBackgroundTheme.allCases.count)
     }
 
@@ -4514,7 +4481,7 @@ struct PomodoroAquariumTests {
         let container = try makeShopContainer()
         let player = Player(coins: 250)
         container.mainContext.insert(player)
-        let seaweed = try #require(ShopCatalog.items.first { $0.id == "decoration-seaweed" })
+        let seaweed = ShopItem(id: "test-seaweed-a", name: "海藻A", price: 100, category: .decoration, content: .decoration(.seaweedA))
 
         let placement = try ShopService.purchaseDecoration(
             seaweed,
@@ -4523,7 +4490,7 @@ struct PomodoroAquariumTests {
         )
 
         #expect(CurrencyService.balance(of: player) == 150)
-        #expect(placement.kind == .seaweed)
+        #expect(placement.kind == .seaweedA)
         #expect(!placement.isPlaced)
         #expect(try container.mainContext.fetch(FetchDescriptor<AquariumDecorationPlacement>()).count == 1)
     }
@@ -4532,7 +4499,7 @@ struct PomodoroAquariumTests {
         let container = try makeShopContainer()
         let player = Player(coins: 300)
         container.mainContext.insert(player)
-        let seaweed = try #require(ShopCatalog.items.first { $0.id == "decoration-seaweed" })
+        let seaweed = ShopItem(id: "test-seaweed-a", name: "海藻A", price: 100, category: .decoration, content: .decoration(.seaweedA))
 
         let first = try ShopService.purchaseDecoration(seaweed, for: player, in: container.mainContext)
         let second = try ShopService.purchaseDecoration(seaweed, for: player, in: container.mainContext)
@@ -4540,7 +4507,7 @@ struct PomodoroAquariumTests {
 
         #expect(first.decorationID != second.decorationID)
         #expect(placements.count == 2)
-        #expect(placements.allSatisfy { $0.kind == .seaweed && !$0.isPlaced })
+        #expect(placements.allSatisfy { $0.kind == .seaweedA && !$0.isPlaced })
         #expect(CurrencyService.balance(of: player) == 100)
     }
 
@@ -4548,7 +4515,7 @@ struct PomodoroAquariumTests {
         let container = try makeShopContainer()
         let player = Player(coins: 99)
         container.mainContext.insert(player)
-        let seaweed = try #require(ShopCatalog.items.first { $0.id == "decoration-seaweed" })
+        let seaweed = ShopItem(id: "test-seaweed-a", name: "海藻A", price: 100, category: .decoration, content: .decoration(.seaweedA))
 
         #expect(!CurrencyService.canAfford(seaweed.price, player: player))
         #expect(throws: ShopPurchaseError.insufficientCoins) {

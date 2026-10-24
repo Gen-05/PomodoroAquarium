@@ -20,7 +20,7 @@ struct AquariumEditorPresentationTests {
 
     @Test func initialDecorationStaysGroundedAndAvoidsTheFixedMenuAndNeighbors() {
         let size = CGSize(width: 393, height: 808)
-        for kind in AquariumDecorationKind.allCases where kind.groundAnchorY != nil {
+        for kind in AquariumDecorationKind.availableKinds where kind.groundAnchorY != nil {
             let first = AquariumEditorInitialPlacement.decoration(kind: kind, scale: 1, size: size, existing: [])
             let existing = AquariumDecoration(id: "existing", kind: kind, relativeX: first.x, relativeY: first.y, scale: 1)
             let next = AquariumEditorInitialPlacement.decoration(kind: kind, scale: 1, size: size, existing: [existing])

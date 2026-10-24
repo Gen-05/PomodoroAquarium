@@ -60,7 +60,7 @@ struct AquariumDeveloperDecorationTests {
     }
 
     @Test func coralCorrectionDoesNotAffectExistingDecorations() {
-        for kind in AquariumDecorationKind.allCases where kind.decorationType != .coral {
+        for kind in AquariumDecorationKind.availableKinds where kind.decorationType != .coral {
             let correction = AquariumCoralColorCorrection.correction(for: .deepSea, kind: kind)
             #expect(correction.saturation == 1 && correction.brightness == 0)
             #expect(correction.red == 1 && correction.green == 1 && correction.blue == 1)
@@ -84,7 +84,7 @@ struct AquariumDeveloperDecorationTests {
         for name in kind.animationFrameNames {
             #expect(UIImage(named: name)?.size == CGSize(width: 512, height: 768))
         }
-        #expect(!AquariumDecorationService.defaultDecorations.contains { $0.kind == kind })
+        #expect(kind.isAvailable)
         #expect(!ShopCatalog.items.contains { $0.content == .decoration(kind) })
     }
 
@@ -119,7 +119,7 @@ struct AquariumDeveloperDecorationTests {
             #expect(cycle.first == cycle.last)
             #expect(Set(cycle).count == 8)
         }
-        #expect(!AquariumDecorationService.defaultDecorations.contains { $0.kind == kind })
+        #expect(kind.isAvailable)
         #expect(!ShopCatalog.items.contains { $0.content == .decoration(kind) })
     }
 
@@ -157,7 +157,7 @@ struct AquariumDeveloperDecorationTests {
             let cycle = (0...8).map { kind.animationFrameNames[AquariumDecorationFramePlayback.frameIndex(step: $0 + offset, frameCount: 8)] }
             #expect(cycle == (0...8).map { kind.animationFrameNames[($0 + offset) % 8] })
         }
-        #expect(!AquariumDecorationService.defaultDecorations.contains { $0.kind == kind })
+        #expect(kind.isAvailable)
         #expect(!ShopCatalog.items.contains { $0.content == .decoration(kind) })
     }
 
@@ -185,7 +185,7 @@ struct AquariumDeveloperDecorationTests {
         }
         #expect(AquariumDecorationKind.mediumRockC.displaySize.height > AquariumDecorationKind.mediumRockB.displaySize.height)
         #expect(AquariumDecorationKind.mediumRockB.displaySize.height > AquariumDecorationKind.mediumRockA.displaySize.height)
-        #expect(!AquariumDecorationService.defaultDecorations.contains { $0.kind == kind })
+        #expect(kind.isAvailable)
         #expect(!ShopCatalog.items.contains { $0.content == .decoration(kind) })
     }
 
@@ -213,7 +213,7 @@ struct AquariumDeveloperDecorationTests {
             let image = try #require(UIImage(named: name))
             #expect(image.size == expected.2)
         }
-        #expect(!AquariumDecorationService.defaultDecorations.contains { $0.kind == kind })
+        #expect(kind.isAvailable)
         #expect(!ShopCatalog.items.contains { $0.content == .decoration(kind) })
     }
 
@@ -244,17 +244,14 @@ struct AquariumDeveloperDecorationTests {
         }
     }
 
-    @Test func defaultPlaceholderRockIsHiddenOnlyWhenPlacedAndSmallRocksAreOwned() {
+    @Test func retiredPlaceholderRocksNeverAppearInInventory() {
         let legacy = AquariumDecorationPlacement(decorationID: "default-rock", kind: .rock, relativeX: 0.82, relativeY: 0.88, scale: 1.1)
         let small = AquariumDecorationPlacement(kind: .smallRockA, relativeX: 0.5, relativeY: 0.92, scale: 1, isPlaced: false)
-        #expect(AquariumDecorationEditorPresentation.inventory(from: [legacy]).map(\.kind) == [.rock])
+        #expect(AquariumDecorationEditorPresentation.inventory(from: [legacy]).isEmpty)
         #expect(AquariumDecorationEditorPresentation.inventory(from: [legacy, small]).map(\.kind) == [.smallRockA])
-        #expect(legacy.kindRawValue == "rock" && legacy.isPlaced && legacy.scale == 1.1)
         legacy.isPlaced = false
-        #expect(AquariumDecorationEditorPresentation.inventory(from: [legacy, small]).map(\.kind) == [.rock, .smallRockA])
-        legacy.isPlaced = true
-        let ownedLegacy = AquariumDecorationPlacement(kind: .rock, relativeX: 0.5, relativeY: 0.84, scale: 1)
-        #expect(AquariumDecorationEditorPresentation.inventory(from: [legacy, ownedLegacy, small]).first?.ownedCount == 2)
+        #expect(AquariumDecorationEditorPresentation.inventory(from: [legacy, small]).map(\.kind) == [.smallRockA])
+        #expect(legacy.kindRawValue == "rock" && legacy.scale == 1.1)
     }
 
     @Test func decorationLayerPriorityPrecedesYAndDraggingTemporarilyOverridesIt() {
@@ -360,10 +357,10 @@ struct AquariumDeveloperDecorationTests {
     @Test func disabledDevelopmentSeedingLeavesProductionInitialDataUnchanged() throws {
         let container = try makeContainer()
         let context = container.mainContext
-        try AquariumDecorationService.createDefaultsIfNeeded(in: context)
+        try AquariumDecorationService.removeLegacyPlaceholders(in: context)
         #expect(!(try AquariumDeveloperDecorations.seedIfNeeded(in: context, enabled: false)))
         let placements = try context.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-        #expect(Set(placements.map(\.decorationID)) == Set(["default-seaweed", "default-rock"]))
+        #expect(placements.isEmpty)
         #expect(!placements.contains { $0.kind.stars != nil })
     }
 
@@ -471,7 +468,7 @@ struct AquariumDeveloperDecorationTests {
         let container = try makeContainer()
         let context = container.mainContext
         let size = CGSize(width: 393, height: 852)
-        for kind in AquariumDecorationKind.allCases where kind.groundAnchorY != nil {
+        for kind in AquariumDecorationKind.availableKinds where kind.groundAnchorY != nil {
             let position = AquariumDecorationEditor.relativePosition(forDropLocation: CGPoint(x: -1000, y: 700), aquariumSize: size, kind: kind)
             #expect(position.x < 0)
             let placement = try AquariumDecorationService.addPlacement(kind: kind, at: position, isPlaced: true, in: context)

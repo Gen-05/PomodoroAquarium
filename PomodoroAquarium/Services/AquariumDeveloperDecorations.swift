@@ -42,7 +42,7 @@ enum AquariumDeveloperDecorations {
         ).map(\.decorationID))
         var didInsert = false
         for id in developerOwnedDecorationIDs {
-            guard let kind = AquariumDecorationKind(rawValue: id) else { continue }
+            guard let kind = AquariumDecorationKind(rawValue: id), kind.isAvailable else { continue }
             let position = kind.restorationPosition
             for index in 0..<ownedCountPerDecoration {
                 // 1個目は以前のIDを維持。配置済みの個体を上書きせず、不足分だけ補充する。

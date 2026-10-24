@@ -132,7 +132,7 @@ struct AquariumEditorSessionSnapshot: Equatable {
         let statesByID = Dictionary(uniqueKeysWithValues: decorations.map {
             ($0.decorationID, $0)
         })
-        for placement in decorationPlacements {
+        for placement in decorationPlacements where placement.kind.isAvailable {
             statesByID[placement.decorationID]?.restore(to: placement)
         }
     }
@@ -142,6 +142,7 @@ struct AquariumEditorSessionSnapshot: Equatable {
         from placements: [AquariumDecorationPlacement]
     ) -> [AquariumDecorationEditorState] {
         placements
+            .filter { $0.kind.isAvailable }
             .map(AquariumDecorationEditorState.init)
             .sorted { $0.decorationID < $1.decorationID }
     }

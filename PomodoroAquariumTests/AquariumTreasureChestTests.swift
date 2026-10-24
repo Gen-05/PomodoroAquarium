@@ -12,7 +12,7 @@ struct AquariumTreasureChestTests {
         #expect(kind.displayName == "宝箱" && kind.stars == 3 && kind.plannedPrice == 500)
         #expect(kind.category == .object && kind.renderLayer == .object)
         #expect(kind.animationFrameNames.isEmpty && kind.supportsFacingDirection)
-        #expect(!AquariumDecorationService.defaultDecorations.contains { $0.kind == kind })
+        #expect(kind.isAvailable)
         #expect(!ShopCatalog.items.contains { $0.content == .decoration(kind) })
         for theme in AquariumBackgroundTheme.allCases {
             for direction in AquariumDecorationFacingDirection.allCases {
@@ -25,7 +25,7 @@ struct AquariumTreasureChestTests {
         #expect(abs(kind.displaySize.width * 1115 / 1254 - 126) < 0.000001)
         #expect(kind.displaySize.height == kind.displaySize.width)
         #expect(abs(kind.displaySize.width - AquariumTreasureChestEffects.canvasSide) < 0.000001)
-        for other in AquariumDecorationKind.allCases where other != kind && other != .shipwreck { #expect(!other.supportsFacingDirection) }
+        for other in AquariumDecorationKind.availableKinds where other != kind && other != .shipwreck { #expect(!other.supportsFacingDirection) }
         let container = try ModelContainer(for: AquariumDecorationPlacement.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let context = container.mainContext

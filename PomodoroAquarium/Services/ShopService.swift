@@ -14,7 +14,7 @@ enum ShopService {
         in context: ModelContext
     ) throws -> AquariumDecorationPlacement {
         guard let player else { throw ShopPurchaseError.playerUnavailable }
-        guard case let .decoration(kind) = item.content else {
+        guard case let .decoration(kind) = item.content, kind.isAvailable else {
             throw ShopPurchaseError.unsupportedProduct
         }
         guard CurrencyService.canAfford(item.price, player: player) else {

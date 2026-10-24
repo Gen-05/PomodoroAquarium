@@ -1,42 +1,18 @@
 import CoreGraphics
 import SwiftData
 
-enum AquariumDecorationPlacementError: Error { case requiresFixedPlacement }
+enum AquariumDecorationPlacementError: Error { case requiresFixedPlacement, unavailableKind }
 
 enum AquariumDecorationService {
-    static let defaultDecorations: [AquariumDecoration] = [
-        AquariumDecoration(
-            id: "default-seaweed",
-            kind: .seaweed,
-            relativeX: 0.14,
-            relativeY: 0.82,
-            scale: 1.0
-        ),
-        AquariumDecoration(
-            id: "default-rock",
-            kind: .rock,
-            relativeX: 0.82,
-            relativeY: 0.88,
-            scale: 1.1
-        )
-    ]
-
     @discardableResult
-    static func createDefaultsIfNeeded(in context: ModelContext) throws -> Bool {
+    static func removeLegacyPlaceholders(in context: ModelContext) throws -> Bool {
         let descriptor = FetchDescriptor<AquariumDecorationPlacement>()
-        let existingIDs = Set(try context.fetch(descriptor).map(\.decorationID))
-        let missingDefaults = defaultDecorations.filter { !existingIDs.contains($0.id) }
-        guard !missingDefaults.isEmpty else { return false }
-
-        for decoration in missingDefaults {
-            context.insert(AquariumDecorationPlacement(
-                decorationID: decoration.id,
-                kind: decoration.kind,
-                relativeX: Double(decoration.relativeX),
-                relativeY: Double(decoration.relativeY),
-                scale: Double(decoration.scale)
-            ))
+        // IDやカテゴリではなく旧kindの完全一致。収納中の旧個体も除去し、正式装飾は変更しない。
+        let retired = try context.fetch(descriptor).filter {
+            AquariumDecorationKind.isLegacyPlaceholder(rawValue: $0.kindRawValue)
         }
+        guard !retired.isEmpty else { return false }
+        for placement in retired { context.delete(placement) }
         try context.save()
         return true
     }
@@ -51,6 +27,7 @@ enum AquariumDecorationService {
         isPlaced: Bool = false,
         in context: ModelContext
     ) throws -> AquariumDecorationPlacement {
+        guard kind.isAvailable else { throw AquariumDecorationPlacementError.unavailableKind }
         let initialPosition = position ?? kind.restorationPosition
         let placement = AquariumDecorationPlacement(
             kind: kind,
@@ -81,7 +58,7 @@ enum AquariumDecorationService {
         category: AquariumDecorationCategory? = nil
     ) -> [AquariumDecorationPlacement] {
         placements.filter { placement in
-            !placement.isPlaced && (category == nil || placement.kind.category == category)
+            placement.kind.isAvailable && !placement.isPlaced && (category == nil || placement.kind.category == category)
         }
     }
 
@@ -91,6 +68,7 @@ enum AquariumDecorationService {
         in context: ModelContext,
         persistChanges: Bool = true
     ) throws {
+        guard placement.kind.isAvailable else { throw AquariumDecorationPlacementError.unavailableKind }
         guard placement.kind != .shipwreck else { throw AquariumDecorationPlacementError.requiresFixedPlacement }
         placement.relativeX = Double(position.x)
         placement.relativeY = Double(position.y)

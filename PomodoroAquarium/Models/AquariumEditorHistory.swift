@@ -7,7 +7,13 @@ struct AquariumEditorHistory: Codable, Equatable {
     private(set) var position: Int
     var canUndo: Bool { position > 0 }
     var canRedo: Bool { position + 1 < states.count }
-    var current: AquariumEditorDraft { states[position] }
+    var current: AquariumEditorDraft { states[position].removingLegacyPlaceholders() }
+
+    func removingLegacyPlaceholders() -> Self {
+        var copy = self
+        copy.states = states.map { $0.removingLegacyPlaceholders() }
+        return copy
+    }
 
     init(initial: AquariumEditorDraft) {
         states = [initial.snapshot]

@@ -43,7 +43,7 @@ struct AquariumView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var officialDecorationPlacements: [AquariumDecorationPlacement]
     var editingPlacements: [AquariumDecorationPlacement]?
-    private var decorationPlacements: [AquariumDecorationPlacement] { editingPlacements ?? officialDecorationPlacements }
+    private var decorationPlacements: [AquariumDecorationPlacement] { (editingPlacements ?? officialDecorationPlacements).filter { $0.kind.isAvailable } }
     @State private var treasureTapRequest: AquariumTreasureChestTapRequest?
     @State private var editingDecorationID: String?
     @State private var showsDecorationNudge = false
@@ -201,7 +201,7 @@ struct AquariumView: View {
         if editingPlacements != nil { updateDisplayedFish(); return }
 
         do {
-            _ = try AquariumDecorationService.createDefaultsIfNeeded(in: modelContext)
+            _ = try AquariumDecorationService.removeLegacyPlaceholders(in: modelContext)
             _ = try AquariumDeveloperDecorations.seedIfNeeded(in: modelContext)
             guard !Task.isCancelled else { return }
 
@@ -662,7 +662,9 @@ struct AquariumDecorationView: View {
 
     @ViewBuilder
     var body: some View {
-        if !decoration.kind.animationFrameNames.isEmpty {
+        if !decoration.kind.isAvailable {
+            EmptyView()
+        } else if !decoration.kind.animationFrameNames.isEmpty {
             AquariumDecorationFrameView(kind: decoration.kind, placementID: decoration.id)
                 .modifier(AquariumSeaweedColorCorrection.correction(for: backgroundTheme))
         } else if let imageName = decoration.kind.assetImageName(for: backgroundTheme, facingDirection: decoration.facingDirection),
@@ -673,50 +675,9 @@ struct AquariumDecorationView: View {
                 .frame(width: decoration.kind.displaySize.width, height: decoration.kind.displaySize.height)
                 .modifier(AquariumCoralColorCorrection.correction(for: backgroundTheme, kind: decoration.kind))
         } else {
-            switch decoration.kind {
-            case .treasureChest, .shipwreck: EmptyView()
-            case .coralAPink, .coralAOrange, .coralAPurple, .coralBPink, .coralBOrange, .coralBPurple, .coralCPink, .coralCOrange, .coralCPurple:
-                EmptyView()
-            case .seaweed, .seaweedA, .seaweedB, .seaweedC:
-                HStack(alignment: .bottom, spacing: -8) {
-                    seaweedStem(height: 88, rotation: -8)
-                    seaweedStem(height: 120, rotation: 3)
-                    seaweedStem(height: 76, rotation: 10)
-                }
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.mint, .green.opacity(0.75)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-
-            case .rock, .smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC:
-                ZStack(alignment: .bottom) {
-                    Ellipse()
-                        .fill(Color.black.opacity(0.18))
-                        .frame(width: 112, height: 30)
-
-                    RoundedRectangle(cornerRadius: 28)
-                        .fill(
-                            LinearGradient(
-                                colors: [.gray.opacity(0.9), .black.opacity(0.55)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 94, height: 64)
-                        .offset(y: -8)
-                }
-            }
+            // 素材不足や旧種別を仮の図形へ置き換えない。
+            EmptyView()
         }
-    }
-
-    private func seaweedStem(height: CGFloat, rotation: Double) -> some View {
-        Capsule()
-            .fill(.green)
-            .frame(width: 18, height: height)
-            .rotationEffect(.degrees(rotation), anchor: .bottom)
     }
 }
 

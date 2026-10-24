@@ -38,6 +38,8 @@ struct ContentView: View {
             // Loadingを先に構築し、既存の初期化完了を待つ。固定秒数は待たせない。
             await Task.yield()
             guard !Task.isCancelled else { return }
+            _ = try? AquariumDecorationService.removeLegacyPlaceholders(in: modelContext)
+            _ = try? AquariumEditorDraftStore.standard.load()
             _ = try? FocusCategoryService.createDefaultsIfNeeded(in: modelContext)
             try? FocusSessionHistoryMigration.migrateLegacyDailyRecordsIfNeeded(
                 in: modelContext

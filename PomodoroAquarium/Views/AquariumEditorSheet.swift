@@ -27,14 +27,14 @@ struct AquariumEditorSheet: View {
         category.map { .decorationCategory($0) } ?? .decorations
     }
     private var placedDecorations: [AquariumDecorationPlacement] {
-        placements.filter { $0.isPlaced && decorationStorageTarget.includes($0.kind) }
+        placements.filter { $0.kind.isAvailable && $0.isPlaced && decorationStorageTarget.includes($0.kind) }
     }
 
     private var inventory: [AquariumDecorationInventoryItem] {
         AquariumDecorationEditorPresentation.inventory(from: placements)
     }
     private var kinds: [AquariumDecorationKind] {
-        AquariumDecorationKind.allCases.filter { kind in
+        AquariumDecorationKind.availableKinds.filter { kind in
             (kind.stars != nil || inventory.contains { item in item.kind == kind }) &&
             decorationStorageTarget.includes(kind)
         }
