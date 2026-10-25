@@ -17,6 +17,7 @@ struct PomodoroAquariumApp: App {
         TimerConfigurationStorage.migrateLegacyValuesIfNeeded()
 #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
+        DecorationTutorialUITestSupport.prepareLaunch()
         usesInMemoryUITestStore = arguments.contains("-core-tutorial-ui-test") ||
             arguments.contains("-core-tutorial-in-memory") ||
             arguments.contains("-statistics-tap-ui-test")

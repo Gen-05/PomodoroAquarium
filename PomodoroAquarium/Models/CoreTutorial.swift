@@ -28,6 +28,7 @@ enum CoreTutorialStorageKey {
 enum CoreTutorialMode: Equatable {
     case production
     case preview
+    case decorationPreview
 }
 
 @MainActor
@@ -52,6 +53,11 @@ final class CoreTutorialCoordinator {
         self.defaults = defaults
         self.timerSessionStore = timerSessionStore ?? TimerSessionStore(defaults: defaults)
 
+        if mode == .decorationPreview {
+            hasCompletedTutorial = true
+            step = .finishing
+            return
+        }
         if mode == .preview {
             // UserDefaultsのArgumentDomain（UI Test起動引数を含む）にも影響されず、
             // Previewは毎回必ず最初から始める。
@@ -80,7 +86,7 @@ final class CoreTutorialCoordinator {
 
     var isActive: Bool { !hasCompletedTutorial }
 
-    var isPreviewMode: Bool { mode == .preview }
+    var isPreviewMode: Bool { mode != .production }
 
     var usesTutorialStudySetup: Bool {
         isActive && [

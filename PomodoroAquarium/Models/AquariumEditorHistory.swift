@@ -39,6 +39,15 @@ struct AquariumEditorHistory: Codable, Equatable {
         position -= 1
         return current
     }
+    /// 購入自体は取り消せない。各配置snapshotに所有の追加を補完し、配置操作だけをUndoできるようにする。
+    mutating func includeNewlyOwnedDecorations(_ baseline: [AquariumEditorDraft.Placement]) {
+        states = states.map { state in
+            var copy = state
+            let ids = Set(copy.placements.map(\.id))
+            copy.placements.append(contentsOf: baseline.filter { !ids.contains($0.id) })
+            return copy.snapshot
+        }
+    }
     mutating func redo() -> AquariumEditorDraft? {
         guard canRedo else { return nil }
         position += 1

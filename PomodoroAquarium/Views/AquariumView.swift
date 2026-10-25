@@ -24,6 +24,7 @@ struct AquariumView: View {
     var onGlobalCanvasGeometryChanged: (CGRect) -> Void = { _ in }
     var viewingTapRequest: AquariumTreasureChestTapLocation?
     var isSimulationPaused = false
+    var allowsDeveloperDecorationSeeding = true
     var isEditing = false
     var isTreasureTapEnabled = true
     var defersDecorationPersistence = false
@@ -33,6 +34,9 @@ struct AquariumView: View {
     var onCanvasTapped: () -> Void = {}
     var onDecorationChanged: () -> Void = {}
     var onDecorationEditingChanged: (Bool) -> Void = { _ in }
+    var onDecorationSelected: (AquariumDecorationPlacement?) -> Void = { _ in }
+    var onDecorationDragged: (String, CGPoint, CGPoint) -> Void = { _, _, _ in }
+    var onShipwreckSideChanged: (String, AquariumDecorationFacingDirection, AquariumDecorationFacingDirection) -> Void = { _, _, _ in }
     var selectionResetRequestID: UUID?
     var historyRestorationRequestID: UUID?
     var decorationControlsTopInset: CGFloat = 160
@@ -202,7 +206,7 @@ struct AquariumView: View {
 
         do {
             _ = try AquariumDecorationService.removeLegacyPlaceholders(in: modelContext)
-            _ = try AquariumDeveloperDecorations.seedIfNeeded(in: modelContext)
+            if allowsDeveloperDecorationSeeding { _ = try AquariumDeveloperDecorations.seedIfNeeded(in: modelContext) }
             guard !Task.isCancelled else { return }
 
             if let player,
@@ -225,6 +229,12 @@ struct AquariumView: View {
         ForEach(Array(decorationPlacements.filter { $0.isPlaced && $0.kind == .shipwreck }
             .sorted { $0.decorationID < $1.decorationID }.prefix(1)), id: \.decorationID) { placement in
             AquariumShipwreckView(side: placement.facingDirection, theme: backgroundTheme, size: size)
+                .overlay {
+                    let rect = AquariumShipwreckPresentation.settings(for: backgroundTheme).bounds(side: placement.facingDirection, size: size)
+                    Color.clear.frame(width: rect.width, height: rect.height)
+                        .decorationTutorialTarget(.placement(placement.decorationID))
+                        .position(x: rect.midX, y: rect.midY).allowsHitTesting(false)
+                }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("沈没船")
                 .accessibilityIdentifier("aquarium.shipwreck")
@@ -341,7 +351,10 @@ struct AquariumView: View {
                     if draggingDecorationID != nil, let id = editingDecorationID,
                        let position = previewPosition,
                        let placement = decorationPlacements.first(where: { $0.decorationID == id }) {
-                        moveDecoration(placement, to: position)
+                        let from = CGPoint(x: placement.relativeX, y: placement.relativeY)
+                        if moveDecoration(placement, to: position) {
+                            onDecorationDragged(id, from, position)
+                        }
                         updateDecorationControlsCenter(placement, size: size)
                     }
                     canvasDragStart = nil
@@ -360,9 +373,11 @@ struct AquariumView: View {
                     if placement.kind == .shipwreck {
                         ForEach([AquariumDecorationFacingDirection.left, .right], id: \.self) { side in
                             Button {
+                                let previousSide = placement.facingDirection
                                 if AquariumShipwreckEditing.place(id: placement.decorationID, side: side, among: decorationPlacements) != nil {
                                     if !defersDecorationPersistence { try? modelContext.save() }
                                     onDecorationChanged()
+                                    onShipwreckSideChanged(placement.decorationID, previousSide, side)
                                 }
                             } label: {
                                 Text(side == .left ? "左奥" : "右奥")
@@ -447,6 +462,7 @@ struct AquariumView: View {
                 }
                 .buttonStyle(.plain)
                 .frame(width: min(size.width - 24, (placement.kind == .shipwreck || (!showsDecorationNudge && !showsStackingControls)) ? 330 : 260), height: 60)
+                .decorationTutorialTarget(.operations)
                 .position(decorationControlsCenter ?? controlsCenter(for: placement, size: size))
                 .onAppear { updateDecorationControlsCenter(placement, size: size) }
                 .onChange(of: id) { _, _ in updateDecorationControlsCenter(placement, size: size) }
@@ -513,6 +529,7 @@ struct AquariumView: View {
         let wasEditing = editingDecorationID != nil
         if editingDecorationID != placement.decorationID { showsDecorationNudge = false }
         editingDecorationID = placement.decorationID
+        onDecorationSelected(placement)
         originalPosition = position
         previewPosition = initialPreviewPosition
         if !wasEditing {
@@ -553,11 +570,13 @@ struct AquariumView: View {
         finishDecorationEditing()
     }
 
+    @discardableResult
     private func moveDecoration(
         _ placement: AquariumDecorationPlacement,
         to position: CGPoint
-    ) {
-        guard isEditing else { return }
+    ) -> Bool {
+        guard isEditing else { return false }
+        let previous = CGPoint(x: placement.relativeX, y: placement.relativeY)
         editingDecorationID = placement.decorationID
         do {
             try AquariumDecorationService.confirmPlacement(
@@ -569,7 +588,8 @@ struct AquariumView: View {
             originalPosition = position
             previewPosition = nil
             onDecorationChanged()
-        } catch {}
+            return previous != position
+        } catch { return false }
     }
 
     private func finishDecorationEditing() {
@@ -581,6 +601,7 @@ struct AquariumView: View {
         originalPosition = nil
         previewPosition = nil
         onDecorationEditingChanged(false)
+        onDecorationSelected(nil)
     }
 
     // 魚の配置と泳ぎは、背景装飾とは独立したレイヤーで管理する。
@@ -648,6 +669,7 @@ private struct AquariumPlacedDecorationView: View {
                     .opacity(depth.opacity)
             }
         }
+        .decorationTutorialTarget(.placement(placement.decorationID))
         .offset(y: decoration.kind.groundAnchorOffset(scale: scale, facingDirection: decoration.facingDirection))
         .position(x: aquariumSize.width * position.x, y: aquariumSize.height * position.y)
         .accessibilityLabel(decoration.kind.displayName)

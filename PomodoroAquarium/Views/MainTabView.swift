@@ -188,7 +188,9 @@ struct MainTabSelectionState {
 
 enum AquariumEditorLaunchPolicy {
     static func canRestore(mode: CoreTutorialMode, defaults: UserDefaults) -> Bool {
-        mode == .production && defaults.bool(forKey: OnboardingStore.storageKey) &&
+        // 専用DraftStoreを注入したPreviewでも、画面再生成時は本番と同じ復元経路を使う。
+        if mode == .decorationPreview { return true }
+        return mode == .production && defaults.bool(forKey: OnboardingStore.storageKey) &&
             defaults.bool(forKey: CoreTutorialStorageKey.hasCompleted)
     }
 
@@ -213,6 +215,7 @@ struct MainTabView: View {
     @State private var isDecorationOperationFocused = false
     @State private var aquariumViewingControlsAutoHideTask: Task<Void, Never>?
     @State private var coreTutorial: CoreTutorialCoordinator
+    @State private var decorationTutorial: DecorationPurchaseTutorial
     @State private var showsCoreTutorialCompletion = false
     @State private var hasReconciledCoreTutorial = false
     @State private var hasCheckedRewardRecovery = false
@@ -223,6 +226,9 @@ struct MainTabView: View {
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let appDefaults: UserDefaults
+    private let editorDraftStore: AquariumEditorDraftStore
+    private let timerSessionStore: TimerSessionStore
+    private let shopItemsOverride: [ShopItem]?
     private let coreTutorialMode: CoreTutorialMode
     private let onCoreTutorialPreviewFinished: () -> Void
 
@@ -231,9 +237,13 @@ struct MainTabView: View {
         defaults: UserDefaults = .standard,
         timerSessionStore: TimerSessionStore? = nil,
         notificationService: TimerNotificationScheduling? = nil,
+        editorDraftStore: AquariumEditorDraftStore = .standard,
+        decorationTutorial: DecorationPurchaseTutorial? = nil,
+        shopItems: [ShopItem]? = nil,
         onCoreTutorialPreviewFinished: @escaping () -> Void = {}
     ) {
-        let initialTab = AquariumEditorLaunchPolicy.initialTab(mode: coreTutorialMode, defaults: defaults)
+        let initialTab: MainAppTab = coreTutorialMode == .decorationPreview ? .shop :
+            AquariumEditorLaunchPolicy.initialTab(mode: coreTutorialMode, defaults: defaults, store: editorDraftStore)
         var initialSelection = MainTabSelectionState()
         initialSelection.select(initialTab, whileStudyLocked: false)
         _tabSelectionState = State(initialValue: initialSelection)
@@ -274,12 +284,24 @@ struct MainTabView: View {
             defaults: defaults,
             timerSessionStore: resolvedSessionStore
         ))
+        _decorationTutorial = State(initialValue: decorationTutorial ?? DecorationPurchaseTutorial(defaults: defaults))
+        self.editorDraftStore = editorDraftStore
+        self.timerSessionStore = resolvedSessionStore
+        self.shopItemsOverride = shopItems
         self.appDefaults = defaults
         self.coreTutorialMode = coreTutorialMode
         self.onCoreTutorialPreviewFinished = onCoreTutorialPreviewFinished
     }
 
     private var player: Player? { players.first }
+    private var shopProducts: [ShopItem] {
+        if let shopItemsOverride { return shopItemsOverride }
+#if DEBUG
+        return DecorationTutorialUITestSupport.products ?? ShopCatalog.items
+#else
+        return ShopCatalog.items
+#endif
+    }
 
     private var tabSelection: Binding<MainAppTab> {
         Binding(
@@ -304,6 +326,8 @@ struct MainTabView: View {
                             ),
                         homeNavigationResetRequestID: homeNavigationResetRequestID,
                         appDefaults: appDefaults,
+                        editorDraftStore: editorDraftStore,
+                        timerSessionStore: timerSessionStore,
                         coreTutorial: coreTutorial,
                         showsCoreTutorialCompletion: showsCoreTutorialCompletion,
                         coreTutorialCompletionButtonTitle: coreTutorialMode == .preview
@@ -343,7 +367,11 @@ struct MainTabView: View {
                         areAquariumViewingControlsVisible: areAquariumViewingControlsVisible,
                         onAquariumViewingInteraction: showAndScheduleAquariumViewingControls,
                         appDefaults: appDefaults,
-                        coreTutorial: coreTutorial
+                        editorDraftStore: editorDraftStore,
+                        timerSessionStore: timerSessionStore,
+                        coreTutorial: coreTutorial,
+                        decorationTutorial: decorationTutorial,
+                        blocksDecorationTutorial: showsCoreTutorialCompletion
                     )
                     .toolbarVisibility(.hidden, for: .tabBar)
                 } label: {
@@ -352,7 +380,7 @@ struct MainTabView: View {
 
                 Tab(value: MainAppTab.shop) {
                     NavigationStack {
-                        ShopView()
+                        ShopView(decorationTutorial: decorationTutorial, products: shopProducts)
                     }
                     .toolbarVisibility(.hidden, for: .tabBar)
                 } label: {
@@ -379,14 +407,26 @@ struct MainTabView: View {
             }
             .toolbarVisibility(.hidden, for: .tabBar)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                customTabBar
-                    .opacity(shouldShowBottomTabBar ? 1 : 0)
-                    .allowsHitTesting(shouldShowBottomTabBar)
-                    .accessibilityHidden(!shouldShowBottomTabBar)
-                    .animation(
-                        .easeInOut(duration: AquariumViewingControlsPolicy.fadeDuration),
-                        value: shouldShowBottomTabBar
-                    )
+                VStack(spacing: 0) {
+                    if decorationTutorial.phase == .invitation,
+                       !decorationTutorial.isPurchaseFeedbackVisible,
+                       tabSelectionState.selection == .shop, scenePhase == .active,
+                       !coreTutorial.isActive, !showsCoreTutorialCompletion {
+                        DecorationPurchaseInvitation(tutorial: decorationTutorial) {
+                            // 「はい」では通常の水槽へ移動し、編集はユーザーの操作で始める。
+                            decorationTutorial.requestEditor()
+                            if !requestTabSelection(.aquarium) { decorationTutorial.dismiss() }
+                        }
+                    }
+                    customTabBar
+                        .opacity(shouldShowBottomTabBar ? 1 : 0)
+                        .allowsHitTesting(shouldShowBottomTabBar)
+                        .accessibilityHidden(!shouldShowBottomTabBar)
+                        .animation(
+                            .easeInOut(duration: AquariumViewingControlsPolicy.fadeDuration),
+                            value: shouldShowBottomTabBar
+                        )
+                }
             }
             .overlayPreferenceValue(CoreTutorialTargetPreferenceKey.self) { targets in
                 GeometryReader { tutorialGeometry in
@@ -729,6 +769,8 @@ struct MainTabView: View {
     }
 
     private func coreTutorialAllowsSelecting(_ tab: MainAppTab) -> Bool {
+        if !coreTutorial.isActive, decorationTutorial.step != nil { return tab == .aquarium }
+        if coreTutorialMode == .decorationPreview { return tab == .shop || tab == .aquarium }
         guard coreTutorial.isActive else { return true }
         return CoreTutorialTabInteractionPolicy.canSelect(
             tab,

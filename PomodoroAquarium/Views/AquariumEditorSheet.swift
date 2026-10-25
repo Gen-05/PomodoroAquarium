@@ -22,6 +22,10 @@ struct AquariumEditorSheet: View {
     @State private var showsPlaced = false
     @State private var shipwreckCandidateID: String?
     var placeShipwreck: (String, AquariumDecorationFacingDirection) -> Void = { _, _ in }
+    var tutorialPlacementID: String?
+    var tutorialKind: AquariumDecorationKind?
+    var onDecorationLibraryShown: (Bool) -> Void = { _ in }
+    var onLibraryModalChanged: (Bool) -> Void = { _ in }
 
     private var decorationStorageTarget: AquariumEditorBulkStorage {
         category.map { .decorationCategory($0) } ?? .decorations
@@ -46,28 +50,38 @@ struct AquariumEditorSheet: View {
                 Spacer()
                 Button(action: close) { Image(systemName: "xmark").frame(width: 44, height: 44) }
                     .accessibilityLabel("一覧を閉じる").accessibilityIdentifier("aquariumEditor.closeLibrary")
+                    .decorationTutorialTarget(.closeLibrary)
             }.padding(.horizontal, 16)
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    if editorCategory == .decoration {
-                        decorationContent
-                    } else if editorCategory == .fish {
-                        fishContent
-                    } else {
-                        ForEach(AquariumBackgroundTheme.allCases, id: \.self) { theme in
-                            Button { selectBackground(theme) } label: {
-                                HStack {
-                                    Image(theme.imageName).resizable().scaledToFill().frame(width: 70, height: 65).clipped().clipShape(RoundedRectangle(cornerRadius: 12))
-                                    Text(theme.displayName)
-                                    Spacer()
-                                    if theme == backgroundTheme { Image(systemName: "checkmark") }
-                                }.padding(10).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                            }.buttonStyle(.plain)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: 16) {
+                        if editorCategory == .decoration {
+                            decorationContent
+                        } else if editorCategory == .fish {
+                            fishContent
+                        } else {
+                            ForEach(AquariumBackgroundTheme.allCases, id: \.self) { theme in
+                                Button { selectBackground(theme) } label: {
+                                    HStack {
+                                        Image(theme.imageName).resizable().scaledToFill().frame(width: 70, height: 65).clipped().clipShape(RoundedRectangle(cornerRadius: 12))
+                                        Text(theme.displayName)
+                                        Spacer()
+                                        if theme == backgroundTheme { Image(systemName: "checkmark") }
+                                    }.padding(10).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                                }.buttonStyle(.plain)
+                            }
                         }
-                    }
-                }.padding(16)
+                    }.padding(16)
+                }
+                .scrollIndicators(.visible)
+                .task(id: "\(tutorialKind?.rawValue ?? "")-\(showsPlaced)") {
+                    guard let kind = tutorialKind else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    guard !showsPlaced else { return }
+                    proxy.scrollTo(kind, anchor: .top)
+                }
             }
-            .scrollIndicators(.visible)
 
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -84,6 +98,11 @@ struct AquariumEditorSheet: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("aquariumEditor.fullScreenLibrary")
+        .onAppear { if editorCategory == .decoration { onDecorationLibraryShown(!showsPlaced) } }
+        .onChange(of: showsPlaced) { _, placed in if editorCategory == .decoration { onDecorationLibraryShown(!placed) } }
+        .onChange(of: editorCategory) { _, category in if category == .decoration { onDecorationLibraryShown(!showsPlaced) } }
+        .onChange(of: shipwreckCandidateID) { _, id in onLibraryModalChanged(id != nil) }
+        .onDisappear { onLibraryModalChanged(false) }
         .alert(bulkStorageConfirmation?.confirmationTitle ?? "",
                isPresented: Binding(get: { bulkStorageConfirmation != nil }, set: { if !$0 { bulkStorageConfirmation = nil } }),
                presenting: bulkStorageConfirmation) { target in
@@ -193,6 +212,7 @@ struct AquariumEditorSheet: View {
                 Text("追加する").tag(false)
                 Text("配置済み").tag(true)
             }.pickerStyle(.segmented)
+            .decorationTutorialTarget(.additions)
             if showsPlaced {
                 bulkStorageButton(decorationStorageTarget, count: placedDecorations.count)
                 if placedDecorations.isEmpty {
@@ -217,10 +237,13 @@ struct AquariumEditorSheet: View {
                         let remaining = (item?.ownedCount ?? 0) - (item?.placedCount ?? 0)
                         let activeShip = placements.first { $0.kind == .shipwreck && $0.isPlaced }
                         let available = kind == .shipwreck ? (item?.ownedCount ?? 0) > 0 : remaining > 0
+                        let preferredID = placements.first {
+                            $0.decorationID == tutorialPlacementID && $0.kind == kind && !$0.isPlaced
+                        }?.decorationID ?? item?.dragPlacementID
                         Button {
                             if kind == .shipwreck, let item {
-                                shipwreckCandidateID = activeShip?.decorationID ?? item.dragPlacementID
-                            } else if let item, remaining > 0 { addDecoration(item.dragPlacementID) }
+                                shipwreckCandidateID = activeShip?.decorationID ?? preferredID ?? item.dragPlacementID
+                            } else if let preferredID, remaining > 0 { addDecoration(preferredID) }
                         } label: {
                             VStack(spacing: 6) {
                                 thumbnail(kind)
@@ -231,6 +254,8 @@ struct AquariumEditorSheet: View {
                             }.frame(maxWidth: .infinity).padding(10)
                                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
                         }.buttonStyle(.plain).disabled(!available).opacity(available ? 1 : 0.45)
+                        .id(kind)
+                        .decorationTutorialTarget(.add(kind))
                         .accessibilityIdentifier("aquariumEditor.add.\(kind.rawValue)")
                     }
                 }

@@ -364,6 +364,8 @@ struct CoreTutorialSpotlightStep: View {
     var showsPointingHand = false
     var allowsConversationAdvance = true
     var allowsTargetInteraction = false
+    var followsTargetFrame = false
+    var interactionFrames: [CGRect]?
     var onConversationAdvance: () -> Void = {}
     let accessibilityIdentifier: String
 
@@ -421,6 +423,7 @@ struct CoreTutorialSpotlightStep: View {
         }
         .accessibilityIdentifier(accessibilityIdentifier)
         .task(id: captureIdentity) {
+            if followsTargetFrame { return }
             latestTargetFrame = targetFrame
             capturedTargetFrame = nil
             capturedStepIdentifier = nil
@@ -452,12 +455,14 @@ struct CoreTutorialSpotlightStep: View {
             reservesPointingHandSpace: showsPointingHand,
             allowsAdvance: allowsConversationAdvance,
             allowsTargetInteraction: allowsTargetInteraction,
+            interactionFrames: interactionFrames,
             onAdvance: onConversationAdvance
         )
         .id(captureIdentity)
     }
 
     private var resolvedTargetFrame: CGRect? {
+        if followsTargetFrame { return targetFrame }
         guard capturedStepIdentifier == captureIdentity else {
             return targetFrame
         }
@@ -488,6 +493,7 @@ private struct CoreTutorialConversationLayer: View {
     let reservesPointingHandSpace: Bool
     let allowsAdvance: Bool
     let allowsTargetInteraction: Bool
+    let interactionFrames: [CGRect]?
     let onAdvance: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -503,7 +509,8 @@ private struct CoreTutorialConversationLayer: View {
             if allowsTargetInteraction {
                 CoreTutorialInteractionBlocker(
                     targetFrame: targetFrame,
-                    containerSize: containerSize
+                    containerSize: containerSize,
+                    allowedFrames: interactionFrames
                 )
             } else {
                 Color.clear
@@ -678,14 +685,21 @@ private struct CoreTutorialConversationCardSizePreferenceKey: PreferenceKey {
 /// Blocks the backing screen while leaving only the real tutorial target hittable.
 /// Four rectangles form a hole around the resolved target frame, so no fake control
 /// is layered over the action the user is asked to perform.
-private struct CoreTutorialInteractionBlocker: View {
+struct CoreTutorialInteractionBlocker: View {
     let targetFrame: CGRect?
     let containerSize: CGSize
+    var allowedFrames: [CGRect]?
 
     @ViewBuilder
     var body: some View {
         if let bounds = validContainerBounds {
-            if let target = validTarget(in: bounds) {
+            if let allowedFrames {
+                ZStack(alignment: .topLeading) {
+                    ForEach(Array(blockedRegions(in: bounds, allowing: allowedFrames).enumerated()), id: \.offset) { _, frame in
+                        blockingRegion(frame)
+                    }
+                }.frame(width: bounds.width, height: bounds.height)
+            } else if let target = validTarget(in: bounds) {
                 ZStack(alignment: .topLeading) {
                     blockingRegion(CGRect(
                         x: 0,
@@ -718,6 +732,19 @@ private struct CoreTutorialInteractionBlocker: View {
             }
         } else {
             fullSizeBlocker
+        }
+    }
+
+    private func blockedRegions(in bounds: CGRect, allowing frames: [CGRect]) -> [CGRect] {
+        frames.filter(isValidRegion).reduce([bounds]) { regions, frame in
+            regions.flatMap { region -> [CGRect] in
+                let cut = region.intersection(frame.insetBy(dx: -4, dy: -4))
+                guard isValidRegion(cut) else { return [region] }
+                return [CGRect(x: region.minX, y: region.minY, width: region.width, height: cut.minY - region.minY),
+                    CGRect(x: region.minX, y: cut.maxY, width: region.width, height: region.maxY - cut.maxY),
+                    CGRect(x: region.minX, y: cut.minY, width: cut.minX - region.minX, height: cut.height),
+                    CGRect(x: cut.maxX, y: cut.minY, width: region.maxX - cut.maxX, height: cut.height)].filter(isValidRegion)
+            }
         }
     }
 

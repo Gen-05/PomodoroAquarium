@@ -64,7 +64,11 @@ struct ContentView: View {
             }
             if hasCompletedOnboarding {
                 // Homeと同じ冪等な準備処理を再利用し、Playerの重複生成を避ける。
-                _ = try? HomePlayerInitialization.prepare(in: modelContext)
+                if let initialization = try? HomePlayerInitialization.prepare(in: modelContext) {
+#if DEBUG
+                    try? DecorationTutorialUITestSupport.prepare(initialization, in: modelContext)
+#endif
+                }
             }
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.25)) {

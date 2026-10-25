@@ -94,7 +94,11 @@ struct HomeView: View {
     var onAquariumViewingInteraction: () -> Void = {}
     var homeNavigationResetRequestID: UUID?
     var appDefaults: UserDefaults = .standard
+    var editorDraftStore: AquariumEditorDraftStore = .standard
+    var timerSessionStore: TimerSessionStore = .shared
     var coreTutorial: CoreTutorialCoordinator?
+    var decorationTutorial: DecorationPurchaseTutorial?
+    var blocksDecorationTutorial = false
     var showsCoreTutorialCompletion = false
     var coreTutorialCompletionButtonTitle = "はじめる"
     var onDismissCoreTutorialCompletion: () -> Void = {}
@@ -157,6 +161,8 @@ struct HomeView: View {
     @State private var showsAquariumCapacityAlert = false
     @State private var showsEditorSaveConfirmation = false
     @State private var showsAquariumEditorTutorial = false
+    @State private var localDecorationTutorial = DecorationPurchaseTutorial()
+    @State private var decorationGuideLibraryModal = false
     // 旧編集overlayは新UIの検証完了まで実装を保持し、表示経路だけ切り替える。
     @State private var isEditingDecoration = false
     @State private var showsDecorationStorage = false
@@ -230,6 +236,20 @@ struct HomeView: View {
         )
     }
 
+    private var decorationGuide: DecorationPurchaseTutorial { decorationTutorial ?? localDecorationTutorial }
+    private var allowsDecorationGuide: Bool {
+        mode == .aquariumEditor && isAquariumEditorActive && coreTutorial?.isActive != true &&
+        !blocksDecorationTutorial && !showsCoreTutorialCompletion && !showsAquariumEditorTutorial
+    }
+    private var showsDecorationGuide: Bool {
+        allowsDecorationGuide && decorationGuide.step != nil && !decorationGuideLibraryModal &&
+        !showsAquariumEditConfirmation && editorPersistenceError == nil &&
+        !showsEditorCancelConfirmation && !showsEditorSaveConfirmation
+    }
+    private var keepsDecorationViewingControlsVisible: Bool {
+        allowsDecorationGuide && (decorationGuide.step == .edit || decorationGuide.step == .completed)
+    }
+
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
@@ -249,6 +269,7 @@ struct HomeView: View {
                         onGlobalCanvasGeometryChanged: { globalCanvasFrame = $0 },
                         viewingTapRequest: aquariumViewingTapRequest,
                         isSimulationPaused: isAquariumSimulationPaused || showsTimerScreen,
+                        allowsDeveloperDecorationSeeding: coreTutorial?.isPreviewMode != true,
                         isEditing: isAquariumEditorPresented && !showsEditorLibrary,
                         isTreasureTapEnabled: !isAquariumEditorPresented,
                         defersDecorationPersistence: mode == .aquariumEditor,
@@ -263,6 +284,11 @@ struct HomeView: View {
                                 selectedAquariumFishID = nil
                             }
                         },
+                        onDecorationSelected: { placement in
+                            decorationGuide.didSelectDecoration(placement)
+                        },
+                        onDecorationDragged: { id, from, to in decorationGuide.didDragDecoration(id: id, from: from, to: to) },
+                        onShipwreckSideChanged: { id, from, to in decorationGuide.didChangeShipwreckSide(id: id, from: from, to: to) },
                         selectionResetRequestID: aquariumSelectionResetRequestID,
                         historyRestorationRequestID: aquariumHistoryRestorationRequestID,
                         decorationControlsTopInset: max(0, editorHistoryBottom - globalCanvasFrame.minY + 12),
@@ -305,9 +331,9 @@ struct HomeView: View {
                             .zIndex(15)
 
                         aquariumEditingEntryControl
-                            .opacity(areAquariumViewingControlsVisible ? 1 : 0)
-                            .allowsHitTesting(areAquariumViewingControlsVisible)
-                            .accessibilityHidden(!areAquariumViewingControlsVisible)
+                            .opacity(areAquariumViewingControlsVisible || keepsDecorationViewingControlsVisible ? 1 : 0)
+                            .allowsHitTesting(areAquariumViewingControlsVisible || keepsDecorationViewingControlsVisible)
+                            .accessibilityHidden(!areAquariumViewingControlsVisible && !keepsDecorationViewingControlsVisible)
                             .animation(
                                 .easeInOut(duration: AquariumViewingControlsPolicy.fadeDuration),
                                 value: areAquariumViewingControlsVisible
@@ -326,11 +352,15 @@ struct HomeView: View {
                                 selectPlacement: { id in showsEditorLibrary = false; decorationRestoreRequestID = id },
                                 addFish: addFishFromLibrary, storeFish: storeAquariumFish,
                                 selectFish: { id in selectAquariumFish(id); showsEditorLibrary = false },
-                                close: { showsEditorLibrary = false },
+                                close: { showsEditorLibrary = false; decorationGuide.didCloseLibrary() },
                                 selectBackground: { theme in selectBackground(theme); showsEditorLibrary = false },
                                 storeAllFish: { storeAllAquariumItems(.fish) },
                                 storeDecorations: { storeAllAquariumItems($0) },
-                                placeShipwreck: placeShipwreckFromLibrary)
+                                placeShipwreck: placeShipwreckFromLibrary,
+                                tutorialPlacementID: showsDecorationGuide ? decorationGuide.placementID : nil,
+                                tutorialKind: showsDecorationGuide ? decorationGuide.kind : nil,
+                                onDecorationLibraryShown: { decorationGuide.didShowLibrary(isAdding: $0) },
+                                onLibraryModalChanged: { decorationGuideLibraryModal = $0 })
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .opacity(fishDragSession == nil ? 1 : 0)
                             .zIndex(40)
@@ -346,6 +376,7 @@ struct HomeView: View {
                             aquariumEditorTutorial(aquariumWidth: aquariumWidth)
                                 .zIndex(60)
                         }
+
                     }
 
                     if showsInterruptionBanner {
@@ -359,6 +390,29 @@ struct HomeView: View {
 
                 }
                 .coordinateSpace(name: AquariumEditorCoordinateSpace.name)
+                .overlayPreferenceValue(DecorationTutorialTargetKey.self) { targets in
+                    GeometryReader { proxy in
+                        if showsDecorationGuide {
+                            if let frame = decorationGuideTargetFrame(targets, in: proxy) {
+                                DecorationTutorialSpotlight(tutorial: decorationGuide, targetFrame: frame,
+                                    interactionFrames: decorationGuideInteractionFrames(targets, in: proxy, target: frame))
+                            } else {
+                                CoreTutorialInteractionBlocker(targetFrame: nil, containerSize: proxy.size,
+                                    allowedFrames: decorationGuideInteractionFrames(targets, in: proxy, target: .zero))
+                            }
+                            VStack {
+                                HStack {
+                                    Button(decorationGuide.step == .completed ? "閉じる" : "スキップ") { decorationGuide.dismiss() }
+                                        .font(.caption.bold()).padding(.horizontal, 8).frame(minHeight: 44)
+                                        .background(.regularMaterial, in: Capsule())
+                                        .accessibilityIdentifier("decorationTutorial.skip")
+                                    Spacer()
+                                }
+                                Spacer()
+                            }.padding(12)
+                        }
+                    }
+                }
                 .animation(.easeInOut(duration: 0.22), value: isEditorPanelExpanded)
                 .animation(.easeInOut(duration: 0.20), value: isDecorationOperationFocused)
                 .overlayPreferenceValue(CoreTutorialTargetPreferenceKey.self) { targets in
@@ -409,6 +463,17 @@ struct HomeView: View {
         .task {
             await initializeHomeDataAfterAppearance()
             restoreAquariumEditorDraftIfNeeded()
+        }
+        .onChange(of: decorationGuide.phase, initial: true) { _, _ in
+            if allowsDecorationGuide && isAquariumEditorPresented && editorWorkingState != nil {
+                decorationGuide.didBeginEditing(placements: decorationPlacements)
+            }
+        }
+        .onChange(of: officialDecorationPlacements.map(\.decorationID).sorted()) { _, _ in
+            synchronizePurchasedDecorationInventory()
+        }
+        .onChange(of: decorationPlacements.filter(\.isPlaced).map(\.decorationID).sorted()) { _, _ in
+            decorationGuide.reconcilePlacedTarget(decorationPlacements)
         }
         .task(id: homeStartTransition.requestID) {
             guard let id = homeStartTransition.requestID else { return }
@@ -479,7 +544,10 @@ struct HomeView: View {
             showsTimerScreen = false
         }
         .onChange(of: isAquariumEditorPresented) { _, isEditing in
-            if isEditing { aquariumEditorCategory = .fish; isFishLibraryCompact = false; showsActiveFishLibrary = false; showsEditorLibrary = false }
+            if isEditing {
+                aquariumEditorCategory = .fish; isFishLibraryCompact = false; showsActiveFishLibrary = false; showsEditorLibrary = false
+                decorationGuide.didBeginEditing(placements: decorationPlacements)
+            }
             if !isEditing {
                 showsEditorLibrary = false
                 clearAquariumSelections()
@@ -807,6 +875,7 @@ struct HomeView: View {
                     Image(systemName: "xmark").frame(width: 44, height: 48)
                         .background(.ultraThinMaterial, in: Capsule())
                 }.accessibilityLabel("キャンセル").accessibilityIdentifier("aquariumEditor.cancel")
+                .decorationTutorialTarget(.cancel)
                 Button {
                     guard coreTutorial?.isActive != true || isAquariumDoneTutorialInteractionAllowed else { return }
                     finishAquariumEditing()
@@ -816,6 +885,7 @@ struct HomeView: View {
                         .background(.ultraThinMaterial, in: Capsule())
                 }
                 .coreTutorialTarget(.aquariumDone)
+                .decorationTutorialTarget(.done)
                 .disabled(coreTutorial?.isActive == true && !isAquariumDoneTutorialInteractionAllowed)
                 .accessibilityIdentifier("aquariumEditor.done")
             }
@@ -827,6 +897,7 @@ struct HomeView: View {
             }
             .background(.ultraThinMaterial, in: Capsule())
             .padding(.top, 4)
+            .decorationTutorialTarget(.history)
             .background {
                 GeometryReader { geometry in
                     Color.clear
@@ -852,6 +923,9 @@ struct HomeView: View {
 
     private func editorCategoryButton(_ category: AquariumEditorCategory, title: String, symbol: String) -> some View {
         Button {
+            if category == .decoration, decorationGuide.step == .library {
+                selectedDecorationCategory = decorationGuide.kind?.category
+            }
             aquariumEditorCategory = category
             isFishLibraryCompact = false
             showsEditorLibrary = true
@@ -871,6 +945,7 @@ struct HomeView: View {
             }
         }
         .accessibilityLabel(title)
+        .background { if category == .decoration { Color.clear.decorationTutorialTarget(.category) } }
         .accessibilityIdentifier("aquariumEditor.category.\(category == .fish ? "fish" : category == .decoration ? "decoration" : "background")")
     }
 
@@ -898,12 +973,14 @@ struct HomeView: View {
             if let active = decorationPlacements.first(where: { $0.kind == .shipwreck && $0.isPlaced }) {
                 showsEditorLibrary = false
                 decorationRestoreRequestID = active.decorationID
+                decorationGuide.didAddDecoration(active)
             }
             return
         }
         showsEditorLibrary = false
         decorationRestoreRequestID = placement.decorationID
         markAquariumEditorChanged()
+        decorationGuide.didAddDecoration(placement)
         if mode != .aquariumEditor { try? modelContext.save() }
     }
 
@@ -919,6 +996,7 @@ struct HomeView: View {
             showsEditorLibrary = false
             decorationRestoreRequestID = id
             markAquariumEditorChanged()
+            decorationGuide.didAddDecoration(placement)
         } catch { showsAquariumCapacityAlert = true }
     }
 
@@ -1150,6 +1228,7 @@ struct HomeView: View {
                         .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
                 }
                 .buttonStyle(.plain)
+                .decorationTutorialTarget(.edit)
                 .coreTutorialTarget(.aquariumEdit)
                 .coreTutorialHighlight(
                     coreTutorial?.isActive == true &&
@@ -1263,6 +1342,46 @@ struct HomeView: View {
         .accessibilityIdentifier("aquariumEditor.expandPanel")
     }
 
+    private var decorationGuideTarget: DecorationTutorialTarget? {
+        switch decorationGuide.step {
+        case .edit, .completed: .edit
+        case .library: .category
+        case .additions: .additions
+        case .add: decorationGuide.kind.map { .add($0) } ?? .additions
+        case .select: decorationGuide.placementID.map { .placement($0) }
+        case .move: decorationGuide.kind == .shipwreck ? .operations : decorationGuide.placementID.map { .placement($0) }
+        case .tools: .operations
+        case .save: .done
+        default: nil
+        }
+    }
+
+    private func decorationGuideTargetFrame(_ targets: [DecorationTutorialTarget: Anchor<CGRect>], in proxy: GeometryProxy) -> CGRect? {
+        guard let target = decorationGuideTarget, let anchor = targets[target] else { return nil }
+        let frame = proxy[anchor].intersection(CGRect(origin: .zero, size: proxy.size))
+        return frame.isNull || frame.width < 1 || frame.height < 1 ? nil : frame
+    }
+
+    private func decorationGuideInteractionFrames(_ targets: [DecorationTutorialTarget: Anchor<CGRect>], in proxy: GeometryProxy, target: CGRect) -> [CGRect] {
+        var allowed: [CGRect] = decorationGuide.step == .completed ? [] : [target]
+        if decorationGuide.step == .move, decorationGuide.kind != .shipwreck {
+            allowed.append(CGRect(x: 0, y: max(0, editorHistoryBottom - globalCanvasFrame.minY + 12),
+                width: proxy.size.width, height: max(0, proxy.size.height - (editorHistoryBottom - globalCanvasFrame.minY + 12))))
+        }
+        for key in [DecorationTutorialTarget.cancel, .closeLibrary, .history] {
+            if let anchor = targets[key] { allowed.append(proxy[anchor]) }
+        }
+        return allowed
+    }
+
+    private func synchronizePurchasedDecorationInventory() {
+        guard mode == .aquariumEditor, let work = editorWorkingState else { return }
+        let baseline = work.includeNewlyOwnedDecorations(officialDecorationPlacements)
+        guard !baseline.isEmpty else { return }
+        editorHistory?.includeNewlyOwnedDecorations(baseline)
+        persistAquariumEditorDraft()
+    }
+
     private func aquariumEditorTutorial(aquariumWidth: CGFloat) -> some View {
         VStack(spacing: 12) {
             Text("水槽編集の操作")
@@ -1334,13 +1453,13 @@ struct HomeView: View {
               let player else { return }
 
         _ = try? AquariumDecorationService.removeLegacyPlaceholders(in: modelContext)
-        _ = try? AquariumDeveloperDecorations.seedIfNeeded(in: modelContext)
+        if coreTutorial?.isPreviewMode != true { _ = try? AquariumDeveloperDecorations.seedIfNeeded(in: modelContext) }
         let currentPlacements = (try? modelContext.fetch(
             FetchDescriptor<AquariumDecorationPlacement>()
         )) ?? decorationPlacements
 
         let initial = AquariumEditorDraft(player: player, placements: currentPlacements, background: savedBackgroundTheme)
-        do { try AquariumEditorDraftStore.standard.save(initial) }
+        do { try editorDraftStore.save(initial) }
         catch { editorPersistenceError = "一時保存できませんでした。\(error.localizedDescription)"; return }
         fishViewingSession.beginEditing()
         editorWorkingState = AquariumEditorWorkingState(official: player, placements: currentPlacements, draft: initial)
@@ -1385,16 +1504,16 @@ struct HomeView: View {
         do {
             var draft = AquariumEditorDraft(player: work.player, placements: work.placements, background: displayedBackgroundTheme)
             draft.history = editorHistory
-            try AquariumEditorDraftStore.standard.save(draft)
+            try editorDraftStore.save(draft)
         } catch { editorPersistenceError = "一時保存できませんでした。\(error.localizedDescription)" }
     }
 
     private func restoreAquariumEditorDraftIfNeeded() {
         guard mode == .aquariumEditor, allowsEditorDraftRestoration, editorWorkingState == nil, let official = players.first else { return }
         do {
-            guard let draft = try AquariumEditorDraftStore.standard.load() else { return }
+            guard let draft = try editorDraftStore.load() else { return }
             _ = try AquariumDecorationService.removeLegacyPlaceholders(in: modelContext)
-            _ = try AquariumDeveloperDecorations.seedIfNeeded(in: modelContext)
+            if coreTutorial?.isPreviewMode != true { _ = try? AquariumDeveloperDecorations.seedIfNeeded(in: modelContext) }
             let currentPlacements = try modelContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
             let work = AquariumEditorWorkingState(official: official, placements: currentPlacements, draft: draft)
             fishViewingSession.beginEditing()
@@ -1402,11 +1521,15 @@ struct HomeView: View {
             draftBackgroundTheme = AquariumBackgroundTheme(rawValue: draft.background)
             let current = AquariumEditorDraft(player: work.player,
                 placements: work.placements, background: displayedBackgroundTheme)
-            editorHistory = draft.history.flatMap { $0.isValid(for: current) ? $0 : nil } ?? AquariumEditorHistory(initial: current)
+            var restoredHistory = draft.history
+            let oldIDs = Set(draft.placements.map(\.id))
+            restoredHistory?.includeNewlyOwnedDecorations(current.placements.filter { !oldIDs.contains($0.id) })
+            editorHistory = restoredHistory.flatMap { $0.isValid(for: current) ? $0 : nil } ?? AquariumEditorHistory(initial: current)
             aquariumEditorNavigation?.beginSession()
             aquariumEditorNavigation?.markChanged()
             showsEditorLibrary = false
             fishAppearances = [:]
+            decorationGuide.didBeginEditing(placements: decorationPlacements)
         } catch { editorPersistenceError = "一時データを読み込めませんでした。正式な水槽データは保持されています。" }
     }
 
@@ -1433,7 +1556,7 @@ struct HomeView: View {
             return
         }
         backgroundThemeRawValue = displayedBackgroundTheme.rawValue
-        do { try AquariumEditorDraftStore.standard.remove() }
+        do { try editorDraftStore.remove() }
         catch {
             original.restore(player: official, decorationPlacements: officialDecorationPlacements)
             official.hasSavedCoreTutorialAquarium = originalTutorialSaved
@@ -1446,14 +1569,16 @@ struct HomeView: View {
         fishViewingSession.finishEditing(commit: official.activeAquariumFishIDs)
         coreTutorial?.didSaveAquarium(with: official)
         endAquariumEditorSession(selecting: nil)
+        decorationGuide.didEndEditing(saved: true)
     }
 
     private func discardAquariumEditorSession(closeEditor: Bool) {
-        do { try AquariumEditorDraftStore.standard.remove() }
+        do { try editorDraftStore.remove() }
         catch { editorPersistenceError = "一時保存を破棄できませんでした。"; return }
         fishViewingSession.finishEditing()
         coreTutorial?.didDiscardAquariumChanges()
         endAquariumEditorSession(selecting: nil)
+        decorationGuide.didEndEditing(saved: false)
     }
 
     private func continueAquariumEditing() {
@@ -2056,14 +2181,14 @@ struct HomeView: View {
     }
 
     private func inspectPersistedTimerSession() {
-        switch TimerSessionStore.shared.launchStatus(at: Date()) {
+        switch timerSessionStore.launchStatus(at: Date()) {
         case .recoverable, .interrupted:
             showsTimerScreen = true
         case .none, .sameProcess:
             break
         }
 
-        if TimerSessionStore.shared.consumeInterruptionBanner() {
+        if timerSessionStore.consumeInterruptionBanner() {
             withAnimation { showsInterruptionBanner = true }
         }
     }

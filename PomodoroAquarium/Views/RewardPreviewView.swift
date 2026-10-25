@@ -207,6 +207,9 @@ struct RewardPreviewView: View {
     @State private var showsCoreTutorialPreview = false
     @State private var coreTutorialPreviewSessionID = UUID()
     @State private var coreTutorialPreviewDataStore = CoreTutorialPreviewDataStore()
+    @State private var decorationTutorialPreviewSession: DecorationTutorialPreviewSession?
+    @State private var retainedDecorationTutorialPreviewSession: DecorationTutorialPreviewSession?
+    @State private var decorationTutorialPreviewError: String?
     @State private var previewHistory = RewardPreviewCatalog.historyItems
     @State private var replayedPreviewHistoryID: UUID?
 
@@ -339,11 +342,37 @@ struct RewardPreviewView: View {
                     Label("Core Tutorial Preview", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
                 }
                 .accessibilityIdentifier("rewardPreview.coreTutorial")
+
+                Button {
+                    guard retainedDecorationTutorialPreviewSession == nil else { return }
+                    do {
+                        let session = try DecorationTutorialPreviewSession()
+                        retainedDecorationTutorialPreviewSession = session
+                        decorationTutorialPreviewSession = session
+                    } catch {
+                        decorationTutorialPreviewError = "プレビューを開始できませんでした。"
+                    }
+                } label: {
+                    Label("Decoration Tutorial Preview", systemImage: "leaf.circle")
+                }
+                .accessibilityIdentifier("rewardPreview.decorationTutorial")
             } footer: {
-                Text("OnboardingとCore Tutorialを確認できます。本番の完了状態やPlayerDataは変更しません。")
+                Text("Onboarding・Core Tutorial・装飾の購入案内を確認できます。本番の完了状態やPlayerDataは変更しません。")
             }
         }
         .navigationTitle("Reward Preview")
+        .alert("Decoration Tutorial Preview", isPresented: Binding(
+            get: { decorationTutorialPreviewError != nil },
+            set: { if !$0 { decorationTutorialPreviewError = nil } })) {
+            Button("OK", role: .cancel) { decorationTutorialPreviewError = nil }
+        } message: { Text(decorationTutorialPreviewError ?? "") }
+        .fullScreenCover(item: $decorationTutorialPreviewSession, onDismiss: {
+            retainedDecorationTutorialPreviewSession?.cleanUp()
+            retainedDecorationTutorialPreviewSession = nil
+        }) { session in
+            DecorationTutorialPreviewHost(session: session) { decorationTutorialPreviewSession = nil }
+                .id(session.suiteName)
+        }
         .sheet(isPresented: $showsDailyFishClaimPreview) { DailyFishClaimPreviewView() }
         .fullScreenCover(isPresented: $showsLoadingPreview) {
             AquariumLoadingPreviewHost {

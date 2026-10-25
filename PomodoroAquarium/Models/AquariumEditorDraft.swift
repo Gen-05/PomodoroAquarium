@@ -135,7 +135,7 @@ struct AquariumEditorDraftStore {
 @MainActor @Observable
 final class AquariumEditorWorkingState {
     let player: Player
-    let placements: [AquariumDecorationPlacement]
+    private(set) var placements: [AquariumDecorationPlacement]
     init(official: Player, placements: [AquariumDecorationPlacement], draft: AquariumEditorDraft) {
         // Every model is detached; no relationship points into the official context.
         player = Player(ownedFish: official.ownedFish.map { PlayerFish(id: $0.id, species: $0.species) },
@@ -157,6 +157,17 @@ final class AquariumEditorWorkingState {
             return copy
         }
     }
+    /// 編集中の購入は所有データの追加。既存の配置・魚・履歴を変更せず、未配置のコピーだけを取り込む。
+    func includeNewlyOwnedDecorations(_ official: [AquariumDecorationPlacement]) -> [AquariumEditorDraft.Placement] {
+        let existingIDs = Set(placements.map(\.decorationID))
+        let added = official.filter { $0.kind.isAvailable && !existingIDs.contains($0.decorationID) }
+        guard !added.isEmpty else { return [] }
+        let baseline = AquariumEditorDraft(player: player, placements: added, background: .aquarium)
+        let detached = AquariumEditorWorkingState(official: player, placements: added, draft: baseline)
+        placements.append(contentsOf: detached.placements)
+        return baseline.placements
+    }
+
     func apply(_ draft: AquariumEditorDraft) {
         let ownedIDs = Set(player.ownedFish.map(\.id))
         player.activeAquariumFishIDs = draft.fishIDs.filter { ownedIDs.contains($0) }

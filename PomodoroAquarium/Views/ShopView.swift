@@ -2,10 +2,17 @@ import SwiftData
 import SwiftUI
 
 struct ShopView: View {
+    var decorationTutorial: DecorationPurchaseTutorial?
+    var products: [ShopItem] = ShopCatalog.items
     @Environment(\.modelContext) private var modelContext
     @Query private var players: [Player]
     @State private var selectedCategory: ShopCategory = .decoration
-    @State private var feedbackMessage: String?
+    @State private var feedback: PurchaseFeedback?
+
+    private struct PurchaseFeedback: Identifiable {
+        let id = UUID()
+        let message: String
+    }
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -41,7 +48,7 @@ struct ShopView: View {
                 .pickerStyle(.segmented)
 
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(ShopCatalog.items(in: selectedCategory)) { item in
+                    ForEach(products.filter { $0.category == selectedCategory }) { item in
                         productCard(item)
                     }
                 }
@@ -51,16 +58,18 @@ struct ShopView: View {
         .background(Color.cyan.opacity(0.08).ignoresSafeArea())
         .navigationTitle("ショップ")
         .navigationBarTitleDisplayMode(.inline)
-        .alert(
-            "ショップ",
-            isPresented: Binding(
-                get: { feedbackMessage != nil },
-                set: { if !$0 { feedbackMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(feedbackMessage ?? "")
+        // onDismissは購入結果の表示が閉じ終わってから呼ばれる。案内と重ねない。
+        .sheet(item: $feedback, onDismiss: { decorationTutorial?.purchaseFeedbackDidDismiss() }) { result in
+            VStack(spacing: 20) {
+                Text("ショップ").font(.headline)
+                Text(result.message).multilineTextAlignment(.center)
+                Button("OK") { feedback = nil }.buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("shop.purchaseFeedback.close")
+            }
+            .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+            .presentationDetents([.height(220)])
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("shop.purchaseFeedback")
         }
     }
 
@@ -120,13 +129,19 @@ struct ShopView: View {
     }
 
     private func purchase(_ item: ShopItem) {
+        guard feedback == nil else { return }
+        decorationTutorial?.purchaseFeedbackWillPresent()
         do {
-            _ = try ShopService.purchaseDecoration(item, for: player, in: modelContext)
-            feedbackMessage = "\(item.name)を購入しました"
+            if let decorationTutorial {
+                try decorationTutorial.purchase(item, player: player, in: modelContext)
+            } else {
+                try ShopService.purchaseDecoration(item, for: player, in: modelContext)
+            }
+            feedback = PurchaseFeedback(message: "\(item.name)を購入しました")
         } catch ShopPurchaseError.insufficientCoins {
-            feedbackMessage = "コインが足りません"
+            feedback = PurchaseFeedback(message: "コインが足りません")
         } catch {
-            feedbackMessage = "購入できませんでした"
+            feedback = PurchaseFeedback(message: "購入できませんでした")
         }
     }
 }
