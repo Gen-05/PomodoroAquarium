@@ -120,13 +120,6 @@ struct PomodoroAquariumTests {
         #expect(viewModel.lastCompletedStudyMinutes == 1_439)
     }
 
-    @Test func notificationIntroductionAppearsOnlyForFirstCountdownStudyStart() {
-        #expect(NotificationIntroductionSettings.shouldPresent(for: .pomodoro, hasShown: false))
-        #expect(NotificationIntroductionSettings.shouldPresent(for: .countdown, hasShown: false))
-        #expect(!NotificationIntroductionSettings.shouldPresent(for: .stopwatch, hasShown: false))
-        #expect(!NotificationIntroductionSettings.shouldPresent(for: .pomodoro, hasShown: true))
-    }
-
     @Test func deniedNotificationsDoNotPreventStudyOrScheduleStudyOrBreak() {
         let clock = TestClock()
         let notifications = TestNotificationService()

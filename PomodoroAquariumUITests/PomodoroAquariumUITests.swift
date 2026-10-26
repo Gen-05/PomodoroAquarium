@@ -93,7 +93,7 @@ final class PomodoroAquariumUITests: XCTestCase {
     private func verifyPomodoroReentry(automatically: Bool) {
         let app = XCUIApplication()
         app.launchArguments += ["-core-tutorial-in-memory", "-pomodoro-navigation-ui-test",
-                                "-timerSessionState", "", "-hasShownNotificationIntroduction", "YES",
+                                "-timerSessionState", "",
                                 "-pomodoroStudyDuration", "25", "-pomodoroBreakDuration", "5",
                                 "-pomodoroSetCount", "2", "-pomodoroAutoStartNextSet", automatically ? "YES" : "NO"]
         launchReturningUser(app)
@@ -161,7 +161,7 @@ final class PomodoroAquariumUITests: XCTestCase {
     func testRunningFocusDisplayForAllThreeModes() {
         for mode in ["ポモドーロ", "タイマー", "ストップウォッチ"] {
             let app = XCUIApplication()
-            app.launchArguments += ["-core-tutorial-in-memory", "-shore-wave-ui-test", "-hasShownNotificationIntroduction", "YES", "-timerSessionState", ""]
+            app.launchArguments += ["-core-tutorial-in-memory", "-shore-wave-ui-test", "-timerSessionState", ""]
             launchReturningUser(app)
             app.buttons["home.startStudy"].tap()
             XCTAssertTrue(app.buttons["timer.startStudy"].waitForExistence(timeout: 3))
@@ -248,7 +248,7 @@ final class PomodoroAquariumUITests: XCTestCase {
     @MainActor
     func testShoreWaveStartsAndReturnsToRunningUI() {
         let app = XCUIApplication()
-        app.launchArguments += ["-core-tutorial-in-memory", "-shore-wave-ui-test", "-hasShownNotificationIntroduction", "YES", "-timerSessionState", ""]
+        app.launchArguments += ["-core-tutorial-in-memory", "-shore-wave-ui-test", "-timerSessionState", ""]
         launchReturningUser(app)
         app.buttons["home.startStudy"].tap()
         XCTAssertTrue(app.buttons["timer.startStudy"].waitForExistence(timeout: 3))

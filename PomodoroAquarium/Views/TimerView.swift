@@ -271,10 +271,6 @@ struct TimerView: View {
     @AppStorage(TimerConfigurationStorageKey.pomodoroSetCount) private var pomodoroSetCount = 3
     @AppStorage(TimerConfigurationStorageKey.timerDuration)
     private var storedTimerDuration = "25"
-    @AppStorage(NotificationIntroductionSettings.hasShownKey)
-    private var hasShownNotificationIntroduction = false
-    @AppStorage(NotificationSettings.enabledKey)
-    private var notificationsEnabled = false
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -343,7 +339,6 @@ struct TimerView: View {
     @State private var showsTimeSettings = false
     @State private var showsFocusRules = false
     @State private var showsFocusCategorySelection = false
-    @State private var showsNotificationIntroduction = false
     @State private var tutorialCompletionTask: Task<Void, Never>?
     @State private var isCompletingCoreTutorialStudy = false
     @State private var focusDisplay = FocusDisplayState()
@@ -600,25 +595,6 @@ struct TimerView: View {
                 Text("現在の休憩を終了して、次の集中へ進みます。")
             }
         }
-        .alert("集中終了をお知らせ", isPresented: $showsNotificationIntroduction) {
-            Button("あとで", role: .cancel) {
-                notificationsEnabled = false
-                viewModel.resumeTimer()
-            }
-            Button("通知を許可する") {
-                viewModel.resumeTimer()
-                NotificationService.shared.requestAuthorization { granted in
-                    Task { @MainActor in
-                        notificationsEnabled = granted
-                        if granted {
-                            viewModel.rescheduleCurrentSessionNotification()
-                        }
-                    }
-                }
-            }
-        } message: {
-            Text("集中や休憩が終わった時に通知でお知らせできます。")
-        }
         .alert("次のセットを始めますか？", isPresented: Binding(
             get: { viewModel.shouldConfirmNextSet },
             set: { _ in }
@@ -751,18 +727,7 @@ struct TimerView: View {
             return
         }
 
-        let isInitialStudyStart = viewModel.isStudyTime &&
-            (viewModel.state == .idle || viewModel.state == .completed)
-        if isInitialStudyStart,
-           NotificationIntroductionSettings.shouldPresent(
-               for: viewModel.mode,
-               hasShown: hasShownNotificationIntroduction
-           ) {
-            hasShownNotificationIntroduction = true
-            showsNotificationIntroduction = true
-        } else {
-            viewModel.resumeTimer()
-        }
+        viewModel.resumeTimer()
     }
 
 #if DEBUG
@@ -1326,8 +1291,7 @@ struct TimerView: View {
             Button("START") {
                 guard scenePhase == .active, isTimerViewVisible,
                       !isStudyStartDisabledForTutorial,
-                      !studyStartPresentation.isPresenting,
-                      !showsNotificationIntroduction else { return }
+                      !studyStartPresentation.isPresenting else { return }
                 if studyStartCanvasFrame.width > 0 && !studyStartButtonFrame.isEmpty {
                     studyStartOrigin = CGPoint(
                         x: (studyStartButtonFrame.midX - studyStartCanvasFrame.minX) / studyStartCanvasFrame.width,
@@ -1346,7 +1310,7 @@ struct TimerView: View {
                 studyStartButtonFrame = frame
             }
             .coreTutorialTarget(.studyStart)
-            .disabled(isStudyStartDisabledForTutorial || studyStartPresentation.isPresenting || showsNotificationIntroduction)
+            .disabled(isStudyStartDisabledForTutorial || studyStartPresentation.isPresenting)
             .accessibilityHidden(isStudyStartHiddenForTutorial)
             .accessibilityIdentifier("timer.startStudy")
         } else {

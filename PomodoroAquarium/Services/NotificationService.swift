@@ -82,14 +82,6 @@ enum NotificationAuthorizationState: Equatable {
     }
 }
 
-enum NotificationIntroductionSettings {
-    static let hasShownKey = "hasShownNotificationIntroduction"
-
-    static func shouldPresent(for mode: TimerMode, hasShown: Bool) -> Bool {
-        !hasShown && mode != .stopwatch
-    }
-}
-
 final class NotificationService: NSObject, TimerNotificationScheduling,
     UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = NotificationService()
