@@ -89,9 +89,9 @@ enum AquariumEditorInitialPlacement {
     }
 
     private static func rect(kind: AquariumDecorationKind, scale: CGFloat, root: CGPoint, size: CGSize) -> CGRect {
-        let depth = AquariumDecorationDepthPresentation(kind: kind, relativeY: root.y)
-        let width = kind.displaySize.width * scale * depth.scale
-        let height = kind.displaySize.height * scale * depth.scale
+        let displayScale = AquariumDecorationSizing.scale(for: kind, individualScale: scale, relativeY: root.y, in: size)
+        let width = kind.displaySize.width * displayScale
+        let height = kind.displaySize.height * displayScale
         let content = kind.placementHorizontalContentBounds
         return CGRect(x: root.x * size.width + (content.lowerBound - 0.5) * width,
                       y: root.y * size.height - (kind.groundAnchorY ?? 0.5) * height,

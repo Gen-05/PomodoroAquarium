@@ -434,14 +434,15 @@ struct AquariumDeveloperDecorationTests {
             let rootY = kind.groundAnchorY ?? 1
             for position in [left, right] {
                 let depth = AquariumDecorationDepthPresentation(kind: kind, relativeY: position.y)
-                let displayWidth = kind.displaySize.width * scale * depth.scale
+                let displayWidth = kind.displaySize.width * scale * depth.scale * AquariumDecorationSizing.viewportScale(for: kind, in: size)
                 let contentLeft = position.x * width + (content.lowerBound - 0.5) * displayWidth
                 let contentRight = position.x * width + (content.upperBound - 0.5) * displayWidth
                 let visible = max(0, min(width, contentRight) - max(0, contentLeft))
                 #expect(visible + 0.000_001 >= min((contentRight - contentLeft) * 0.25, width))
             }
-            #expect(left.y * size.height - kind.displaySize.height * scale * rootY >= 0)
-            #expect(right.y * size.height + kind.displaySize.height * scale * (1 - rootY) <= size.height)
+            let displayHeight = kind.displaySize.height * scale * AquariumDecorationSizing.viewportScale(for: kind, in: size)
+            #expect(left.y * size.height - displayHeight * rootY >= 0)
+            #expect(right.y * size.height + displayHeight * (1 - rootY) <= size.height)
         }
         let bounds = AquariumDecorationEditor.placementBounds(for: kind, aquariumSize: size)
         if width == 393 && (kind == .seaweedA || kind == .seaweedB) {

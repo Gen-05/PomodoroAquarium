@@ -168,8 +168,10 @@ enum AquariumDecorationEditor {
         let band = groundBand ?? kind.movementBounds
         let content = kind.placementHorizontalContentBounds
         let depth = AquariumDecorationDepthPresentation(kind: kind, relativeY: relativeY ?? band.y.upperBound)
-        let width = kind.displaySize.width * max(scale, 0) * depth.scale
-        let height = kind.displaySize.height * max(scale, 0)
+        let displayScale = max(scale, 0) * AquariumDecorationSizing.viewportScale(for: kind, in: aquariumSize)
+        let width = kind.displaySize.width * displayScale * depth.scale
+        // Yのclampは従来どおり手前の最大奥行きサイズを確保する。
+        let height = kind.displaySize.height * displayScale
         let leftExtent = (0.5 - content.lowerBound) * width / aquariumSize.width
         let rightExtent = (content.upperBound - 0.5) * width / aquariumSize.width
         // 実際の表示幅の25%を残し、見えている部分から選択・dragできるようにする。

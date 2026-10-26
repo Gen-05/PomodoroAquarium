@@ -1038,17 +1038,20 @@ struct AquariumDecorationDragPreview: View {
     let decoration: AquariumDecoration
     var backgroundTheme: AquariumBackgroundTheme = .aquarium
     var relativeY: CGFloat? = nil
+    var aquariumSize: CGSize = .zero
 
     private var depth: AquariumDecorationDepthPresentation {
         AquariumDecorationDepthPresentation(kind: decoration.kind, relativeY: relativeY ?? decoration.relativeY)
     }
 
     var body: some View {
+        let scale = 0.72 * AquariumDecorationSizing.scale(for: decoration.kind, individualScale: decoration.scale,
+            relativeY: relativeY ?? decoration.relativeY, in: aquariumSize)
         AquariumDecorationView(decoration: decoration, backgroundTheme: backgroundTheme)
-            .scaleEffect(0.72 * depth.scale)
+            .scaleEffect(scale)
             .opacity(depth.opacity)
             .frame(width: 110, height: 110)
-            .offset(y: decoration.kind.groundAnchorOffset(scale: 0.72 * depth.scale, facingDirection: decoration.facingDirection))
+            .offset(y: decoration.kind.groundAnchorOffset(scale: scale, facingDirection: decoration.facingDirection))
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }

@@ -101,7 +101,12 @@ struct AquariumView: View {
                 onCanvasGeometryChanged(geometry.frame(in: .named(AquariumEditorCoordinateSpace.name)))
                 onGlobalCanvasGeometryChanged(geometry.frame(in: .global))
             }
-            .onChange(of: geometry.size) { _, _ in onCanvasGeometryChanged(geometry.frame(in: .named(AquariumEditorCoordinateSpace.name))) }
+            .onChange(of: geometry.size) { _, _ in
+                onCanvasGeometryChanged(geometry.frame(in: .named(AquariumEditorCoordinateSpace.name)))
+                if let id = editingDecorationID, let placement = decorationPlacements.first(where: { $0.decorationID == id }) {
+                    updateDecorationControlsCenter(placement, size: geometry.size)
+                }
+            }
             .onChange(of: geometry.frame(in: .global)) { _, frame in onGlobalCanvasGeometryChanged(frame) }
         }
         .ignoresSafeArea()
@@ -247,12 +252,12 @@ struct AquariumView: View {
         let instances = decorationPlacements.filter { placement in
             guard placement.isPlaced, placement.kind == .treasureChest else { return false }
             let root = position(for: placement)
-            let depth = AquariumDecorationDepthPresentation(kind: placement.kind, relativeY: root.y)
-            let side = placement.kind.displaySize.width * CGFloat(placement.scale) * depth.scale
-            let rect = CGRect(x: root.x * size.width - side / 2,
-                y: root.y * size.height - (placement.kind.groundAnchorY(facingDirection: placement.facingDirection) ?? 0.5) * side,
-                width: side, height: side)
-            return rect.intersects(CGRect(origin: .zero, size: size))
+            let rect = AquariumDecorationSizing.frame(for: placement.decoration, root: root, in: size)
+            let scale = AquariumDecorationSizing.scale(for: placement.kind, individualScale: CGFloat(placement.scale), relativeY: root.y, in: size)
+            // 本体が画面外でも、上へ伸びる泡が画面内に残る間は演出を続ける。
+            let overflow = AquariumTreasureChestEffects.overflowTop * scale
+            let effectsRect = CGRect(x: rect.minX, y: rect.minY - overflow, width: rect.width, height: rect.height + overflow)
+            return effectsRect.intersects(CGRect(origin: .zero, size: size))
         }.sorted { $0.relativeY == $1.relativeY ? $0.decorationID < $1.decorationID : $0.relativeY > $1.relativeY }
         .map { AquariumTreasureChestEffects.Instance(id: $0.decorationID, direction: $0.facingDirection) }
         return AquariumTreasureChestAnimationLayer(instances: instances, isSimulationPaused: pausesFish,
@@ -278,7 +283,8 @@ struct AquariumView: View {
                 AquariumDecorationDragPreview(
                     decoration: decorationDragPreview,
                     backgroundTheme: backgroundTheme,
-                    relativeY: decorationDragPreview.relativeY
+                    relativeY: decorationDragPreview.relativeY,
+                    aquariumSize: size
                 )
                 .position(
                     x: decorationDragPreview.relativeX * size.width,
@@ -656,7 +662,7 @@ private struct AquariumPlacedDecorationView: View {
     var body: some View {
         let decoration = placement.decoration
         let depth = AquariumDecorationDepthPresentation(kind: decoration.kind, relativeY: position.y)
-        let scale = decoration.scale * depth.scale
+        let scale = AquariumDecorationSizing.scale(for: decoration.kind, individualScale: decoration.scale, relativeY: position.y, in: aquariumSize)
         Group {
             if decoration.kind == .treasureChest {
                 AquariumTreasureChestView(direction: decoration.facingDirection, frame: treasureFrame,
@@ -669,6 +675,7 @@ private struct AquariumPlacedDecorationView: View {
                     .opacity(depth.opacity)
             }
         }
+        .frame(width: decoration.kind.displaySize.width * scale, height: decoration.kind.displaySize.height * scale)
         .decorationTutorialTarget(.placement(placement.decorationID))
         .offset(y: decoration.kind.groundAnchorOffset(scale: scale, facingDirection: decoration.facingDirection))
         .position(x: aquariumSize.width * position.x, y: aquariumSize.height * position.y)

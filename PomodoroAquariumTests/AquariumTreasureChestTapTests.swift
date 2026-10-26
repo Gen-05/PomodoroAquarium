@@ -75,7 +75,7 @@ struct AquariumTreasureChestTapTests {
         for direction in AquariumDecorationFacingDirection.allCases {
             chest.facingDirection = direction
             let depth = AquariumDecorationDepthPresentation(kind: .treasureChest, relativeY: chest.relativeY)
-            let side = AquariumTreasureChestEffects.canvasSide * depth.scale
+            let side = AquariumTreasureChestEffects.canvasSide * depth.scale * AquariumDecorationSizing.viewportScale(for: chest.kind, in: size)
             let origin = CGPoint(x: 200 - side / 2, y: 540 - side * (chest.kind.groundAnchorY(facingDirection: direction) ?? 0.5))
             let blank = CGPoint(x: origin.x + 1, y: origin.y + 1)
             #expect(AquariumDecorationHitTesting.selectedID(at: blank, decorations: [chest], aquariumSize: size,

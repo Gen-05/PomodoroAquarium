@@ -25,13 +25,10 @@ enum AquariumDecorationHitTesting {
 
     static func contains(_ point: CGPoint, decoration: AquariumDecoration, root: CGPoint,
                          aquariumSize: CGSize, theme: AquariumBackgroundTheme, tolerance: CGFloat = 0) -> Bool {
-        let depth = AquariumDecorationDepthPresentation(kind: decoration.kind, relativeY: root.y)
-        let scale = decoration.scale * depth.scale
-        let width = decoration.kind.displaySize.width * scale
-        let height = decoration.kind.displaySize.height * scale
+        let rect = AquariumDecorationSizing.frame(for: decoration, root: root, in: aquariumSize)
+        let width = rect.width, height = rect.height
         guard width > 0, height > 0 else { return false }
-        let origin = CGPoint(x: root.x * aquariumSize.width - width / 2,
-                             y: root.y * aquariumSize.height - (decoration.kind.groundAnchorY(facingDirection: decoration.facingDirection) ?? 0.5) * height)
+        let origin = rect.origin
         let names = decoration.kind.animationFrameNames.isEmpty
             ? [decoration.kind.assetImageName(for: theme, facingDirection: decoration.facingDirection)].compactMap { $0 }
             : decoration.kind.animationFrameNames
@@ -87,12 +84,8 @@ enum AquariumDecorationHitTesting {
 
     static func overlapShape(for decoration: AquariumDecoration, aquariumSize: CGSize,
                              theme: AquariumBackgroundTheme) -> OverlapShape {
-        let depth = AquariumDecorationDepthPresentation(kind: decoration.kind, relativeY: decoration.relativeY)
-        let scale = decoration.scale * depth.scale
-        let width = decoration.kind.displaySize.width * scale, height = decoration.kind.displaySize.height * scale
-        let rect = CGRect(x: decoration.relativeX * aquariumSize.width - width / 2,
-            y: decoration.relativeY * aquariumSize.height - height * (decoration.kind.groundAnchorY(facingDirection: decoration.facingDirection) ?? 0.5),
-            width: width, height: height)
+        let rect = AquariumDecorationSizing.frame(for: decoration, in: aquariumSize)
+        let width = rect.width, height = rect.height
         let names = decoration.kind.animationFrameNames.isEmpty
             ? [decoration.kind.assetImageName(for: theme, facingDirection: decoration.facingDirection)].compactMap { $0 }
             : decoration.kind.animationFrameNames
