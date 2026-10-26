@@ -336,6 +336,7 @@ struct TimerView: View {
     @State private var rewardHistoryIDs: [UUID] = []
     @State private var studyFinishedMinutes: Int?
     @State private var studyFinishedEndReason: StudySessionEndReason = .completed
+    @State private var studyFinishedMode: TimerMode = .pomodoro
     @State private var showsEndConfirmation = false
     @State private var showsBreakEndConfirmation = false
     @State private var breakEndConfirmationID: UUID?
@@ -675,7 +676,8 @@ struct TimerView: View {
             if let studyFinishedMinutes {
                 StudyFinishedView(
                     studyMinutes: studyFinishedMinutes,
-                    endReason: studyFinishedEndReason
+                    endReason: studyFinishedEndReason,
+                    mode: studyFinishedMode
                 )
             }
         }
@@ -844,6 +846,7 @@ struct TimerView: View {
             }
             let completedStudyMinutes = viewModel.lastCompletedStudyMinutes
             studyFinishedEndReason = viewModel.lastStudySessionEndReason ?? .completed
+            studyFinishedMode = viewModel.mode
             if !viewModel.isAutomaticPomodoroFlow { studyFinishedMinutes = completedStudyMinutes }
             guard let player else {
                 queueStudyCompletionReward(StudyCompletionReward(

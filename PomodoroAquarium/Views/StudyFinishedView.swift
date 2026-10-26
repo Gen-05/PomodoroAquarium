@@ -9,6 +9,11 @@ enum StudyFinishedLayout {
 struct StudyFinishedView: View {
     let studyMinutes: Int
     var endReason: StudySessionEndReason = .completed
+    var mode: TimerMode = .pomodoro
+
+    private var showsFinishedPresentation: Bool {
+        endReason.isNormalCompletion || (mode == .stopwatch && endReason == .userEnded)
+    }
 
     @Environment(\.dismiss) private var dismiss
     @State private var isVisible = false
@@ -33,7 +38,7 @@ struct StudyFinishedView: View {
                         .foregroundStyle(.cyan)
                         .shadow(color: .cyan.opacity(0.35), radius: 14)
 
-                    Text(endReason.isNormalCompletion ? "🎉 集中終了！" : "集中が途中で終了しました")
+                    Text(showsFinishedPresentation ? "🎉 集中終了！" : "集中が途中で終了しました")
                         .font(.largeTitle.bold())
                         .multilineTextAlignment(.center)
                         .lineLimit(StudyFinishedLayout.titleLineLimit)
@@ -50,7 +55,7 @@ struct StudyFinishedView: View {
                             .monospacedDigit()
                     }
 
-                    if !endReason.isNormalCompletion {
+                    if !showsFinishedPresentation {
                         Text("終了地点までの集中時間で報酬を計算します")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
