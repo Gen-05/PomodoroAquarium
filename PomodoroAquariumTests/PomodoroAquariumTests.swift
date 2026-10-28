@@ -4615,7 +4615,7 @@ struct PomodoroAquariumTests {
     }
 #endif
 
-    @Test @MainActor func backgroundProductIsDisplayedButNotPurchasedYet() throws {
+    @Test @MainActor func decorationPurchaseRejectsBackgroundProducts() throws {
         let container = try makeShopContainer()
         let player = Player(coins: 1_000)
         container.mainContext.insert(player)

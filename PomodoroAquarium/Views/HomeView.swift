@@ -29,7 +29,8 @@ struct HomePlayerInitializationResult {
 @MainActor
 enum HomePlayerInitialization {
     /// `@Query` の更新前でも既存Playerを再利用し、Homeの再表示で重複生成しない。
-    static func prepare(in modelContext: ModelContext) throws -> HomePlayerInitializationResult {
+    static func prepare(in modelContext: ModelContext, defaults: UserDefaults = .standard,
+                        draftStore: AquariumEditorDraftStore? = nil) throws -> HomePlayerInitializationResult {
         var descriptor = FetchDescriptor<Player>()
         descriptor.fetchLimit = 1
 
@@ -39,6 +40,9 @@ enum HomePlayerInitialization {
         if didCreatePlayer {
             modelContext.insert(player)
         }
+
+        try AquariumBackgroundOwnership.migrateIfNeeded(for: player, in: modelContext,
+            defaults: defaults, draftStore: draftStore ?? .standard)
 
         let didInitializeAquariumSelection = AquariumFishSelection.initializeIfNeeded(
             for: player
@@ -250,7 +254,7 @@ struct HomeView: View {
         allowsDecorationGuide && (decorationGuide.step == .edit || decorationGuide.step == .completed)
     }
 
-    var body: some View {
+    private var aquariumContent: some View {
         NavigationStack {
             GeometryReader { geometry in
                 let editorWidth = AquariumSideEditorLayout.width(for: geometry.size.width)
@@ -454,6 +458,10 @@ struct HomeView: View {
             key: AquariumDecorationEditingPreferenceKey.self,
             value: isAquariumEditorPresented && (mode != .aquariumEditor || isAquariumEditorActive)
         )
+    }
+
+    private var observedAquariumContent: some View {
+        aquariumContent
         .onAppear {
             if mode == .home {
                 inspectPersistedTimerSession()
@@ -472,9 +480,16 @@ struct HomeView: View {
         .onChange(of: officialDecorationPlacements.map(\.decorationID).sorted()) { _, _ in
             synchronizePurchasedDecorationInventory()
         }
+        .onChange(of: players.first?.ownedBackgroundRawValues ?? []) { _, _ in
+            synchronizePurchasedBackgroundOwnership()
+        }
         .onChange(of: decorationPlacements.filter(\.isPlaced).map(\.decorationID).sorted()) { _, _ in
             decorationGuide.reconcilePlacedTarget(decorationPlacements)
         }
+    }
+
+    private var timedAquariumContent: some View {
+        observedAquariumContent
         .task(id: homeStartTransition.requestID) {
             guard let id = homeStartTransition.requestID else { return }
             do {
@@ -517,13 +532,11 @@ struct HomeView: View {
 #endif
             if !isPresented { homeStartTransition.reset() }
         }
-        .onDisappear {
-            homeStartTransition.reset()
-            persistAquariumEditorDraft()
-            // 追加時の一時座標・演出を次の水槽表示へ持ち越さない。
-            fishSpawnPositions = [:]
-            fishAppearances = [:]
-        }
+        .onDisappear(perform: handleHomeDisappearance)
+    }
+
+    var body: some View {
+        timedAquariumContent
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { cancelFishDrag() }
         }
@@ -1137,7 +1150,8 @@ struct HomeView: View {
     }
 
     private func selectBackground(_ theme: AquariumBackgroundTheme) {
-        guard isAquariumEditorPresented, aquariumEditorCategory == .background else { return }
+        guard isAquariumEditorPresented, aquariumEditorCategory == .background,
+              AquariumBackgroundOwnership.canUse(theme, player: player) else { return }
         if mode == .aquariumEditor {
             guard displayedBackgroundTheme != theme else { return }
             draftBackgroundTheme = theme
@@ -1374,6 +1388,19 @@ struct HomeView: View {
         return allowed
     }
 
+    private func handleHomeDisappearance() {
+        homeStartTransition.reset()
+        persistAquariumEditorDraft()
+        fishSpawnPositions = [:]
+        fishAppearances = [:]
+    }
+
+    private func synchronizePurchasedBackgroundOwnership() {
+        // 購入は配置の履歴に含めず、編集コピーの所持情報だけを最新に保つ。
+        guard let official = players.first else { return }
+        editorWorkingState?.player.ownedBackgroundRawValues = official.ownedBackgroundRawValues
+    }
+
     private func synchronizePurchasedDecorationInventory() {
         guard mode == .aquariumEditor, let work = editorWorkingState else { return }
         let baseline = work.includeNewlyOwnedDecorations(officialDecorationPlacements)
@@ -1484,6 +1511,11 @@ struct HomeView: View {
 
     private func applyAquariumHistory(isRedo: Bool) {
         guard let work = editorWorkingState else { return }
+        guard let history = editorHistory else { return }
+        let nextIndex = history.position + (isRedo ? 1 : -1)
+        guard history.states.indices.contains(nextIndex),
+              let theme = AquariumBackgroundTheme(rawValue: history.states[nextIndex].background),
+              AquariumBackgroundOwnership.canUse(theme, player: players.first) else { return }
         let draft = isRedo ? editorHistory?.redo() : editorHistory?.undo()
         guard let draft else { return }
         let previousIDs = Set(work.player.activeAquariumFishIDs)
@@ -1512,6 +1544,11 @@ struct HomeView: View {
         guard mode == .aquariumEditor, allowsEditorDraftRestoration, editorWorkingState == nil, let official = players.first else { return }
         do {
             guard let draft = try editorDraftStore.load() else { return }
+            guard let theme = AquariumBackgroundTheme(rawValue: draft.background),
+                  AquariumBackgroundOwnership.canUse(theme, player: official) else {
+                editorPersistenceError = "未購入の背景を含む下書きは再開できません。下書きは保持しています。"
+                return
+            }
             _ = try AquariumDecorationService.removeLegacyPlaceholders(in: modelContext)
             if coreTutorial?.isPreviewMode != true { _ = try? AquariumDeveloperDecorations.seedIfNeeded(in: modelContext) }
             let currentPlacements = try modelContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
@@ -1535,6 +1572,10 @@ struct HomeView: View {
 
     private func saveAquariumEditorSession() {
         guard let work = editorWorkingState, let official = players.first else { return }
+        guard AquariumBackgroundOwnership.canUse(displayedBackgroundTheme, player: official) else {
+            editorPersistenceError = "未購入の背景は保存できません。"
+            return
+        }
         let original = AquariumEditorSessionSnapshot.capture(player: official,
             decorationPlacements: officialDecorationPlacements, backgroundTheme: savedBackgroundTheme)
         let originalTutorialSaved = official.hasSavedCoreTutorialAquarium
@@ -2037,8 +2078,10 @@ struct HomeView: View {
 
     private func backgroundThemeCard(_ theme: AquariumBackgroundTheme) -> some View {
         let isSelected = previewBackgroundTheme == theme
+        let canUse = AquariumBackgroundOwnership.canUse(theme, player: player)
 
         return Button {
+            guard AquariumBackgroundOwnership.canUse(theme, player: player) else { return }
             withAnimation(.easeInOut(duration: 0.18)) {
                 previewBackgroundTheme = theme
             }
@@ -2060,6 +2103,7 @@ struct HomeView: View {
                 Text(theme.displayName)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.primary)
+                if !canUse { Label("ショップで購入", systemImage: "lock.fill").font(.caption2) }
             }
             .padding(8)
             .background(
@@ -2072,6 +2116,7 @@ struct HomeView: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(!canUse)
     }
 
     private func beginBackgroundThemeEditing() {
@@ -2092,7 +2137,7 @@ struct HomeView: View {
     }
 
     private func confirmBackgroundThemeEditing() {
-        if let previewBackgroundTheme {
+        if let previewBackgroundTheme, AquariumBackgroundOwnership.canUse(previewBackgroundTheme, player: player) {
             backgroundThemeRawValue = previewBackgroundTheme.rawValue
         }
         withAnimation(.easeInOut(duration: 0.22)) {
@@ -2133,7 +2178,8 @@ struct HomeView: View {
         guard !Task.isCancelled else { return }
 
         do {
-            let initialization = try HomePlayerInitialization.prepare(in: modelContext)
+            let initialization = try HomePlayerInitialization.prepare(in: modelContext,
+                defaults: appDefaults, draftStore: editorDraftStore)
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-fish-editor-ui-test"),
                ProcessInfo.processInfo.arguments.contains("-core-tutorial-in-memory"),

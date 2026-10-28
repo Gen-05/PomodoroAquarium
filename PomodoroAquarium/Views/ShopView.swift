@@ -94,7 +94,7 @@ struct ShopView: View {
 
     private func productCard(_ item: ShopItem) -> some View {
         let canAfford = CurrencyService.canAfford(item.price, player: player)
-        let isPurchasable = item.category == .decoration
+        let purchased = isBackgroundPurchased(item)
         let soldOut = isSoldOut(item)
 
         return VStack(spacing: 10) {
@@ -121,11 +121,11 @@ struct ShopView: View {
             Button {
                 purchaseFlow.requestConfirmation(for: item)
             } label: {
-                Text(soldOut ? "売り切れ" : (isPurchasable ? (canAfford ? "購入する" : "コイン不足") : "準備中"))
+                Text(purchased ? "購入済み" : soldOut ? "購入済み" : canAfford ? "購入する" : "コイン不足")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(soldOut || !isPurchasable || player == nil || purchaseFlow.isPresenting)
+            .disabled(purchased || soldOut || player == nil || purchaseFlow.isPresenting)
             .accessibilityIdentifier("purchase-\(item.id)")
         }
         .padding(12)
@@ -174,9 +174,15 @@ struct ShopView: View {
         return ShopService.isSoldOut(kind, among: ownedDecorations)
     }
 
+    private func isBackgroundPurchased(_ item: ShopItem) -> Bool {
+        guard case let .background(theme) = item.content else { return false }
+        return AquariumBackgroundOwnership.canUse(theme, player: player)
+    }
+
     private func purchaseConfirmation(_ item: ShopItem) -> some View {
         let canAfford = CurrencyService.canAfford(item.price, player: player)
         let soldOut = isSoldOut(item)
+        let purchased = isBackgroundPurchased(item)
 
         return NavigationStack {
             ScrollView {
@@ -190,31 +196,35 @@ struct ShopView: View {
                     VStack(spacing: 12) {
                         LabeledContent("価格", value: "\(item.price)コイン")
                         LabeledContent("現在の所持コイン", value: "\(balance)コイン")
-                        LabeledContent("購入後の所持コイン", value: canAfford ? "\(balance - item.price)コイン" : "コイン不足")
+                        LabeledContent("購入後の所持コイン", value: purchased ? "購入済み" : canAfford ? "\(balance - item.price)コイン" : "コイン不足")
                     }
                     .monospacedDigit()
-                    if soldOut {
-                        Text("売り切れです").foregroundStyle(.secondary)
+                    if purchased {
+                        Text("購入済みです").foregroundStyle(.secondary)
+                    } else if soldOut {
+                        Text("購入済みです").foregroundStyle(.secondary)
                     } else if !canAfford {
                         Text("コインが足りません").foregroundStyle(.red)
                     }
-                    Button("自分の水槽で試す") {
-                        guard let player else { return }
-                        do {
-                            decorationPreview = try ShopDecorationPreviewSession(item: item, official: player,
-                                placements: ownedDecorations,
-                                backgroundTheme: AquariumThemeStore.theme(from: backgroundThemeRawValue),
-                                fishViewingSession: fishViewingSession)
-                        } catch { showsPreviewError = true }
+                    if case .decoration = item.content {
+                        Button("自分の水槽で試す") {
+                            guard let player else { return }
+                            do {
+                                decorationPreview = try ShopDecorationPreviewSession(item: item, official: player,
+                                    placements: ownedDecorations,
+                                    backgroundTheme: AquariumThemeStore.theme(from: backgroundThemeRawValue),
+                                    fishViewingSession: fishViewingSession)
+                            } catch { showsPreviewError = true }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(player == nil || decorationPreview != nil)
+                        .accessibilityIdentifier("shop.purchaseConfirmation.tryInAquarium")
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(player == nil || decorationPreview != nil)
-                    .accessibilityIdentifier("shop.purchaseConfirmation.tryInAquarium")
                     Button("購入を確定") {
                         purchaseFlow.confirm(player: player, in: modelContext, tutorial: decorationTutorial)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!canAfford || soldOut || player == nil || purchaseFlow.confirmation == nil)
+                    .disabled(purchased || !canAfford || soldOut || player == nil || purchaseFlow.confirmation == nil)
                     .accessibilityIdentifier("shop.purchaseConfirmation.confirm")
                     Button("キャンセル", role: .cancel) { purchaseFlow.confirmation = nil }
                         .accessibilityIdentifier("shop.purchaseConfirmation.cancel")

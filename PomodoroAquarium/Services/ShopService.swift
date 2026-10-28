@@ -5,9 +5,31 @@ enum ShopPurchaseError: Error, Equatable {
     case insufficientCoins
     case unsupportedProduct
     case soldOut
+    case alreadyOwned
+    case backgroundOwnershipUnavailable
 }
 
 enum ShopService {
+    static func purchaseBackground(_ item: ShopItem, for player: Player?, in context: ModelContext,
+                                   save: (() throws -> Void)? = nil) throws {
+        guard let player else { throw ShopPurchaseError.playerUnavailable }
+        guard case let .background(theme) = item.content, theme != .aquarium else { throw ShopPurchaseError.unsupportedProduct }
+        // 移行未完了の旧データを未所持と誤認して課金しない。
+        guard let owned = player.ownedBackgroundRawValues else { throw ShopPurchaseError.backgroundOwnershipUnavailable }
+        guard !AquariumBackgroundOwnership.canUse(theme, player: player) else { throw ShopPurchaseError.alreadyOwned }
+        let oldCoins = player.coins
+        guard CurrencyService.debitWithoutSaving(item.price, from: player) else { throw ShopPurchaseError.insufficientCoins }
+        player.ownedBackgroundRawValues = owned + [theme.rawValue]
+        do {
+            if let save { try save() } else { try context.save() }
+        } catch {
+            // 共有Context全体をrollbackせず、購入の2項目だけ戻す。後のautosaveでも片方だけ残らない。
+            player.coins = oldCoins
+            player.ownedBackgroundRawValues = owned
+            throw error
+        }
+    }
+
     /// 配置・収納の状態を問わず、正式な所持個体がある沈没船だけを売り切れとする。
     static func isSoldOut(_ kind: AquariumDecorationKind, among placements: [AquariumDecorationPlacement]) -> Bool {
         kind == .shipwreck && placements.contains { $0.kind == kind }

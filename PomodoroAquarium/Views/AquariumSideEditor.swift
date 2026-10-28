@@ -786,7 +786,9 @@ struct AquariumSideEditor: View {
 
     private func backgroundCard(_ theme: AquariumBackgroundTheme) -> some View {
         let isSelected = selectedBackgroundTheme == theme
+        let canUse = AquariumBackgroundOwnership.canUse(theme, player: player)
         return Button {
+            guard AquariumBackgroundOwnership.canUse(theme, player: player) else { return }
             selectBackground(theme)
         } label: {
             VStack(spacing: 5) {
@@ -810,6 +812,7 @@ struct AquariumSideEditor: View {
                 Text(theme.displayName)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.primary)
+                if !canUse { Label("ショップで購入", systemImage: "lock.fill").font(.caption2) }
             }
             .padding(6)
             .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
@@ -819,7 +822,7 @@ struct AquariumSideEditor: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(isCoreTutorialActive)
+        .disabled(isCoreTutorialActive || !canUse)
         .accessibilityHidden(isCoreTutorialActive)
         .accessibilityIdentifier("aquariumEditor.background.\(theme.rawValue)")
         .accessibilityValue(isSelected ? "選択中" : "未選択")

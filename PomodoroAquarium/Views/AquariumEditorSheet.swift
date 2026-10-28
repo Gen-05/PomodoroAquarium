@@ -61,14 +61,22 @@ struct AquariumEditorSheet: View {
                             fishContent
                         } else {
                             ForEach(AquariumBackgroundTheme.allCases, id: \.self) { theme in
-                                Button { selectBackground(theme) } label: {
+                                let canUse = AquariumBackgroundOwnership.canUse(theme, player: player)
+                                Button {
+                                    guard AquariumBackgroundOwnership.canUse(theme, player: player) else { return }
+                                    selectBackground(theme)
+                                } label: {
                                     HStack {
                                         Image(theme.imageName).resizable().scaledToFill().frame(width: 70, height: 65).clipped().clipShape(RoundedRectangle(cornerRadius: 12))
-                                        Text(theme.displayName)
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(theme.displayName)
+                                            if !canUse { Label("ショップで購入", systemImage: "lock.fill").font(.caption) }
+                                        }
                                         Spacer()
                                         if theme == backgroundTheme { Image(systemName: "checkmark") }
                                     }.padding(10).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
                                 }.buttonStyle(.plain)
+                                    .disabled(!canUse)
                             }
                         }
                     }.padding(16)

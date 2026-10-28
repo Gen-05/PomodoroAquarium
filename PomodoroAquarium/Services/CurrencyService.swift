@@ -81,9 +81,16 @@ enum CurrencyService {
         from player: Player,
         in context: ModelContext
     ) throws -> Bool {
+        guard debitWithoutSaving(amount, from: player) else { return false }
+        try context.save()
+        return true
+    }
+
+    /// 所持状態などと1回の保存にまとめる購入処理用。
+    @discardableResult
+    static func debitWithoutSaving(_ amount: Int, from player: Player) -> Bool {
         guard amount > 0, canAfford(amount, player: player) else { return false }
         player.coins = balance(of: player) - amount
-        try context.save()
         return true
     }
 }

@@ -14,30 +14,39 @@ final class ShopPurchaseFlow {
     var feedback: Feedback?
     private var pendingFeedback: Feedback?
     private var isCompletingPurchase = false
+    private var notifiesDecorationTutorial = false
 
     var isPresenting: Bool { confirmation != nil || isCompletingPurchase || feedback != nil }
 
     func requestConfirmation(for item: ShopItem) {
-        guard !isPresenting, case .decoration = item.content else { return }
+        guard !isPresenting else { return }
         confirmation = item
     }
 
     func confirm(player: Player?, in context: ModelContext, tutorial: DecorationPurchaseTutorial?) {
         guard let item = confirmation, !isCompletingPurchase, feedback == nil else { return }
         isCompletingPurchase = true
-        tutorial?.purchaseFeedbackWillPresent()
         let message: String
         do {
-            if let tutorial {
-                try tutorial.purchase(item, player: player, in: context)
-            } else {
-                try ShopService.purchaseDecoration(item, for: player, in: context)
+            switch item.content {
+            case .decoration:
+                notifiesDecorationTutorial = true
+                tutorial?.purchaseFeedbackWillPresent()
+                if let tutorial {
+                    try tutorial.purchase(item, player: player, in: context)
+                } else {
+                    try ShopService.purchaseDecoration(item, for: player, in: context)
+                }
+            case .background:
+                try ShopService.purchaseBackground(item, for: player, in: context)
             }
             message = "\(item.name)を購入しました"
         } catch ShopPurchaseError.insufficientCoins {
             message = "コインが足りません"
         } catch ShopPurchaseError.soldOut {
-            message = "沈没船は売り切れです"
+            message = "沈没船は購入済みです"
+        } catch ShopPurchaseError.alreadyOwned {
+            message = "この背景は購入済みです"
         } catch {
             message = "購入できませんでした"
         }
@@ -55,6 +64,9 @@ final class ShopPurchaseFlow {
     func feedbackDidDismiss(tutorial: DecorationPurchaseTutorial?) {
         guard isCompletingPurchase, pendingFeedback == nil, feedback == nil else { return }
         isCompletingPurchase = false
-        tutorial?.purchaseFeedbackDidDismiss()
+        if notifiesDecorationTutorial {
+            notifiesDecorationTutorial = false
+            tutorial?.purchaseFeedbackDidDismiss()
+        }
     }
 }

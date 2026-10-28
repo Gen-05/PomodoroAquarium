@@ -26,6 +26,8 @@ class Player {
     var todayStudyMinutes = 0
     var yesterdayStudyMinutes = 0
     var coins = 0
+    /// nilは背景購入対応前の保存データ。新規Playerはinitでベーシック所持を設定する。
+    var ownedBackgroundRawValues: [String]? = nil
     var studyStreakDays = 0
     var lastStudyCompletionDate: Date?
     var hasClaimedSevenDayStreakReward = false
@@ -73,7 +75,8 @@ class Player {
         lastStudyCompletionDate: Date? = nil,
         hasClaimedSevenDayStreakReward: Bool = false,
         hasClaimedThirtyDayStreakReward: Bool = false,
-        hasClaimedYearStreakReward: Bool = false
+        hasClaimedYearStreakReward: Bool = false,
+        ownedBackgroundRawValues: [String]? = [AquariumBackgroundTheme.aquarium.rawValue]
     ) {
         self.ownedFish = ownedFish
         self.favoriteFish = favoriteFish
@@ -87,6 +90,7 @@ class Player {
         self.todayStudyMinutes = todayStudyMinutes
         self.yesterdayStudyMinutes = yesterdayStudyMinutes
         self.coins = max(0, coins)
+        self.ownedBackgroundRawValues = ownedBackgroundRawValues
         self.studyStreakDays = max(0, studyStreakDays)
         self.lastStudyCompletionDate = lastStudyCompletionDate
         self.hasClaimedSevenDayStreakReward = hasClaimedSevenDayStreakReward

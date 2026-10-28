@@ -132,7 +132,7 @@ struct DecorationPurchaseTutorialTests {
             let count = try store.mainContext.fetchCount(FetchDescriptor<AquariumDecorationPlacement>())
             flow.confirm(player: player, in: store.mainContext, tutorial: tutorial)
             flow.confirmationDidDismiss()
-            #expect(flow.feedback?.message == (kind == .shipwreck ? "沈没船は売り切れです" : "コインが足りません"))
+            #expect(flow.feedback?.message == (kind == .shipwreck ? "沈没船は購入済みです" : "コインが足りません"))
             #expect(player.coins == coins)
             #expect(try store.mainContext.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == count)
             #expect(!settings.bool(forKey: DecorationPurchaseTutorial.storageKey))

@@ -123,6 +123,14 @@ struct AquariumEditorDraftStore {
         if decoded != draft { try save(draft) }
         return draft
     }
+    /// 所持移行用の読み取り専用経路。通常loadの旧装飾整理によるファイル保存も行わない。
+    func backgroundThemesForOwnershipMigration() throws -> Set<AquariumBackgroundTheme> {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let draft = try JSONDecoder().decode(AquariumEditorDraft.self, from: Data(contentsOf: url))
+        guard draft.isValid else { throw CocoaError(.fileReadCorruptFile) }
+        let rawValues = [draft.background] + (draft.history?.states.map(\.background) ?? [])
+        return Set(rawValues.compactMap(AquariumBackgroundTheme.init(rawValue:)))
+    }
     func save(_ draft: AquariumEditorDraft) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(draft.removingLegacyPlaceholders()).write(to: url, options: .atomic)
@@ -143,7 +151,8 @@ final class AquariumEditorWorkingState {
         player = Player(ownedFish: fish.map { PlayerFish(id: $0.id, species: $0.species) },
                         activeAquariumFishIDs: (draft?.fishIDs ?? fish.map(\.id)).filter { id in fish.contains { $0.id == id } },
                         hasInitializedActiveAquariumFish: true,
-                        coreTutorialRewardFishID: official.coreTutorialRewardFishID)
+                        coreTutorialRewardFishID: official.coreTutorialRewardFishID,
+                        ownedBackgroundRawValues: official.ownedBackgroundRawValues)
         let states = Dictionary(uniqueKeysWithValues: (draft?.placements ?? []).map { ($0.id, $0) })
         self.placements = placements.filter { !$0.kind.isLegacyPlaceholder }.map { original in
             let state = states[original.decorationID]
