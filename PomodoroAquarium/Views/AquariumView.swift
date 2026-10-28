@@ -43,7 +43,7 @@ struct AquariumView: View {
     var decorationRestoreRequestID: String?
     var onDecorationRestoreRequestHandled: () -> Void = {}
     var decorationDragPreview: AquariumDecoration?
-    /// 商品の試し置き時だけ、その個体を選択・操作可能にする。通常編集のメニューは出さない。
+    /// 商品の試し置き時だけ、その個体を選択・操作可能にし、収納は表示しない。
     var decorationTrialID: String?
 
     @Environment(\.modelContext) private var modelContext
@@ -96,7 +96,7 @@ struct AquariumView: View {
                 else { treasureInteractionLayer(in: geometry.size) }
                 fishLayer(in: geometry.size)
                     .allowsHitTesting(decorationTrialID == nil)
-                if isEditing && decorationTrialID == nil { decorationOperationMenu(in: geometry.size) }
+                if isEditing { decorationOperationMenu(in: geometry.size) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
@@ -392,7 +392,9 @@ struct AquariumView: View {
     @ViewBuilder
     private func decorationOperationMenu(in size: CGSize) -> some View {
         if draggingDecorationID == nil, let id = editingDecorationID,
-           let placement = decorationPlacements.first(where: { $0.decorationID == id }) {
+           let placement = decorationPlacements.first(where: { $0.decorationID == id }),
+           decorationTrialID == nil || (id == decorationTrialID && placement.kind != .shipwreck) {
+            let mainMenuWidth: CGFloat = decorationTrialID == nil ? 330 : 220
             HStack(spacing: 4) {
                     if placement.kind == .shipwreck {
                         ForEach([AquariumDecorationFacingDirection.left, .right], id: \.self) { side in
@@ -410,10 +412,12 @@ struct AquariumView: View {
                             }
                             .accessibilityIdentifier("aquariumEditor.shipwreck.\(side.rawValue)")
                         }
-                        Button { storeDecoration(placement) } label: {
-                            Text("水槽からしまう").font(.caption.bold()).decorationControlHitArea()
+                        if decorationTrialID == nil {
+                            Button { storeDecoration(placement) } label: {
+                                Text("水槽からしまう").font(.caption.bold()).decorationControlHitArea()
+                            }
+                            .accessibilityIdentifier("aquariumEditor.removeSelectedDecoration")
                         }
-                        .accessibilityIdentifier("aquariumEditor.removeSelectedDecoration")
                     } else if showsDecorationNudge {
                         nudgeButton("arrow.left", label: "左へ", delta: CGSize(width: -8, height: 0), placement: placement, size: size)
                         nudgeButton("arrow.up", label: "奥へ", delta: CGSize(width: 0, height: -8), placement: placement, size: size)
@@ -464,12 +468,14 @@ struct AquariumView: View {
                             .accessibilityValue(placement.facingDirection == .right ? "右側面" : "左側面")
                             .accessibilityIdentifier("aquariumEditor.changeTreasureChestDirection")
                         }
-                        Button { storeDecoration(placement) } label: {
-                            Label("水槽からしまう", systemImage: "tray.and.arrow.down")
-                                .labelStyle(.titleOnly).font(.caption.bold()).decorationControlHitArea()
-                        }
+                        if decorationTrialID == nil {
+                            Button { storeDecoration(placement) } label: {
+                                Label("水槽からしまう", systemImage: "tray.and.arrow.down")
+                                    .labelStyle(.titleOnly).font(.caption.bold()).decorationControlHitArea()
+                            }
                             .accessibilityLabel("水槽からしまう")
                             .accessibilityIdentifier("aquariumEditor.removeSelectedDecoration")
+                        }
                     }
                 }
                 .padding(.horizontal, 8)
@@ -485,7 +491,7 @@ struct AquariumView: View {
                         .allowsHitTesting(false)
                 }
                 .buttonStyle(.plain)
-                .frame(width: min(size.width - 24, (placement.kind == .shipwreck || (!showsDecorationNudge && !showsStackingControls)) ? 330 : 260), height: 60)
+                .frame(width: min(size.width - 24, (placement.kind == .shipwreck || (!showsDecorationNudge && !showsStackingControls)) ? mainMenuWidth : 260), height: 60)
                 .decorationTutorialTarget(.operations)
                 .position(decorationControlsCenter ?? controlsCenter(for: placement, size: size))
                 .onAppear { updateDecorationControlsCenter(placement, size: size) }
@@ -548,7 +554,7 @@ struct AquariumView: View {
         _ placement: AquariumDecorationPlacement,
         at initialPreviewPosition: CGPoint
     ) {
-        guard isEditing else { return }
+        guard canEditDecoration(placement) else { return }
         let position = CGPoint(x: placement.relativeX, y: placement.relativeY)
         let wasEditing = editingDecorationID != nil
         if editingDecorationID != placement.decorationID { showsDecorationNudge = false }
@@ -569,13 +575,13 @@ struct AquariumView: View {
 
     private func changeStacking(_ placement: AquariumDecorationPlacement, action: AquariumDecorationStacking.Action, size: CGSize) {
         let members = AquariumDecorationOverlapGroups.members(of: placement.decorationID, placements: decorationPlacements, size: size, theme: backgroundTheme)
-        guard isEditing, AquariumDecorationStacking.move(placement, action: action, among: decorationPlacements, within: members) else { return }
+        guard canEditDecoration(placement), AquariumDecorationStacking.move(placement, action: action, among: decorationPlacements, within: members) else { return }
         if !defersDecorationPersistence { try? modelContext.save() }
         onDecorationChanged()
     }
 
     private func changeFacing(_ placement: AquariumDecorationPlacement) {
-        guard isEditing else { return }
+        guard canEditDecoration(placement) else { return }
         do {
             if try AquariumDecorationService.toggleFacing(placement, in: modelContext,
                 persistChanges: !defersDecorationPersistence) { onDecorationChanged() }
@@ -583,6 +589,7 @@ struct AquariumView: View {
     }
 
     private func storeDecoration(_ placement: AquariumDecorationPlacement) {
+        guard decorationTrialID == nil else { return }
         do {
             try AquariumDecorationService.store(
                 placement,
@@ -599,7 +606,7 @@ struct AquariumView: View {
         _ placement: AquariumDecorationPlacement,
         to position: CGPoint
     ) -> Bool {
-        guard isEditing else { return false }
+        guard canEditDecoration(placement) else { return false }
         let previous = CGPoint(x: placement.relativeX, y: placement.relativeY)
         editingDecorationID = placement.decorationID
         do {
@@ -614,6 +621,10 @@ struct AquariumView: View {
             onDecorationChanged()
             return previous != position
         } catch { return false }
+    }
+
+    private func canEditDecoration(_ placement: AquariumDecorationPlacement) -> Bool {
+        isEditing && (decorationTrialID == nil || placement.decorationID == decorationTrialID)
     }
 
     private func finishDecorationEditing() {

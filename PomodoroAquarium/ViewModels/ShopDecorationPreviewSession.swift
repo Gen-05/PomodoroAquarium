@@ -26,6 +26,8 @@ final class ShopDecorationPreviewSession: Identifiable {
         self.backgroundTheme = backgroundTheme
         working = AquariumEditorWorkingState(official: official,
             placements: placements.filter { $0.isPlaced && $0.kind.isAvailable })
+        // 通常編集と同じ旧重なり番号の補完。変更は切り離したコピーにのみ適用する。
+        working.apply(AquariumEditorDraft(player: working.player, placements: working.placements, background: backgroundTheme))
         let fishIDs = Set(working.player.activeAquariumFishIDs)
         self.fishViewingSession = fishViewingSession?.independentPreview(for: fishIDs) ?? AquariumFishViewingSession()
         let point = kind.restorationPosition

@@ -4,6 +4,7 @@ import SwiftUI
 struct ShopView: View {
     var decorationTutorial: DecorationPurchaseTutorial?
     var products: [ShopItem] = ShopCatalog.items
+    var bottomContentBoundary: CGFloat?
     @Environment(\.modelContext) private var modelContext
     @Query private var players: [Player]
     @Query private var ownedDecorations: [AquariumDecorationPlacement]
@@ -23,37 +24,33 @@ struct ShopView: View {
     private var balance: Int { CurrencyService.balance(of: player) }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                HStack(spacing: 7) {
-                    Image(systemName: "circle.hexagongrid.fill")
-                        .foregroundStyle(.yellow)
-                    Text("\(balance)")
-                        .font(.title2.bold())
-                        .monospacedDigit()
-                    Text("コイン")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(16)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("所持コイン \(balance)枚")
+        GeometryReader { geometry in
+            let contentHeight = ShopContentLayout.contentHeight(frame: geometry.frame(in: .global),
+                boundary: bottomContentBoundary)
+            VStack(spacing: 0) {
+                balanceHeader
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 8)
+                ScrollView {
+                    VStack(spacing: 18) {
+                        Picker("商品カテゴリ", selection: $selectedCategory) {
+                            ForEach(ShopCategory.allCases) { category in
+                                Text(category.displayName).tag(category)
+                            }
+                        }
+                        .pickerStyle(.segmented)
 
-                Picker("商品カテゴリ", selection: $selectedCategory) {
-                    ForEach(ShopCategory.allCases) { category in
-                        Text(category.displayName).tag(category)
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(products.filter { $0.category == selectedCategory }) { item in
+                                productCard(item)
+                            }
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
-
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(products.filter { $0.category == selectedCategory }) { item in
-                        productCard(item)
-                    }
+                    .padding(16)
                 }
             }
-            .padding()
+            .frame(height: contentHeight, alignment: .top)
         }
         .background(Color.cyan.opacity(0.08).ignoresSafeArea())
         .navigationTitle("ショップ")
@@ -78,19 +75,44 @@ struct ShopView: View {
         }
     }
 
+    private var balanceHeader: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "circle.hexagongrid.fill")
+                .foregroundStyle(.yellow)
+            Text("\(balance)")
+                .font(.title2.bold())
+                .monospacedDigit()
+            Text("コイン")
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(16)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("所持コイン \(balance)枚")
+    }
+
     private func productCard(_ item: ShopItem) -> some View {
         let canAfford = CurrencyService.canAfford(item.price, player: player)
         let isPurchasable = item.category == .decoration
         let soldOut = isSoldOut(item)
 
         return VStack(spacing: 10) {
-            productPreview(item)
-                .frame(height: 92)
+            productPreview(item, comparesDecorationSizes: true)
+                .frame(height: ShopDecorationThumbnailLayout.height)
                 // scaledToFillの画像領域を操作対象にせず、背後のPickerやスクロールへ通す。
                 .allowsHitTesting(false)
 
+            if case .decoration(.shipwreck) = item.content {
+                Text("遠景の固定配置")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Text(item.name)
                 .font(.headline)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
 
             Label("\(item.price)コイン", systemImage: "circle.hexagongrid.fill")
                 .font(.subheadline.weight(.semibold))
@@ -116,15 +138,23 @@ struct ShopView: View {
     }
 
     @ViewBuilder
-    private func productPreview(_ item: ShopItem) -> some View {
+    private func productPreview(_ item: ShopItem, comparesDecorationSizes: Bool = false) -> some View {
         switch item.content {
         case let .decoration(kind):
             if kind.isAvailable, let imageName = kind.assetImageName {
-                Image(decorative: imageName)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(4)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if comparesDecorationSizes && kind != .shipwreck {
+                    GeometryReader { geometry in
+                        let frame = ShopDecorationThumbnailLayout.frame(for: kind, in: geometry.size)
+                        Image(decorative: imageName)
+                            .resizable().scaledToFit()
+                            .frame(width: frame.width, height: frame.height)
+                            .position(x: frame.midX, y: frame.midY)
+                    }
+                } else {
+                    Image(decorative: imageName)
+                        .resizable().scaledToFit().padding(4)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         case let .background(theme):
             GeometryReader { geometry in

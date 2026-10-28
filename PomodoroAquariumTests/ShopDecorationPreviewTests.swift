@@ -51,10 +51,15 @@ struct ShopDecorationPreviewTests {
         #expect(preview.working.player.ownedFish.map(\.id) == [fishID])
         #expect(preview.working.player.ownedFish[0] !== player.ownedFish[0])
         #expect(preview.working.player.ownedFish[0].modelContext == nil)
+        let normalDraft = AquariumEditorDraft(player: player,
+            placements: placements.filter(\.isPlaced), background: .deepSea)
+        let normalWorking = AquariumEditorWorkingState(official: player,
+            placements: placements.filter(\.isPlaced), draft: normalDraft)
         for original in placements where original.isPlaced {
             let copy = try #require(preview.working.placements.first { $0.decorationID == original.decorationID })
+            let normalCopy = try #require(normalWorking.placements.first { $0.decorationID == original.decorationID })
             #expect(copy !== original && copy.modelContext == nil)
-            #expect(AquariumDecorationEditorState(copy) == AquariumDecorationEditorState(original))
+            #expect(AquariumDecorationEditorState(copy) == AquariumDecorationEditorState(normalCopy))
         }
         if kind == .shipwreck {
             preview.placeShipwreck(on: .left)
@@ -105,6 +110,49 @@ struct ShopDecorationPreviewTests {
             backgroundTheme: .deepSea, fishViewingSession: sourceSession)
         #expect(reopened.trial.decorationID != preview.trial.decorationID)
         #expect(CGPoint(x: reopened.trial.relativeX, y: reopened.trial.relativeY) == kind.restorationPosition)
+    }
+
+    @Test func nudgeAndAllStackingActionsUseOnlyThePreviewCopies() throws {
+        let (production, player, placements) = try fixture()
+        let before = AquariumEditorSessionSnapshot.capture(player: player,
+            decorationPlacements: placements, backgroundTheme: .deepSea)
+        let item = try #require(ShopCatalog.items.first { $0.content == .decoration(.treasureChest) })
+        let preview = try ShopDecorationPreviewSession(item: item, official: player, placements: placements,
+            backgroundTheme: .deepSea, fishViewingSession: nil)
+        let rock = try #require(preview.working.placements.first { $0.decorationID == "saved-rock" })
+        let canvas = CGSize(width: 393, height: 852)
+        try AquariumDecorationService.confirmPlacement(preview.trial,
+            at: CGPoint(x: rock.relativeX, y: rock.relativeY), in: preview.modelContainer.mainContext, persistChanges: false)
+        for delta in [CGSize(width: -8, height: 0), CGSize(width: 8, height: 0),
+                      CGSize(width: 0, height: -8), CGSize(width: 0, height: 8)] {
+            let original = CGPoint(x: preview.trial.relativeX, y: preview.trial.relativeY)
+            let next = AquariumDecorationEditor.relativePosition(originalX: original.x, originalY: original.y,
+                translation: delta, aquariumSize: canvas, kind: .treasureChest, isEditing: true, scale: 1)
+            try AquariumDecorationService.confirmPlacement(preview.trial, at: next,
+                in: preview.modelContainer.mainContext, persistChanges: false)
+            #expect(abs((preview.trial.relativeX - original.x) * canvas.width - delta.width) < 0.000_001)
+            #expect(abs((preview.trial.relativeY - original.y) * canvas.height - delta.height) < 0.000_001)
+        }
+        let members = AquariumDecorationOverlapGroups.members(of: preview.trial.decorationID,
+            placements: preview.placements, size: canvas, theme: .deepSea)
+        #expect(members.contains(rock.decorationID))
+        #expect(!members.contains("saved-plant"))
+        let initialRockOrder = rock.zOrder
+        for action in [AquariumDecorationStacking.Action.back, .forward, .backward, .front] {
+            #expect(AquariumDecorationStacking.canMove(preview.trial, action: action,
+                among: preview.placements, within: members))
+            let changed = AquariumDecorationStacking.move(preview.trial, action: action,
+                among: preview.placements, within: members)
+            #expect(changed)
+            let behind = action == .back || action == .backward
+            #expect(AquariumDecorationStacking.isBehind(preview.trial.decoration, rock.decoration) == behind)
+            if behind { #expect(rock.zOrder != initialRockOrder) }
+        }
+        #expect(!before.hasChanges(player: player, decorationPlacements: placements, backgroundTheme: .deepSea))
+        #expect(player.coins == 0 && player.ownedFish.count == 2)
+        #expect(!production.mainContext.hasChanges)
+        #expect(!preview.modelContainer.mainContext.hasChanges)
+        #expect(try preview.modelContainer.mainContext.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 0)
     }
 
     @Test func realAquariumStartupAndClosingLeaveDraftFlagsAndProductionUntouched() async throws {

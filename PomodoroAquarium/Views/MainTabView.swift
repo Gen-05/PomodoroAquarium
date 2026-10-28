@@ -223,6 +223,7 @@ struct MainTabView: View {
     @State private var replayReward: FishRewardBatch?
     @State private var replayRewardHistoryIDs: [UUID] = []
     @State private var showsRewardRecoveryPrompt = false
+    @State private var shopBottomBoundary: CGFloat?
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let appDefaults: UserDefaults
@@ -380,7 +381,8 @@ struct MainTabView: View {
 
                 Tab(value: MainAppTab.shop) {
                     NavigationStack {
-                        ShopView(decorationTutorial: decorationTutorial, products: shopProducts)
+                        ShopView(decorationTutorial: decorationTutorial, products: shopProducts,
+                                 bottomContentBoundary: shopBottomBoundary)
                     }
                     .toolbarVisibility(.hidden, for: .tabBar)
                 } label: {
@@ -426,6 +428,9 @@ struct MainTabView: View {
                             .easeInOut(duration: AquariumViewingControlsPolicy.fadeDuration),
                             value: shouldShowBottomTabBar
                         )
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: {
+                    shopBottomBoundary = $0
                 }
             }
             .overlayPreferenceValue(CoreTutorialTargetPreferenceKey.self) { targets in

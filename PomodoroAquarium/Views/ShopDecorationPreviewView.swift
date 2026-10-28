@@ -4,16 +4,20 @@ import SwiftData
 struct ShopDecorationPreviewView: View {
     let session: ShopDecorationPreviewSession
     @Environment(\.dismiss) private var dismiss
+    @State private var headerFrame = CGRect.zero
+    @State private var canvasFrame = CGRect.zero
 
     var body: some View {
         ZStack(alignment: .top) {
             AquariumView(player: session.working.player,
                 fishViewingSessionOverride: session.fishViewingSession,
                 backgroundTheme: session.backgroundTheme,
+                onGlobalCanvasGeometryChanged: { canvasFrame = $0 },
                 allowsDeveloperDecorationSeeding: false,
                 isEditing: true,
                 isTreasureTapEnabled: false,
                 defersDecorationPersistence: true,
+                decorationControlsTopInset: headerFrame.isEmpty ? 160 : max(0, headerFrame.maxY - canvasFrame.minY + 12),
                 decorationTrialID: session.trial.decorationID,
                 editingPlacements: session.placements)
 
@@ -27,7 +31,7 @@ struct ShopDecorationPreviewView: View {
                 }
                 Text(session.trial.kind == .shipwreck
                      ? "「左奥・右奥」で配置を試せます。購入や保存はされません。"
-                     : "光っている商品をドラッグして動かせます。購入や保存はされません。")
+                     : "ドラッグ・微調整で位置、重なり順で前後を試せます。購入や保存はされません。")
                     .font(.subheadline)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if session.trial.kind == .shipwreck {
@@ -39,13 +43,10 @@ struct ShopDecorationPreviewView: View {
                                 .accessibilityIdentifier("shop.decorationPreview.shipwreck.\(side.rawValue)")
                         }
                     }
-                } else if session.trial.kind.supportsFacingDirection {
-                    Button("向きを変える", systemImage: "arrow.left.arrow.right") { session.changeFacing() }
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("shop.decorationPreview.changeFacing")
                 }
             }
             .padding(16)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { headerFrame = $0 }
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
             .padding(16)
         }
