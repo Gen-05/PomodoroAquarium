@@ -495,7 +495,7 @@ struct AquariumSideEditorTests {
         ) == .unavailable)
     }
 
-    @Test func tenthFishDropSucceedsAndFillsTheLastSlot() {
+    @Test func twentiethFishDropSucceedsAndFillsTheLastSlot() {
         let fish = (0..<AquariumDisplayLimits.maxFishCount).map { index in
             PlayerFish(species: index == AquariumDisplayLimits.maxFishCount - 1 ? .manta : .clownfish)
         }

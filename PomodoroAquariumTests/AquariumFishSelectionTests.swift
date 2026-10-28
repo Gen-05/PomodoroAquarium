@@ -6,18 +6,28 @@ import Testing
 @MainActor
 struct AquariumFishSelectionTests {
     @Test func firstInitializationMigratesThePreviousStableSelection() {
-        let fish = makeFish(count: 15)
-        let player = Player(ownedFish: fish, favoriteFish: fish[12])
-        let expectedIDs = AquariumFishDisplayPolicy.displayedFish(
-            from: fish,
-            favoriteFish: fish[12]
-        ).map(\.id)
+        let fish = makeFish(count: 30)
+        let player = Player(ownedFish: fish, favoriteFish: fish[25])
+        let expectedIDs = [fish[25].id] + fish.prefix(9).map(\.id)
 
+        // 初期化前の描画と初期化後の保存で、どちらも従来の10匹を維持する。
+        #expect(AquariumDisplayLimits.maxFishCount == 20)
+        #expect(player.activeAquariumFish.map(\.id) == expectedIDs)
         #expect(AquariumFishSelection.initializeIfNeeded(for: player))
         #expect(player.hasInitializedActiveAquariumFish)
         #expect(player.activeAquariumFishIDs == expectedIDs)
         #expect(player.activeAquariumFish.map(\.id) == expectedIDs)
         #expect(!AquariumFishSelection.initializeIfNeeded(for: player))
+    }
+
+    @Test func initializedTenFishStayUnchangedWhenCapacityAndOwnershipGrow() {
+        let fish = makeFish(count: 25)
+        let ids = fish.prefix(10).map(\.id)
+        let player = Player(ownedFish: fish, activeAquariumFishIDs: ids, hasInitializedActiveAquariumFish: true)
+        player.ownedFish.append(PlayerFish(species: .whaleShark))
+        #expect(!AquariumFishSelection.initializeIfNeeded(for: player))
+        #expect(player.activeAquariumFishIDs == ids)
+        #expect(player.activeAquariumFish.map(\.id) == ids)
     }
 
     @Test func initializedEmptySelectionRemainsEmptyAfterAcquisition() {
@@ -80,20 +90,22 @@ struct AquariumFishSelectionTests {
         #expect(!player.removeFishFromAquarium(playerFishID: fish.id))
     }
 
-    @Test func maximumTenFishRejectsTheEleventh() {
-        let fish = makeFish(count: 11)
+    @Test func maximumTwentySameSpeciesRejectsTheTwentyFirst() {
+        let fish = (0..<21).map { _ in PlayerFish(species: .clownfish) }
         let player = Player(
             ownedFish: fish,
             activeAquariumFishIDs: [],
             hasInitializedActiveAquariumFish: true
         )
 
-        for candidate in fish.prefix(AquariumDisplayLimits.maxFishCount) {
-            #expect(player.addFishToAquarium(playerFishID: candidate.id))
+        for _ in 0..<20 {
+            #expect(player.addOneFishToAquarium(species: .clownfish))
         }
 
-        #expect(!player.addFishToAquarium(playerFishID: fish[10].id))
-        #expect(player.activeAquariumFish.count == AquariumDisplayLimits.maxFishCount)
+        #expect(!player.addFishToAquarium(playerFishID: fish[20].id))
+        #expect(!player.addOneFishToAquarium(species: .clownfish))
+        #expect(player.activeAquariumFish.map(\.id) == fish.prefix(20).map(\.id))
+        #expect(player.ownedFish.count == 21)
     }
 
     @Test func removingActiveFishDoesNotRemoveOwnership() {
@@ -175,6 +187,62 @@ struct AquariumFishSelectionTests {
         #expect(restoredEmpty.hasInitializedActiveAquariumFish)
         #expect(restoredEmpty.activeAquariumFishIDs.isEmpty)
         #expect(restoredEmpty.activeAquariumFish.isEmpty)
+    }
+
+    @Test func twentyFishPersistAfterStoreReloadAndDraftUndoRedo() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("TwentyFish-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("Player.store")
+        let ownedIDs = (0..<21).map { _ in UUID() }
+        let activeIDs = Array(ownedIDs.prefix(20))
+        do {
+            let container = try ModelContainer(for: Player.self, PlayerFish.self,
+                configurations: ModelConfiguration(url: url))
+            let context = ModelContext(container)
+            let player = Player(ownedFish: ownedIDs.map { PlayerFish(id: $0, species: .clownfish) },
+                activeAquariumFishIDs: activeIDs, hasInitializedActiveAquariumFish: true, coins: 432)
+            context.insert(player)
+            try context.save()
+        }
+
+        let reopened = try ModelContainer(for: Player.self, PlayerFish.self,
+            configurations: ModelConfiguration(url: url))
+        let context = ModelContext(reopened)
+        let player = try #require(context.fetch(FetchDescriptor<Player>()).first)
+        #expect(player.activeAquariumFishIDs == activeIDs)
+        #expect(player.activeAquariumFish.map(\.id) == activeIDs)
+        #expect(Set(player.ownedFish.map(\.id)) == Set(ownedIDs))
+        #expect(!AquariumFishSelection.initializeIfNeeded(for: player))
+        #expect(!player.addFishToAquarium(playerFishID: ownedIDs[20]))
+        #expect(player.activeAquariumFishIDs == activeIDs && player.coins == 432)
+
+        let initial = AquariumEditorDraft(player: player, placements: [], background: .aquarium)
+        let work = AquariumEditorWorkingState(official: player, placements: [], draft: initial)
+        var history = AquariumEditorHistory(initial: initial)
+        #expect(work.player.removeFishFromAquarium(playerFishID: activeIDs[19]))
+        let recorded = history.record(AquariumEditorDraft(player: work.player, placements: [], background: .aquarium))
+        #expect(recorded)
+        let undo = history.undo()
+        work.apply(try #require(undo))
+        #expect(work.player.activeAquariumFish.map(\.id) == activeIDs)
+
+        var draft = history.current
+        draft.history = history
+        let store = AquariumEditorDraftStore(url: directory.appendingPathComponent("draft.json"))
+        try store.save(draft)
+        let loaded = try #require(try store.load())
+        #expect(loaded.fishIDs == activeIDs)
+        var restoredHistory = try #require(loaded.history)
+        #expect(restoredHistory.isValid(for: loaded))
+        let redo = restoredHistory.redo()
+        work.apply(try #require(redo))
+        #expect(work.player.activeAquariumFish.count == 19)
+        let undoAgain = restoredHistory.undo()
+        work.apply(try #require(undoAgain))
+        #expect(work.player.activeAquariumFish.map(\.id) == activeIDs)
+        // 作業コピーの変更・復元は、正式な配置へ漏れない（キャンセル時も同じ）。
+        #expect(player.activeAquariumFishIDs == activeIDs && player.ownedFish.count == 21)
     }
 
     @Test func homePlayerInitializationCanRunRepeatedlyWithoutDuplicates() throws {

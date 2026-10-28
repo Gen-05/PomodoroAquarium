@@ -86,7 +86,7 @@ struct MandarinfishTests {
         let clown = try visibleWidth(.clownfish), mandarin = try visibleWidth(.mandarinfish)
         #expect(abs(mandarin / clown - 1.20) < 0.02)
         #expect(FishSpecies.clownfish.displayScale == 0.40)
-        #expect(AquariumFishSizing.displaySize(for: .clownfish, isFavorite: false) == 78 * 0.40)
+        #expect(AquariumFishSizing.displaySize(for: .clownfish, isFavorite: false) == 78 * 0.40 * 0.85)
         print("Mandarinfish visible length \(mandarin)pt / clownfish \(clown)pt = \(mandarin / clown)")
         let size = AquariumFishSizing.displaySize(for: .mandarinfish, isFavorite: false)
         for frame in 0..<5 {

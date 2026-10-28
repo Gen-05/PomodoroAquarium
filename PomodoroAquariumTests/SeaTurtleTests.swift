@@ -130,7 +130,7 @@ struct SeaTurtleTests {
         var neutralShell: [UInt8] = []
         for frame in 0..<7 {
             let visible = try length(.seaTurtle, frame: frame)
-            #expect(abs(visible / clown - 3.9) < 0.03)
+            #expect(abs(visible / clown - 3.9 / 0.85) < 0.03)
             let image = try #require(UIImage(named: FishSpecies.seaTurtle.swimmingImageNames[frame])?.cgImage)
             let bytes = pixels(image)
             // frame2の前足が覆うx540以降を避け、全7枚で露出している甲羅を比較。

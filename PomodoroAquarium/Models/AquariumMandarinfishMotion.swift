@@ -50,6 +50,7 @@ enum AquariumMandarinfishMotion {
         }
 
         var timeRemaining: TimeInterval { max(duration - elapsed, 0) }
+
         var headDipDegrees: Double {
             let t = min(max(elapsed / duration, 0), 1)
             return dip * pow(sin(.pi * t), 2)

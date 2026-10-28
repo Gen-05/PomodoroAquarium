@@ -32,10 +32,16 @@ final class AquariumFishViewingSession: ObservableObject {
     private var snapshots: [UUID: Snapshot] = [:]
     private var owners: [UUID: UUID] = [:]
     private var inflationRequests: Set<UUID> = []
+    private var placedFishIDs: Set<UUID> = []
     private(set) var handledViewingTapToken: UUID?
     private(set) var editingSession: AquariumFishViewingSession?
 
     init(id: UUID = UUID()) { self.id = id }
+
+    func setPlacedFishIDs(_ ids: Set<UUID>) {
+        for id in placedFishIDs.subtracting(ids) { owners[id] = nil }
+        placedFishIDs = ids
+    }
 
     func snapshot(for fishID: UUID) -> Snapshot? { snapshots[fishID] }
 
@@ -97,6 +103,7 @@ final class AquariumFishViewingSession: ObservableObject {
         let editing = AquariumFishViewingSession(id: id)
         editing.snapshots = snapshots
         editing.inflationRequests = inflationRequests
+        editing.placedFishIDs = placedFishIDs
         editingSession = editing
     }
 
@@ -110,6 +117,7 @@ final class AquariumFishViewingSession: ObservableObject {
             owners.removeAll()
             inflationRequests.removeAll()
             stopInflation(except: Set(activeIDs))
+            setPlacedFishIDs(Set(activeIDs))
         }
         editing.owners.removeAll()
         editingSession = nil

@@ -119,6 +119,7 @@ struct AquariumView: View {
         .onChange(of: fishSelectionRevision, initial: true) { _, _ in
             updateDisplayedFish()
         }
+        .onChange(of: fishViewingSession.scopeID) { _, _ in updateDisplayedFish() }
         .onChange(of: displayedFishIDs, initial: true) { _, displayedFishIDs in
             let displayedIDSet = Set(displayedFishIDs)
             let retainedPositions = fishPositions.filter { displayedIDSet.contains($0.key) }
@@ -197,6 +198,7 @@ struct AquariumView: View {
 
         let activeFish = player.activeAquariumFish
         fishViewingSession.stopInflation(except: Set(activeFish.map(\.id)))
+        fishViewingSession.setPlacedFishIDs(Set(activeFish.map(\.id)))
         if activeFish.map(\.id) != displayedFishIDs {
             displayedFish = activeFish
         }
@@ -713,12 +715,26 @@ struct AquariumDecorationView: View {
 enum AquariumFishSizing {
     // 水槽専用の微調整。共通displayScaleや保存データには反映しない。
     static let baseSize: CGFloat = 78
+    static let smallFishScale: CGFloat = 0.85
+
     static func displaySize(for species: FishSpecies, isFavorite _: Bool) -> CGFloat {
+        let scale: CGFloat = switch species {
+        case .clownfish, .blueTang, .yellowTang, .blueGreenChromis, .orientalButterflyfish,
+             .pennantCoralfish, .pufferfish, .jellyfish, .seahorse, .mandarinfish, .lionfish, .porcupinefish:
+            smallFishScale
+        case .seaTurtle, .dolphin, .manta, .whaleShark, .orca:
+            1
+        }
+        return referenceSize(for: species) * scale
+    }
+
+    /// 個別補正を含む従来サイズ。ニシキテグリの移動距離は表示縮小に連動させない。
+    static func referenceSize(for species: FishSpecies) -> CGFloat {
         let adjustment: CGFloat
         switch species {
         case .orca:
             // 初期のイルカ比1.2倍から10%拡大（1.32倍）。16枚とも同じcanvas。
-            return displaySize(for: .dolphin, isFavorite: false) * (1203.0 / 1193) * 1.32
+            return referenceSize(for: .dolphin) * (1203.0 / 1193) * 1.32
         case .whaleShark:
             // 旧泳ぎ1番1177px→新neutral1001px。同じ描画枠を12枚すべてに適用。
             adjustment = 1177.0 / 1001
@@ -760,8 +776,10 @@ struct AquariumSelectionGlow: ViewModifier {
     let isSelected: Bool
     var edgeOpacity: Double = 1
     var outlineWidth: CGFloat = 0.8
+    // 本体だけをぼかす。選択光彩は下の元contentから作り、鮮明さを維持する。
+    var imageBlurRadius: CGFloat = 0
     func body(content: Content) -> some View {
-        content
+        image(content)
             .background {
                 if isSelected {
                     ZStack {
@@ -781,6 +799,15 @@ struct AquariumSelectionGlow: ViewModifier {
             .compositingGroup()
             .shadow(color: isSelected ? .white : .clear, radius: 1)
             .shadow(color: isSelected ? .cyan : .clear, radius: 4)
+    }
+
+    @ViewBuilder
+    private func image(_ content: Content) -> some View {
+        if imageBlurRadius > 0 {
+            content.blur(radius: imageBlurRadius, opaque: false)
+        } else {
+            content
+        }
     }
 }
 
@@ -879,6 +906,7 @@ struct SwimmingFishView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var ownerID = UUID()
     @State private var isVisible = false
+    @State private var rendersFish = true
     let species: FishSpecies
     let appearance: AquariumFishAppearance?
     let viewingTapRequest: AquariumTreasureChestTapLocation?
@@ -949,7 +977,7 @@ struct SwimmingFishView: View {
 
         let profile = AquariumFishMotion.movementProfile(for: species)
         let saved = viewingSession?.snapshot(for: fishID)
-        let bounds = species == .mandarinfish && !AquariumMandarinfishMotion.hasValidGeometry(aquariumSize)
+        let bounds = !AquariumFishWorld.hasValidGeometry(aquariumSize)
             ? saved?.motion.roamingBounds ?? profile.roamingStyle.bounds(in: aquariumSize,
                 fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite))
             : profile.roamingStyle.bounds(in: aquariumSize,
@@ -959,14 +987,25 @@ struct SwimmingFishView: View {
             profile: profile,
             speedVariationProfile: AquariumFishMotion.speedVariationProfile(for: species),
             roamingBounds: bounds,
+            initialBounds: profile.roamingStyle.visibleBounds(in: aquariumSize,
+                fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite)),
             initialPosition: appearance?.spawnPosition(in: aquariumSize) ?? initialPosition,
             viewingSessionID: viewingSession?.id ?? viewingSessionID,
             aquariumSize: aquariumSize,
-            fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite)
+            fishSize: AquariumFishSizing.referenceSize(for: species)
         )
         initialMotion.updateRoamingBounds(bounds)
-        initialMotion.updateStationKeepingGeometry(size: aquariumSize, fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite))
+        initialMotion.updateStationKeepingGeometry(size: aquariumSize, fishSize: AquariumFishSizing.referenceSize(for: species))
         self._motion = State(initialValue: initialMotion)
+        let rotation = initialMotion.stationKeeping.map { $0.headDipDegrees * ($0.facingRight ? 1 : -1) }
+            ?? species.swimmingImageRotation(for: initialMotion.facingDirection)
+        let translation = initialMotion.translationVelocity
+        self._rendersFish = State(initialValue: (appearance?.progress(at: updateDate) ?? 1) < 1
+            || AquariumFishVisibility.shouldRender(wasRendering: true, position: initialMotion.position,
+                aquariumSize: aquariumSize,
+                fishSize: AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite) * initialMotion.depthScale,
+                rotationDegrees: rotation, velocity: CGVector(dx: translation.dx * initialMotion.depthSpeedMultiplier,
+                    dy: translation.dy * initialMotion.depthSpeedMultiplier)))
         self._dolphin = State(initialValue: saved?.dolphin ?? (species == .dolphin ? .init(id: fishID) : nil))
         self._orca = State(initialValue: saved?.orca ?? (species == .orca ? .init(id: fishID) : nil))
         self._inflation = State(initialValue: saved?.inflation ?? (species == .porcupinefish ? .init(id: fishID) : nil))
@@ -985,28 +1024,29 @@ struct SwimmingFishView: View {
 
     var body: some View {
         ZStack {
-            if let appearance, appearance.progress(at: updateDate) < 1 {
-                AquariumFishAppearanceRing(progress: appearance.progress(at: updateDate))
-                    .background { renderedFrameObserver(isRing: true) }
+            if rendersFish {
+                if let appearance, appearance.progress(at: updateDate) < 1 {
+                    AquariumFishAppearanceRing(progress: appearance.progress(at: updateDate))
+                        .background { renderedFrameObserver(isRing: true) }
+                }
+                fishImage
+                    .background { renderedFrameObserver(isRing: false) }
+                    .modifier(AquariumFishColorCorrection.correction(for: backgroundTheme, species: species))
+                    .modifier(AquariumSelectionGlow(isSelected: isSelected && isSelectionEnabled,
+                        edgeOpacity: species.displayScale < 1 ? 1 : 0.95,
+                        outlineWidth: species.displayScale < 1 ? 1 : species.displayScale < 2 ? 0.8 : 0.65,
+                        imageBlurRadius: AquariumFishDepthBlur.radius(at: motion.currentDepth)))
+                    .opacity(Double(appearance == nil ? 1 : 0.15 + 0.85 * appearanceProgress))
             }
-            fishImage
-                .background { renderedFrameObserver(isRing: false) }
-                .modifier(AquariumFishColorCorrection.correction(for: backgroundTheme, species: species))
-                .modifier(AquariumSelectionGlow(isSelected: isSelected && isSelectionEnabled,
-                    edgeOpacity: species.displayScale < 1 ? 1 : 0.95,
-                    outlineWidth: species.displayScale < 1 ? 1 : species.displayScale < 2 ? 0.8 : 0.65))
-                .scaleEffect(0.8 + 0.2 * appearanceProgress)
-                .opacity(Double(appearance == nil ? 1 : 0.15 + 0.85 * appearanceProgress))
         }
             .frame(width: selectionHitTargetSize, height: selectionHitTargetSize)
-            .contentShape(isSelectionEnabled || acceptsInflationTap ? AquariumFishHitTesting.path(
-                image: fishSprite.interactionImage, canvasSize: selectionHitTargetSize,
-                fishSize: fishSize, horizontalScale: fishSprite.resolvedHorizontalScale) : Path())
+            .contentShape(rendersFish && (isSelectionEnabled || acceptsInflationTap) ? fishHitPath : Path())
             .onTapGesture {
+                guard rendersFish else { return }
                 if isSelectionEnabled { select() }
                 requestInflation()
             }
-            .allowsHitTesting(isSelectionEnabled || acceptsInflationTap)
+            .allowsHitTesting(rendersFish && (isSelectionEnabled || acceptsInflationTap))
             .rotationEffect(.degrees(swimRotation + smallFishDirectionRotation))
             .scaleEffect(x: 1, y: swimVerticalScale)
             .offset(y: swimVerticalOffset * appearanceOffsetProgress)
@@ -1045,7 +1085,7 @@ struct SwimmingFishView: View {
                 else { resumeViewingSession() }
             }
             .onChange(of: aquariumSize) { _, size in
-                if species == .mandarinfish, !AquariumMandarinfishMotion.hasValidGeometry(size) {
+                if !AquariumFishWorld.hasValidGeometry(size) {
                     simulationTiming.pause()
                     return
                 }
@@ -1056,10 +1096,12 @@ struct SwimmingFishView: View {
                 motion.updateRoamingBounds(motion.movementProfile.roamingStyle.bounds(
                     in: size, fishSize: fishSize
                 ))
-                motion.updateStationKeepingGeometry(size: size, fishSize: fishSize)
+                motion.updateStationKeepingGeometry(size: size, fishSize: AquariumFishSizing.referenceSize(for: species))
+                updateFishVisibility()
                 saveViewingSession()
             }
             .accessibilityElement(children: .combine)
+            .accessibilityHidden(!rendersFish)
             .accessibilityLabel(fishAccessibilityLabel)
             .accessibilityIdentifier("aquarium.fish.\(fishID.uuidString)")
             .accessibilityValue(isSelectionEnabled && isSelected ? "選択中" : "")
@@ -1109,10 +1151,10 @@ struct SwimmingFishView: View {
         guard isVisible, !isSimulationPaused, scenePhase == .active else { return }
         if let viewingSession {
             let saved = viewingSession.claim(fishID, owner: ownerID, initial: snapshot,
-                bounds: species == .mandarinfish && !AquariumMandarinfishMotion.hasValidGeometry(aquariumSize)
+                bounds: !AquariumFishWorld.hasValidGeometry(aquariumSize)
                     ? motion.roamingBounds : motion.movementProfile.roamingStyle.bounds(in: aquariumSize, fishSize: fishSize))
             motion = saved.motion
-            motion.updateStationKeepingGeometry(size: aquariumSize, fishSize: fishSize)
+            motion.updateStationKeepingGeometry(size: aquariumSize, fishSize: AquariumFishSizing.referenceSize(for: species))
             spriteDirectionTransition = saved.direction
             wingCycle = saved.wing
             inflation = saved.inflation
@@ -1125,6 +1167,7 @@ struct SwimmingFishView: View {
         }
         simulationTiming.pause()
         applyAppearancePositionIfNeeded()
+        updateFishVisibility()
         // 初回Geometryや専用の再生状態を、次の泳動tickを待たずに共有側へ反映する。
         if species == .mandarinfish || species == .whaleShark || species == .orca { saveViewingSession() }
         reportPosition(motion.position)
@@ -1147,7 +1190,7 @@ struct SwimmingFishView: View {
         motion = AquariumFishMotion.initialState(for: fishID, profile: profile,
             speedVariationProfile: AquariumFishMotion.speedVariationProfile(for: species),
             roamingBounds: profile.roamingStyle.bounds(in: aquariumSize, fishSize: fishSize),
-            initialPosition: spawn, aquariumSize: aquariumSize, fishSize: fishSize)
+            initialPosition: spawn, aquariumSize: aquariumSize, fishSize: AquariumFishSizing.referenceSize(for: species))
         simulationTiming.pause()
         if species == .porcupinefish { inflation = .init(id: fishID) }
         if species == .dolphin { dolphin = .init(id: fishID) }
@@ -1162,7 +1205,7 @@ struct SwimmingFishView: View {
         guard let deltaTime = simulationTiming.nextDeltaTime(
             at: date,
             isPaused: isSimulationPaused || (viewingSession != nil && (!isVisible || scenePhase != .active))
-                || (species == .mandarinfish && !AquariumMandarinfishMotion.hasValidGeometry(aquariumSize))
+                || !AquariumFishWorld.hasValidGeometry(aquariumSize)
                 || (appearance?.progress(at: date) ?? 1) < 1
         ) else { return }
         if viewingSession?.takeInflationRequest(for: fishID, owner: ownerID) == true {
@@ -1199,12 +1242,22 @@ struct SwimmingFishView: View {
             toward: motion.facingDirection,
             deltaTime: deltaTime
         )
+        updateFishVisibility()
         saveViewingSession()
         positionReportTimeRemaining -= deltaTime
         if positionReportTimeRemaining <= 0 {
             reportPosition(motion.position)
             positionReportTimeRemaining = 0.45
         }
+    }
+
+    private func updateFishVisibility() {
+        let translation = motion.translationVelocity
+        rendersFish = (appearance?.progress(at: updateDate) ?? 1) < 1
+            || AquariumFishVisibility.shouldRender(wasRendering: rendersFish, position: renderedPosition,
+                aquariumSize: aquariumSize, fishSize: renderedFishSize, rotationDegrees: smallFishDirectionRotation,
+                velocity: CGVector(dx: translation.dx * motion.depthSpeedMultiplier,
+                                   dy: translation.dy * motion.depthSpeedMultiplier))
     }
 
     private var appearanceProgress: CGFloat {
@@ -1228,20 +1281,32 @@ struct SwimmingFishView: View {
     }
 
     private var fishImage: some View {
-        fishSprite.frame(width: fishSize, height: fishSize)
+        fishSprite.frame(width: renderedFishSize, height: renderedFishSize)
     }
 
     private var fishSize: CGFloat {
+        // 境界・追加位置には手前での最大サイズを使い、深度変化で再clampしない。
         AquariumFishSizing.displaySize(for: species, isFavorite: isFavorite)
     }
 
+    private var renderedFishSize: CGFloat {
+        // 追加演出の拡大も描画枠へ含め、通常遊泳への切替とタップ判定で同じ値を使う。
+        fishSize * motion.depthScale * (0.8 + 0.2 * appearanceProgress)
+    }
+
     private var selectionHitTargetSize: CGFloat {
-        guard isSelectionEnabled || acceptsInflationTap else { return fishSize }
-        return max(fishSize + 20, 56)
+        guard isSelectionEnabled || acceptsInflationTap else { return renderedFishSize }
+        return max(renderedFishSize + 20, 56)
+    }
+
+    private var fishHitPath: Path {
+        AquariumFishHitTesting.path(image: fishSprite.interactionImage,
+            canvasSize: selectionHitTargetSize, fishSize: renderedFishSize,
+            horizontalScale: fishSprite.resolvedHorizontalScale)
     }
 
     private var acceptsInflationTap: Bool {
-        species == .porcupinefish && isVisible && !isSimulationPaused && scenePhase == .active && canUpdateSession
+        species == .porcupinefish && rendersFish && isVisible && !isSimulationPaused && scenePhase == .active && canUpdateSession
     }
 
     private func requestInflation() {
@@ -1261,9 +1326,7 @@ struct SwimmingFishView: View {
         let angle = -(swimRotation + smallFishDirectionRotation) * .pi / 180
         let local = CGPoint(x: x * cos(angle) - y * sin(angle) + selectionHitTargetSize / 2,
                             y: x * sin(angle) + y * cos(angle) + selectionHitTargetSize / 2)
-        return AquariumFishHitTesting.path(image: fishSprite.interactionImage,
-            canvasSize: selectionHitTargetSize, fishSize: fishSize,
-            horizontalScale: fishSprite.resolvedHorizontalScale).contains(local)
+        return fishHitPath.contains(local)
     }
 
     private var fishAccessibilityLabel: String {

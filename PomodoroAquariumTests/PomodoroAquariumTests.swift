@@ -2705,7 +2705,7 @@ struct PomodoroAquariumTests {
         #expect(profile.wanderingRadiusX == 0.42...0.68)
         #expect(profile.wanderingRadiusY == 0.20...0.36)
         #expect(profile.turnResponsivenessRange == 0.14...0.28)
-        #expect(profile.depthScaleRange == 1.0...1.0)
+        #expect(profile.depthScaleRange == 0.75...1.0)
         #expect(profile.steeringNoiseMultiplier == 0.14)
         #expect(profile.accelerationResponseRange == 0.65...1.05)
         #expect(profile.brakingResponseRange == 0.55...0.90)
@@ -2741,7 +2741,7 @@ struct PomodoroAquariumTests {
         #expect(manta.hoverProbability == 0.08)
         #expect(manta.burstProbability == 0)
         #expect(manta.steeringNoiseMultiplier == 0.20)
-        #expect(manta.depthScaleRange == 1.0...1.0)
+        #expect(manta.depthScaleRange == 0.75...1.0)
     }
 
     @Test func mantaNeverTransitionsIntoBurst() {
@@ -2882,7 +2882,7 @@ struct PomodoroAquariumTests {
         #expect(jellyfish.burstProbability == 0)
         #expect(jellyfish.steeringNoiseMultiplier == 0.30)
         #expect(jellyfish.swimPhaseSpeedMultiplier == 0.55)
-        #expect(jellyfish.depthScaleRange == 1.0...1.0)
+        #expect(jellyfish.depthScaleRange == 0.75...1.0)
     }
 
     @Test func jellyfishNeverTransitionsIntoBurst() {
@@ -3404,8 +3404,12 @@ struct PomodoroAquariumTests {
     @Test func depthControlsScaleOpacityAndPerceivedSpeedWithoutBlur() {
         let profile = FishMovementProfile.clownfish
 
-        #expect(profile.depthScale(at: 0) == 1)
-        #expect(profile.depthScale(at: 1) == 1)
+        for species in FishSpecies.allCases {
+            let profile = AquariumFishMotion.movementProfile(for: species)
+            #expect(profile.depthScale(at: 0) == 0.75)
+            #expect(profile.depthScale(at: 0.5) == 0.875)
+            #expect(profile.depthScale(at: 1) == 1)
+        }
         #expect(profile.depthOpacity(at: 0) < profile.depthOpacity(at: 1))
         #expect(profile.depthSpeedMultiplier(at: 0) < profile.depthSpeedMultiplier(at: 1))
     }
@@ -3505,6 +3509,7 @@ struct PomodoroAquariumTests {
         motion.depthChangeTimeRemaining = 100
         motion.currentDepth = 0.2
         motion.targetDepth = 0.8
+        motion.depthTravel = .init(start: 0.2, duration: 8)
 
         motion.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
 
@@ -3512,7 +3517,7 @@ struct PomodoroAquariumTests {
         #expect(motion.currentDepth < 0.8)
     }
 
-    @Test func hoveringChangesDepthLessThanWandering() {
+    @MainActor @Test func depthTravelTimingDoesNotRestartWhenSwimBehaviorChanges() {
         let id = UUID(uuid: (61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76))
         var hovering = AquariumFishMotion.initialState(for: id)
         hovering.behavior = .hovering
@@ -3520,13 +3525,16 @@ struct PomodoroAquariumTests {
         hovering.depthChangeTimeRemaining = 100
         hovering.currentDepth = 0.2
         hovering.targetDepth = 0.8
+        hovering.depthTravel = .init(start: 0.2, duration: 8)
         var wandering = hovering
         wandering.behavior = .wandering
 
         hovering.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
         wandering.advance(deltaTime: 1.0 / 30.0, elapsedTime: 1)
 
-        #expect(hovering.currentDepth - 0.2 < wandering.currentDepth - 0.2)
+        #expect(hovering.currentDepth == wandering.currentDepth)
+        #expect(hovering.depthTravel == wandering.depthTravel)
+        #expect(hovering.targetDepth == wandering.targetDepth)
     }
 
     @Test func foregroundDepthMovesFartherThanBackgroundAtTheSameSwimSpeed() {

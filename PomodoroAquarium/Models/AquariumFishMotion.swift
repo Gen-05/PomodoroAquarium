@@ -14,6 +14,13 @@ enum FishRoamingStyle {
     }
 
     func bounds(in aquariumSize: CGSize, fishSize: CGFloat) -> FishRoamingBounds {
+        let viewport = visibleBounds(in: aquariumSize, fishSize: fishSize)
+        guard AquariumFishWorld.hasValidGeometry(aquariumSize) else { return viewport }
+        return AquariumFishWorld.bounds(from: viewport)
+    }
+
+    /// 初期配置と従来の上下層の基準。表示の端を回遊の壁にはしない。
+    func visibleBounds(in aquariumSize: CGSize, fishSize: CGFloat) -> FishRoamingBounds {
         guard self != .legacy, aquariumSize.width > 0, aquariumSize.height > 0 else {
             return .legacy
         }
@@ -48,6 +55,8 @@ struct FishRoamingBounds {
 }
 
 struct FishMovementProfile {
+    static let aquariumDepthScaleRange: ClosedRange<CGFloat> = 0.75...1.0
+
     var roamingStyle: FishRoamingStyle = .legacy
     var usesStationKeeping = false
     var wallAvoidanceStrength: CGFloat = 1
@@ -85,7 +94,7 @@ struct FishMovementProfile {
         wanderingRadiusY: 0.24...0.46,
         turnResponsivenessRange: 0.62...1.02,
         depthRange: 0.12...0.92,
-        depthScaleRange: 1.0...1.0,
+        depthScaleRange: aquariumDepthScaleRange,
         depthOpacityRange: 0.76...1.0,
         depthSpeedRange: 0.82...1.10,
         depthChangeProbability: 0.58,
@@ -113,7 +122,7 @@ struct FishMovementProfile {
         wanderingRadiusY: 0.30...0.54,
         turnResponsivenessRange: 0.30...0.55,
         depthRange: 0.18...0.86,
-        depthScaleRange: 1.0...1.0,
+        depthScaleRange: aquariumDepthScaleRange,
         depthOpacityRange: 0.80...1.0,
         depthSpeedRange: 0.90...1.02,
         depthChangeProbability: 0.40,
@@ -141,7 +150,7 @@ struct FishMovementProfile {
         wanderingRadiusY: 0.30...0.54,
         turnResponsivenessRange: 0.30...0.55,
         depthRange: 0.18...0.86,
-        depthScaleRange: 1.0...1.0,
+        depthScaleRange: aquariumDepthScaleRange,
         depthOpacityRange: 0.80...1.0,
         depthSpeedRange: 0.90...1.02,
         depthChangeProbability: 0.40,
@@ -204,7 +213,7 @@ struct FishMovementProfile {
         wanderingRadiusY: 0.16...0.30,
         turnResponsivenessRange: 0.22...0.42,
         depthRange: 0.20...0.82,
-        depthScaleRange: 1.0...1.0,
+        depthScaleRange: aquariumDepthScaleRange,
         depthOpacityRange: 0.84...1.0,
         depthSpeedRange: 0.92...1.04,
         depthChangeProbability: 0.28,
@@ -311,7 +320,7 @@ struct FishMovementProfile {
         wanderingRadiusY: 0.20...0.36,
         turnResponsivenessRange: 0.14...0.28,
         depthRange: 0.20...0.82,
-        depthScaleRange: 1.0...1.0,
+        depthScaleRange: aquariumDepthScaleRange,
         depthOpacityRange: 0.86...1.0,
         depthSpeedRange: 0.94...1.04,
         depthChangeProbability: 0.20,
@@ -417,6 +426,17 @@ enum AquariumFishMotion {
     static let verticalRange: ClosedRange<CGFloat> = 0.16...0.62
     static let maximumDeltaTime: TimeInterval = 1.0 / 15.0
     static let whaleSharkSpriteFrameDuration: TimeInterval = 0.24 // 移動はFishMovementProfile.whaleSharkで独立調整。
+
+    /// 到着後の滞在と、認識できる幅の奥行き移動。XYの行動・操舵とは独立する。
+    struct DepthTravel: Equatable {
+        static let holdDuration: ClosedRange<TimeInterval> = 20...40
+        static let durationRange: ClosedRange<TimeInterval> = 6...10
+        static let minimumRangeFraction: CGFloat = 0.4
+
+        let start: CGFloat
+        let duration: TimeInterval
+        var elapsed: TimeInterval = 0
+    }
 
     struct WingCycle {
         enum Phase: Equatable {
@@ -532,6 +552,8 @@ enum AquariumFishMotion {
         var targetDepth: CGFloat
         var depthVelocity: CGFloat
         var depthChangeTimeRemaining: TimeInterval
+        var depthTravel: DepthTravel?
+        var depthRandomState: UInt64
 
         let movementProfile: FishMovementProfile
         let baseSpeed: CGFloat
@@ -605,6 +627,8 @@ enum AquariumFishMotion {
         ) where NeighborPositions.Index == Int, NeighborPositions.Element == CGPoint {
             let deltaTime = min(max(rawDeltaTime, 0), AquariumFishMotion.maximumDeltaTime)
             guard deltaTime > 0 else { return }
+            // 滞留型・クロマグロを含め、既存の1 tickにつき深度も1回だけ進める。
+            updateDepth(deltaTime: deltaTime)
             if var stationKeeping {
                 stationKeeping.advance(deltaTime: deltaTime)
                 self.stationKeeping = stationKeeping
@@ -615,7 +639,6 @@ enum AquariumFishMotion {
             behaviorTimeRemaining -= deltaTime
             directionChangeTimeRemaining -= deltaTime
             burstCooldownRemaining = max(0, burstCooldownRemaining - deltaTime)
-            depthChangeTimeRemaining -= deltaTime
             if behaviorTimeRemaining <= 0 {
                 transitionBehavior(neighborPositions: neighborPositions)
             } else if directionChangeTimeRemaining <= 0, behavior != .burst, behavior != .braking {
@@ -678,7 +701,6 @@ enum AquariumFishMotion {
                 return
             }
             velocity = CGVector(dx: blendedDirection.dx * currentSpeed, dy: blendedDirection.dy * currentSpeed)
-            updateDepth(deltaTime: deltaTime)
             let depthSpeed = movementProfile.depthSpeedMultiplier(at: currentDepth)
             let translation = translationVelocity
             position.x += translation.dx * CGFloat(deltaTime) * depthSpeed
@@ -721,81 +743,57 @@ enum AquariumFishMotion {
         }
 
         private mutating func updateDepth(deltaTime: TimeInterval) {
-            if depthChangeTimeRemaining <= 0 {
-                chooseNextDepth()
-            }
-
-            let behaviorMultiplier: CGFloat
-            switch behavior {
-            case .hovering: behaviorMultiplier = 0.14
-            case .wandering: behaviorMultiplier = 0.72
-            case .cruising: behaviorMultiplier = 1
-            case .burst: behaviorMultiplier = 0.24
-            case .braking: behaviorMultiplier = 0.38
-            case .turning: behaviorMultiplier = 0.25
-            }
-            let amount = 1 - exp(
-                -movementProfile.depthChangeResponse
-                    * behaviorMultiplier
-                    * CGFloat(deltaTime)
-            )
             let previousDepth = currentDepth
-            currentDepth += (targetDepth - currentDepth) * amount
-            currentDepth = min(max(currentDepth, 0), 1)
-            depthVelocity = (currentDepth - previousDepth) / max(CGFloat(deltaTime), 0.001)
+            var remaining = deltaTime
+            while remaining > 0.000000001 {
+                if var travel = depthTravel {
+                    let step = min(remaining, max(travel.duration - travel.elapsed, 0))
+                    travel.elapsed += step
+                    remaining -= step
+                    let t = CGFloat(min(travel.elapsed / travel.duration, 1))
+                    // 両端の速度・加速度を0にして、同じcurrentDepthへ滑らかに接続する。
+                    let progress = t * t * t * (10 - 15 * t + 6 * t * t)
+                    currentDepth = travel.start + (targetDepth - travel.start) * progress
+                    currentDepth = min(max(currentDepth, movementProfile.depthRange.lowerBound),
+                                       movementProfile.depthRange.upperBound)
+                    if travel.elapsed >= travel.duration - 0.000000001 {
+                        currentDepth = targetDepth
+                        depthTravel = nil
+                        depthChangeTimeRemaining = nextDepthDuration(in: DepthTravel.holdDuration)
+                    } else {
+                        depthTravel = travel
+                    }
+                } else {
+                    let step = min(remaining, max(depthChangeTimeRemaining, 0))
+                    depthChangeTimeRemaining -= step
+                    remaining -= step
+                    if depthChangeTimeRemaining <= 0.000000001 { chooseNextDepth() }
+                }
+            }
+            depthVelocity = (currentDepth - previousDepth) / CGFloat(deltaTime)
         }
 
         private mutating func chooseNextDepth() {
-            guard behavior != .turning else {
-                depthChangeTimeRemaining = random(in: 0.5...1.2)
+            let range = movementProfile.depthRange
+            let minimumChange = (range.upperBound - range.lowerBound) * DepthTravel.minimumRangeFraction
+            guard minimumChange > 0 else {
+                depthChangeTimeRemaining = nextDepthDuration(in: DepthTravel.holdDuration)
                 return
             }
+            // 現在地の近傍を除いた区間から抽選。端点への固定往復や再抽選ループは作らない。
+            let farLength = max(0, currentDepth - minimumChange - range.lowerBound)
+            let nearLength = max(0, range.upperBound - currentDepth - minimumChange)
+            let offset = AquariumFishMotion.nextRandomUnit(state: &depthRandomState) * (farLength + nearLength)
+            targetDepth = farLength > 0 && (offset <= farLength || nearLength == 0)
+                ? range.lowerBound + offset
+                : min(currentDepth + minimumChange + offset - farLength, range.upperBound)
+            depthTravel = DepthTravel(start: currentDepth,
+                                      duration: nextDepthDuration(in: DepthTravel.durationRange))
+        }
 
-            let probabilityMultiplier: CGFloat
-            let maximumChange: CGFloat
-            let interval: ClosedRange<TimeInterval>
-            switch behavior {
-            case .hovering:
-                probabilityMultiplier = 0.24
-                maximumChange = 0.05
-                interval = 2.5...5.5
-            case .wandering:
-                probabilityMultiplier = 1
-                maximumChange = 0.24
-                interval = 2.0...5.0
-            case .cruising:
-                probabilityMultiplier = 0.86
-                maximumChange = 0.34
-                interval = 2.8...6.2
-            case .burst:
-                probabilityMultiplier = 0.22
-                maximumChange = 0.08
-                interval = 1.2...2.8
-            case .braking:
-                probabilityMultiplier = 0.34
-                maximumChange = 0.10
-                interval = 1.5...3.2
-            case .turning:
-                return
-            }
-
-            if chance(movementProfile.depthChangeProbability * probabilityMultiplier) {
-                let proposedDepth = currentDepth + random(in: -maximumChange...maximumChange)
-                targetDepth = min(
-                    max(proposedDepth, movementProfile.depthRange.lowerBound),
-                    movementProfile.depthRange.upperBound
-                )
-
-                // 手前へ来る時は少し下、奥へ抜ける時は少し上へ向く傾向だけを加える。
-                let depthDelta = targetDepth - currentDepth
-                if movementProfile.roamingStyle != .bluefinTuna {
-                    desiredDirection = AquariumFishMotion.normalized(CGVector(
-                        dx: desiredDirection.dx,
-                        dy: desiredDirection.dy + depthDelta * 0.45
-                    ))
-                }
-            }
-            depthChangeTimeRemaining = random(in: interval)
+        private mutating func nextDepthDuration(in range: ClosedRange<TimeInterval>) -> TimeInterval {
+            range.lowerBound + Double(AquariumFishMotion.nextRandomUnit(state: &depthRandomState))
+                * (range.upperBound - range.lowerBound)
         }
 
         private mutating func steeringForCurrentBehavior(noise: CGVector) -> CGVector {
@@ -1146,7 +1144,6 @@ enum AquariumFishMotion {
 
         private mutating func advanceBluefinTuna(deltaTime dt: TimeInterval) {
             guard var cruise = bluefinCruise else { return }
-            updateDepth(deltaTime: dt)
             let height = max(cruise.aquariumSize.height, 1)
             let width = max(cruise.aquariumSize.width, 1)
             let depthSpeed = max(depthSpeedMultiplier, 0.001)
@@ -1290,6 +1287,7 @@ enum AquariumFishMotion {
         }
 
         mutating func updateStationKeepingGeometry(size: CGSize, fishSize: CGFloat) {
+            guard AquariumFishWorld.hasValidGeometry(size) else { return }
             stationKeeping?.updateGeometry(bounds: roamingBounds, size: size, fishSize: fishSize)
             if stationKeeping != nil { applyStationKeeping() }
             bluefinCruise?.aquariumSize = size
@@ -1360,9 +1358,13 @@ enum AquariumFishMotion {
 
         private mutating func randomUnit() -> CGFloat {
             // 魚個体が保持する軽量PRNG。毎フレーム生成せず、状態遷移時だけ進める。
-            randomState = randomState &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-            return CGFloat((randomState >> 40) & 0xFF_FFFF) / CGFloat(0xFF_FFFF)
+            AquariumFishMotion.nextRandomUnit(state: &randomState)
         }
+    }
+
+    private static func nextRandomUnit(state: inout UInt64) -> CGFloat {
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        return CGFloat((state >> 40) & 0xFF_FFFF) / CGFloat(0xFF_FFFF)
     }
 
     static func initialState(
@@ -1370,6 +1372,7 @@ enum AquariumFishMotion {
         profile: FishMovementProfile = .clownfish,
         speedVariationProfile: SpeedVariationProfile? = nil,
         roamingBounds: FishRoamingBounds = .legacy,
+        initialBounds: FishRoamingBounds? = nil,
         initialPosition spawnPosition: CGPoint? = nil,
         viewingSessionID: UUID? = nil,
         aquariumSize: CGSize = CGSize(width: 393, height: 852),
@@ -1380,7 +1383,7 @@ enum AquariumFishMotion {
         let baseSpeed = interpolated(profile.baseSpeedRange, byte: bytes[5])
         // 追加時の座標を優先。通常表示は個体IDと表示セッションから位置を決める。
         let initialPosition = spawnPosition.map { clampedPoint($0, bounds: roamingBounds) }
-            ?? initialPosition(for: id, bounds: roamingBounds, viewingSessionID: viewingSessionID)
+            ?? initialPosition(for: id, bounds: initialBounds ?? roamingBounds, viewingSessionID: viewingSessionID)
         let direction = normalized(CGVector(
             // 水平姿勢に限定しても、混合済みIDから左右の個体差を維持する。
             dx: profile.roamingStyle == .bluefinTuna ? (bytes[4].isMultiple(of: 2) ? 1 : -1) : cos(angle),
@@ -1394,13 +1397,6 @@ enum AquariumFishMotion {
         let wanderingRadiusX = interpolated(profile.wanderingRadiusX, byte: bytes[12])
         let wanderingRadiusY = interpolated(profile.wanderingRadiusY, byte: bytes[13])
         let initialDepth = interpolated(profile.depthRange, byte: bytes[14])
-        let initialTargetDepth = min(
-            max(
-                initialDepth + (CGFloat(bytes[15]) / 255 - 0.5) * 0.24,
-                profile.depthRange.lowerBound
-            ),
-            profile.depthRange.upperBound
-        )
         let initialBurstCooldown = profile.burstCooldownRange.lowerBound
             + Double(bytes[10]) / 255
                 * (profile.burstCooldownRange.upperBound - profile.burstCooldownRange.lowerBound)
@@ -1427,9 +1423,13 @@ enum AquariumFishMotion {
             roamingDestination: nil,
             roamingBounds: roamingBounds,
             currentDepth: initialDepth,
-            targetDepth: initialTargetDepth,
+            targetDepth: initialDepth,
             depthVelocity: 0,
-            depthChangeTimeRemaining: 1.5 + Double(bytes[10]) / 255 * 3.5,
+            depthChangeTimeRemaining: DepthTravel.holdDuration.lowerBound + Double(bytes[10]) / 255
+                * (DepthTravel.holdDuration.upperBound - DepthTravel.holdDuration.lowerBound),
+            depthTravel: nil,
+            // 同じ個体別PRNGを深度用の系列で利用し、XY行動の抽選や滞留状態と干渉させない。
+            depthRandomState: seed(from: bytes) ^ 0x4445_5054_4854_5241,
             movementProfile: profile,
             baseSpeed: baseSpeed,
             currentSpeed: initialBehavior == .hovering ? baseSpeed * 0.25 : baseSpeed,

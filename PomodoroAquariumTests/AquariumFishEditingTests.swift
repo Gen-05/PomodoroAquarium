@@ -7,11 +7,20 @@ import Testing
 
 @MainActor
 struct AquariumFishEditingTests {
-    private let expectedAquariumSizes: [FishSpecies: CGFloat] = [
+    private let previousAquariumSizes: [FishSpecies: CGFloat] = [
         .orca: 248.81657850551115, .dolphin: 186.9305134619731, .seaTurtle: 172.9161151055391, .mandarinfish: 40.21682564455835, .porcupinefish: 66.14872015449438, .lionfish: 89.30533781498258, .pennantCoralfish: 59.64139267605634, .orientalButterflyfish: 48.442711409395976, .clownfish: 31.2, .blueGreenChromis: 33.462, .yellowTang: 49.608,
         .blueTang: 54.912, .pufferfish: 77.22, .seahorse: 88.92,
         .jellyfish: 62.4, .manta: 211.70467251598145, .whaleShark: 468 * (1177.0 / 1001)
     ]
+
+    private let smallSpecies: Set<FishSpecies> = [.clownfish, .blueTang, .yellowTang, .blueGreenChromis,
+        .orientalButterflyfish, .pennantCoralfish, .pufferfish, .jellyfish, .seahorse, .mandarinfish, .lionfish, .porcupinefish]
+
+    private var expectedAquariumSizes: [FishSpecies: CGFloat] {
+        Dictionary(uniqueKeysWithValues: previousAquariumSizes.map { species, size in
+            (species, size * (smallSpecies.contains(species) ? 0.85 : 1))
+        })
+    }
 
     private func player() -> Player {
         Player(ownedFish: (0..<5).map { _ in PlayerFish(species: .clownfish) }, activeAquariumFishIDs: [], hasInitializedActiveAquariumFish: true)
@@ -22,7 +31,11 @@ struct AquariumFishEditingTests {
         let manta = AquariumFishSizing.displaySize(for: .manta, isFavorite: false)
         let whale = AquariumFishSizing.displaySize(for: .whaleShark, isFavorite: false)
         #expect(small < manta && manta < whale && whale == 468 * (1177.0 / 1001))
+        #expect(AquariumFishSizing.smallFishScale == 0.85)
+        #expect(smallSpecies.count == 12)
         for species in FishSpecies.allCases {
+            #expect(abs(AquariumFishSizing.referenceSize(for: species) - previousAquariumSizes[species]!) < 0.000001)
+            #expect(abs(AquariumFishSizing.displaySize(for: species, isFavorite: false) - expectedAquariumSizes[species]!) < 0.000001)
             #expect(AquariumFishSizing.displaySize(for: species, isFavorite: true) == AquariumFishSizing.displaySize(for: species, isFavorite: false))
         }
     }
@@ -115,10 +128,18 @@ struct AquariumFishEditingTests {
             UIColor.white.setFill()
             context.fill(CGRect(x: 60, y: 10, width: 25, height: 20))
         }
-        let path = AquariumFishHitTesting.path(image: image, canvasSize: 100, fishSize: 100)
-        #expect(path.contains(CGPoint(x: 70, y: 20)))
-        #expect(!path.contains(CGPoint(x: 70, y: 80)))
-        #expect(!path.contains(CGPoint(x: 20, y: 20)))
+        for depth: CGFloat in [0, 0.5, 1] {
+            let scale = FishMovementProfile.clownfish.depthScale(at: depth)
+            for flip: CGFloat in [-1, 1] {
+                let path = AquariumFishHitTesting.path(image: image, canvasSize: 100, fishSize: 100 * scale, horizontalScale: flip)
+                func transformed(_ point: CGPoint) -> CGPoint {
+                    CGPoint(x: 50 + (point.x - 50) * scale * flip, y: 50 + (point.y - 50) * scale)
+                }
+                #expect(path.contains(transformed(CGPoint(x: 70, y: 20))))
+                #expect(!path.contains(transformed(CGPoint(x: 70, y: 80))))
+                #expect(!path.contains(transformed(CGPoint(x: 20, y: 20))))
+            }
+        }
     }
 
     @Test func whaleHitShapeExcludesTransparentSpaceAndFollowsFlip() throws {

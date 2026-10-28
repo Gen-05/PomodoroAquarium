@@ -5,7 +5,7 @@ import Testing
 @MainActor
 struct AquariumFishDisplayPolicyTests {
     @Test func displayCountIsLimitedWithoutChangingOwnership() {
-        for ownedCount in [0, 1, 5, 10, 11, 30, 100] {
+        for ownedCount in [0, 1, 5, 10, 11, 19, 20, 21, 30, 100] {
             let ownedFish = makeFish(count: ownedCount)
             let selected = AquariumFishDisplayPolicy.displayedFish(
                 from: ownedFish,
@@ -20,7 +20,7 @@ struct AquariumFishDisplayPolicyTests {
         }
     }
 
-    @Test func favoriteOutsideFirstTenIsAlwaysIncluded() {
+    @Test func favoriteOutsideDisplayLimitIsAlwaysIncluded() {
         let ownedFish = makeFish(count: 30)
         let favoriteFish = ownedFish[25]
 
@@ -52,8 +52,8 @@ struct AquariumFishDisplayPolicyTests {
         #expect(player.ownedFish.count == 20)
     }
 
-    @Test func repeatedSelectionIsStableAndAppendedFishDoesNotDisplaceExistingTen() {
-        let ownedFish = makeFish(count: 10)
+    @Test func repeatedSelectionIsStableAndAppendedFishDoesNotDisplaceExistingTwenty() {
+        let ownedFish = makeFish(count: 20)
         let initialIDs = AquariumFishDisplayPolicy.displayedFish(
             from: ownedFish,
             favoriteFish: nil

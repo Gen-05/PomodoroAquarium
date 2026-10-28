@@ -4,7 +4,7 @@ import UIKit
 /// 現在フレームのalphaを小さなマスクへ変換。画像とともに保持してIDの再利用を防ぐ。
 @MainActor
 enum AquariumFishHitTesting {
-    private static var cache: [ObjectIdentifier: (CGImage, [CGRect])] = [:]
+    private static var cache: [ObjectIdentifier: (image: CGImage, spans: [CGRect])] = [:]
     private static let resolution = 96
 
     static func path(image: UIImage?, canvasSize: CGFloat, fishSize: CGFloat,
@@ -30,7 +30,7 @@ enum AquariumFishHitTesting {
 
     private static func spans(_ image: CGImage) -> [CGRect] {
         let key = ObjectIdentifier(image)
-        if let cached = cache[key] { return cached.1 }
+        if let cached = cache[key] { return cached.spans }
         var rgba = [UInt8](repeating: 0, count: resolution * resolution * 4)
         rgba.withUnsafeMutableBytes { bytes in
             guard let context = CGContext(data: bytes.baseAddress, width: resolution, height: resolution,

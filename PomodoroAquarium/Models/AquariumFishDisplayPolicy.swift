@@ -1,20 +1,24 @@
 import Foundation
 
 enum AquariumDisplayLimits {
-    static let maxFishCount = 10
+    static let maxFishCount = 20
+    // 配置未初期化の旧データだけ、従来の初期表示数を維持する。
+    static let initialFishCount = 10
 }
 
 enum AquariumFishDisplayPolicy {
-    /// 将来、保存済みの「水槽へ出している魚」をcandidatesへ渡せるよう、所持配列とは分離して選ぶ。
+    /// 所持配列とは分離して選ぶ。旧データの初期化時だけ従来の件数を指定する。
     static func displayedFish(
         from candidates: [PlayerFish],
-        favoriteFish: PlayerFish?
+        favoriteFish: PlayerFish?,
+        maximumCount: Int = AquariumDisplayLimits.maxFishCount
     ) -> [PlayerFish] {
-        guard !candidates.isEmpty || favoriteFish != nil else { return [] }
+        let limit = min(maximumCount, AquariumDisplayLimits.maxFishCount)
+        guard limit > 0, !candidates.isEmpty || favoriteFish != nil else { return [] }
 
         var result: [PlayerFish] = []
         result.reserveCapacity(min(
-            AquariumDisplayLimits.maxFishCount,
+            limit,
             candidates.count + (favoriteFish == nil ? 0 : 1)
         ))
 
@@ -23,7 +27,7 @@ enum AquariumFishDisplayPolicy {
         }
 
         for fish in candidates where fish.id != favoriteFish?.id {
-            guard result.count < AquariumDisplayLimits.maxFishCount else { break }
+            guard result.count < limit else { break }
             result.append(fish)
         }
 
@@ -39,7 +43,8 @@ enum AquariumFishSelection {
 
         player.activeAquariumFishIDs = AquariumFishDisplayPolicy.displayedFish(
             from: player.ownedFish,
-            favoriteFish: player.favoriteFish
+            favoriteFish: player.favoriteFish,
+            maximumCount: AquariumDisplayLimits.initialFishCount
         ).map(\.id)
         player.hasInitializedActiveAquariumFish = true
         return true
@@ -50,7 +55,8 @@ enum AquariumFishSelection {
             // onAppearで保存する前の初回描画も、従来どおり空にしない。
             return AquariumFishDisplayPolicy.displayedFish(
                 from: player.ownedFish,
-                favoriteFish: player.favoriteFish
+                favoriteFish: player.favoriteFish,
+                maximumCount: AquariumDisplayLimits.initialFishCount
             )
         }
 

@@ -131,13 +131,18 @@ struct LionfishTests {
     @Test func actualSwimmingViewUsesTheUncappedSize() async throws {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let scene = try #require(scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)
-        let expected: CGFloat = 89.30533781498258
-        for size in [CGSize(width: 320, height: 568), CGSize(width: 393, height: 852)] {
+        let maximumSize: CGFloat = 89.30533781498258 * 0.85
+        for (size, depth) in [(CGSize(width: 320, height: 568), CGFloat(0)),
+                              (CGSize(width: 393, height: 852), CGFloat(0.5)),
+                              (CGSize(width: 393, height: 852), CGFloat(1))] {
             let id = UUID(), session = AquariumFishViewingSession()
             let profile = AquariumFishMotion.movementProfile(for: .lionfish)
-            let bounds = profile.roamingStyle.bounds(in: size, fishSize: expected)
+            let expected = maximumSize * profile.depthScale(at: depth)
+            let bounds = profile.roamingStyle.bounds(in: size, fishSize: maximumSize)
             var motion = AquariumFishMotion.initialState(for: id, profile: profile,
                 roamingBounds: bounds, initialPosition: CGPoint(x: 0.5, y: 0.5))
+            motion.currentDepth = depth
+            motion.targetDepth = depth
             // 揺れ・旋回を固定し、通常のSwimmingFishViewの描画枠そのものを測る。
             motion.facingDirection = .right
             motion.swimPhase = 0
@@ -163,7 +168,7 @@ struct LionfishTests {
             let frame = try #require(rendered)
             #expect(abs(frame.width - expected) < 0.5)
             #expect(abs(frame.height - expected) < 0.5)
-            #expect(abs(frame.width / 94.00561875261324 - 0.95) < 0.01)
+            #expect(abs(frame.width / 94.00561875261324 - 0.95 * 0.85 * profile.depthScale(at: depth)) < 0.01)
         }
     }
 
