@@ -85,7 +85,7 @@ struct AquariumDeveloperDecorationTests {
             #expect(UIImage(named: name)?.size == CGSize(width: 512, height: 768))
         }
         #expect(kind.isAvailable)
-        #expect(!ShopCatalog.items.contains { $0.content == .decoration(kind) })
+        #expect(ShopCatalog.items.contains { $0.content == .decoration(kind) && $0.price == kind.plannedPrice })
     }
 
     @Test func seaweedBDefinitionAndAssetsReuseSeaweedAPlayback() {
@@ -120,7 +120,7 @@ struct AquariumDeveloperDecorationTests {
             #expect(Set(cycle).count == 8)
         }
         #expect(kind.isAvailable)
-        #expect(!ShopCatalog.items.contains { $0.content == .decoration(kind) })
+        #expect(ShopCatalog.items.contains { $0.content == .decoration(kind) && $0.price == kind.plannedPrice })
     }
 
     @Test func seaweedCDefinitionAssetsAndPlaybackPreserveAspectRatio() {
@@ -158,7 +158,7 @@ struct AquariumDeveloperDecorationTests {
             #expect(cycle == (0...8).map { kind.animationFrameNames[($0 + offset) % 8] })
         }
         #expect(kind.isAvailable)
-        #expect(!ShopCatalog.items.contains { $0.content == .decoration(kind) })
+        #expect(ShopCatalog.items.contains { $0.content == .decoration(kind) && $0.price == kind.plannedPrice })
     }
 
     @Test(arguments: [AquariumDecorationKind.mediumRockA, .mediumRockB, .mediumRockC])
@@ -186,7 +186,7 @@ struct AquariumDeveloperDecorationTests {
         #expect(AquariumDecorationKind.mediumRockC.displaySize.height > AquariumDecorationKind.mediumRockB.displaySize.height)
         #expect(AquariumDecorationKind.mediumRockB.displaySize.height > AquariumDecorationKind.mediumRockA.displaySize.height)
         #expect(kind.isAvailable)
-        #expect(!ShopCatalog.items.contains { $0.content == .decoration(kind) })
+        #expect(ShopCatalog.items.contains { $0.content == .decoration(kind) && $0.price == kind.plannedPrice })
     }
 
     @Test(arguments: [AquariumDecorationKind.smallRockA, .smallRockB, .smallRockC])
@@ -214,7 +214,7 @@ struct AquariumDeveloperDecorationTests {
             #expect(image.size == expected.2)
         }
         #expect(kind.isAvailable)
-        #expect(!ShopCatalog.items.contains { $0.content == .decoration(kind) })
+        #expect(ShopCatalog.items.contains { $0.content == .decoration(kind) && $0.price == kind.plannedPrice })
     }
 
     @Test(arguments: [AquariumDecorationKind.smallRockA, .smallRockB, .smallRockC, .mediumRockA, .mediumRockB, .mediumRockC])

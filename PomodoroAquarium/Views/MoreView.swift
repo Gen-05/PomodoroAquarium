@@ -1,6 +1,15 @@
 import SwiftUI
+#if DEBUG
+import SwiftData
+#endif
 
 struct MoreView: View {
+#if DEBUG
+    @Environment(\.modelContext) private var modelContext
+    @Query private var players: [Player]
+    @State private var coinGrantMessage: String?
+#endif
+
     var body: some View {
         List {
             NavigationLink {
@@ -32,15 +41,49 @@ struct MoreView: View {
                     Label("Reward Preview", systemImage: "sparkles")
                 }
                 .accessibilityIdentifier("more.rewardPreview")
+
+                Button("テスト用コインを100,000枚追加") {
+                    addTestCoins()
+                }
+                .disabled(players.first == nil || coinGrantMessage != nil)
+                .accessibilityIdentifier("more.addTestCoins")
             }
 #endif
         }
         .navigationTitle("その他")
+#if DEBUG
+        .alert("テスト用コイン", isPresented: Binding(
+            get: { coinGrantMessage != nil },
+            set: { if !$0 { coinGrantMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { coinGrantMessage = nil }
+        } message: {
+            Text(coinGrantMessage ?? "")
+        }
+#endif
     }
+
+#if DEBUG
+    private func addTestCoins() {
+        guard coinGrantMessage == nil, let player = players.first else { return }
+        let previousCoins = player.coins
+        do {
+            let balance = try CurrencyService.addCoins(100_000, to: player, in: modelContext)
+            coinGrantMessage = "テスト用コインを追加しました。現在の残高：\(balance)コイン"
+        } catch {
+            // 保存失敗時の加算だけを戻し、他の未保存データには触れない。
+            player.coins = previousCoins
+            coinGrantMessage = "コインを追加できませんでした。"
+        }
+    }
+#endif
 }
 
 #Preview {
     NavigationStack {
         MoreView()
     }
+#if DEBUG
+    .modelContainer(for: [Player.self, PlayerFish.self], inMemory: true)
+#endif
 }

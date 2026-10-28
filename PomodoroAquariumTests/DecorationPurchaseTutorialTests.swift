@@ -35,9 +35,10 @@ struct DecorationPurchaseTutorialTests {
     @Test func onlySuccessfulPurchaseStartsAndEveryOperationNeedsItsRealEvent() throws {
         let store = try container(), settings = defaults(), player = Player(coins: 100)
         store.mainContext.insert(player)
+        let item = try #require(ShopCatalog.items.first { $0.content == .decoration(.seaweedA) })
         let tutorial = DecorationPurchaseTutorial(defaults: settings)
-        let bought = try tutorial.purchase(product(), player: player, in: store.mainContext)
-        #expect(tutorial.phase == .waitingForFeedback && player.coins == 90 && !bought.isPlaced)
+        let bought = try tutorial.purchase(item, player: player, in: store.mainContext)
+        #expect(tutorial.phase == .waitingForFeedback && player.coins == 70 && !bought.isPlaced)
         tutorial.requestEditor()
         #expect(tutorial.phase == .waitingForFeedback)
         tutorial.purchaseFeedbackDidDismiss(); tutorial.requestEditor()
@@ -73,25 +74,26 @@ struct DecorationPurchaseTutorialTests {
         tutorial.didEndEditing(saved: true)
         #expect(tutorial.step == .completed)
         tutorial.next(); #expect(tutorial.phase == .idle)
-        #expect(player.coins == 90)
+        #expect(player.coins == 70)
         #expect(try store.mainContext.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 1)
         #expect(try store.mainContext.fetchCount(FetchDescriptor<RewardHistoryEntry>()) == 0)
         let reopened = DecorationPurchaseTutorial(defaults: settings)
-        try reopened.purchase(product(), player: player, in: store.mainContext)
+        try reopened.purchase(item, player: player, in: store.mainContext)
         reopened.purchaseFeedbackDidDismiss()
-        #expect(reopened.phase == .idle && player.coins == 80)
+        #expect(reopened.phase == .idle && player.coins == 40)
     }
 
     @Test func failureConditionsAndLoadingOrDebugGrantsNeverStartTutorial() throws {
         let store = try container(), settings = defaults()
         let player = Player(coins: 0)
         store.mainContext.insert(player)
+        let item = try #require(ShopCatalog.items.first { $0.content == .decoration(.seaweedA) })
         let tutorial = DecorationPurchaseTutorial(defaults: settings)
         #expect(throws: ShopPurchaseError.insufficientCoins) {
-            try tutorial.purchase(product(), player: player, in: store.mainContext)
+            try tutorial.purchase(item, player: player, in: store.mainContext)
         }
         #expect(throws: ShopPurchaseError.playerUnavailable) {
-            try tutorial.purchase(product(), player: nil, in: store.mainContext)
+            try tutorial.purchase(item, player: nil, in: store.mainContext)
         }
         let background = ShopCatalog.items.first { $0.category == .background }!
         #expect(throws: ShopPurchaseError.unsupportedProduct) {
@@ -108,6 +110,24 @@ struct DecorationPurchaseTutorialTests {
         let reopened = DecorationPurchaseTutorial(defaults: settings)
         #expect(reopened.phase == .idle)
         #expect(player.coins == 0)
+    }
+
+    @Test func soldOutShipwreckNeverStartsPurchaseTutorial() throws {
+        let store = try container(), settings = defaults()
+        let player = Player(coins: 2_500)
+        store.mainContext.insert(player)
+        let existing = try AquariumDecorationService.addPlacement(kind: .shipwreck, in: store.mainContext)
+        let ship = try #require(ShopCatalog.items.first { $0.content == .decoration(.shipwreck) })
+        let tutorial = DecorationPurchaseTutorial(defaults: settings)
+        tutorial.purchaseFeedbackWillPresent()
+        #expect(throws: ShopPurchaseError.soldOut) {
+            try tutorial.purchase(ship, player: player, in: store.mainContext)
+        }
+        tutorial.purchaseFeedbackDidDismiss()
+        #expect(tutorial.phase == .idle)
+        #expect(!settings.bool(forKey: DecorationPurchaseTutorial.storageKey))
+        #expect(player.coins == 2_500 && !existing.isPlaced)
+        #expect(try store.mainContext.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 1)
     }
 
     @Test func laterSkipAndCompletionSuppressAutomaticPresentationButHintsRemainAvailable() throws {

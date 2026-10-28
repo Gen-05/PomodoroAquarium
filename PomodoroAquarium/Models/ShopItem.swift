@@ -28,26 +28,23 @@ struct ShopItem: Identifiable, Hashable {
 }
 
 enum ShopCatalog {
-    // 仮価格はここだけを変更すれば、表示・購入判定の両方へ反映される。
-    static let items: [ShopItem] = [
-        ShopItem(
-            id: "background-aquarium",
-            name: AquariumBackgroundTheme.aquarium.displayName,
-            price: 200,
-            category: .background,
-            content: .background(.aquarium)
-        ),
+    // 正式装飾は既存の定義順・表示名・価格を共有する。IDは並び順に依存しない。
+    static let items: [ShopItem] = AquariumDecorationKind.availableKinds.compactMap { kind -> ShopItem? in
+        guard let price = kind.plannedPrice else { return nil }
+        return ShopItem(id: "decoration-\(kind.rawValue)", name: kind.displayName, price: price,
+                        category: .decoration, content: .decoration(kind))
+    } + [
         ShopItem(
             id: "background-deep-sea",
             name: AquariumBackgroundTheme.deepSea.displayName,
-            price: 300,
+            price: 3_000,
             category: .background,
             content: .background(.deepSea)
         ),
         ShopItem(
             id: "background-tropical",
             name: AquariumBackgroundTheme.tropical.displayName,
-            price: 300,
+            price: 3_000,
             category: .background,
             content: .background(.tropical)
         )

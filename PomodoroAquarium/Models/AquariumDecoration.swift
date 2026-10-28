@@ -141,7 +141,7 @@ extension AquariumDecorationKind {
         }
     }
 
-    /// 装飾のstable IDはkindのrawValue。価格は将来用の定義のみで購入処理には未接続。
+    /// 装飾のstable IDはkindのrawValue。
     var stars: Int? {
         switch self {
         case .treasureChest, .shipwreck: 3
@@ -150,6 +150,7 @@ extension AquariumDecorationKind {
         default: (self == .seaweedA || self == .seaweedB || self == .seaweedC || usesBackgroundVariants) ? 1 : nil
         }
     }
+    /// ショップの商品表示と購入に共通利用する単品価格。
     var plannedPrice: Int? {
         switch self {
         case .shipwreck: 1000

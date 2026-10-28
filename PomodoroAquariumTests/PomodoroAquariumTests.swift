@@ -8,6 +8,7 @@
 import Foundation
 import SwiftData
 import SwiftUI
+import UIKit
 import Testing
 @testable import PomodoroAquarium
 
@@ -4472,59 +4473,147 @@ struct PomodoroAquariumTests {
         #expect(streakCalendar.component(.day, from: next) == 1)
     }
 
-    @Test func shopCatalogContainsNoRetiredPlaceholderProducts() {
+    @Test @MainActor func shopCatalogContainsNoRetiredPlaceholderProducts() throws {
         #expect(!ShopCatalog.items.contains { $0.id == "decoration-seaweed" || $0.id == "decoration-rock" })
-        #expect(ShopCatalog.items(in: .decoration).isEmpty)
-        #expect(ShopCatalog.items(in: .background).count == AquariumBackgroundTheme.allCases.count)
+        let groups: [([AquariumDecorationKind], Int)] = [
+            ([.seaweedA, .seaweedB, .seaweedC], 30),
+            ([.smallRockA, .smallRockB, .smallRockC], 30),
+            ([.mediumRockA, .mediumRockB, .mediumRockC], 80),
+            ([.coralAPink, .coralAOrange, .coralAPurple,
+              .coralBPink, .coralBOrange, .coralBPurple,
+              .coralCPink, .coralCOrange, .coralCPurple], 130),
+            ([.treasureChest], 500), ([.shipwreck], 1_000)
+        ]
+        let kinds = groups.flatMap { $0.0 }
+        let decorations = ShopCatalog.items(in: .decoration)
+        #expect(decorations.count == 20)
+        #expect(Set(decorations.map(\.id)).count == 20)
+        #expect(decorations.map(\.content) == kinds.map { .decoration($0) })
+        #expect(decorations.map(\.id) == kinds.map { "decoration-\($0.rawValue)" })
+        #expect(decorations.map(\.name) == kinds.map(\.displayName))
+        #expect(decorations.map(\.price) == groups.flatMap { Array(repeating: $0.1, count: $0.0.count) })
+        for kind in kinds {
+            #expect(kind.isAvailable && !kind.isLegacyPlaceholder && kind != .unsupported)
+            let imageName = try #require(kind.assetImageName)
+            #expect(UIImage(named: imageName) != nil)
+        }
+        let backgrounds = ShopCatalog.items(in: .background)
+        #expect(backgrounds.map(\.id) == ["background-deep-sea", "background-tropical"])
+        #expect(backgrounds.map(\.content) == [.background(.deepSea), .background(.tropical)])
+        #expect(backgrounds.allSatisfy { $0.price == 3_000 })
     }
 
     @Test @MainActor func affordableDecorationPurchaseConsumesCoinsAndAddsStoredPlacement() throws {
         let container = try makeShopContainer()
         let player = Player(coins: 250)
         container.mainContext.insert(player)
-        let seaweed = ShopItem(id: "test-seaweed-a", name: "海藻A", price: 100, category: .decoration, content: .decoration(.seaweedA))
+        let seaweed = try #require(ShopCatalog.items.first { $0.content == .decoration(.seaweedA) })
 
-        let placement = try ShopService.purchaseDecoration(
-            seaweed,
-            for: player,
-            in: container.mainContext
-        )
+        let placement = try ShopService.purchaseDecoration(seaweed, for: player, in: container.mainContext)
 
-        #expect(CurrencyService.balance(of: player) == 150)
+        #expect(CurrencyService.balance(of: player) == 220)
         #expect(placement.kind == .seaweedA)
         #expect(!placement.isPlaced)
         #expect(try container.mainContext.fetch(FetchDescriptor<AquariumDecorationPlacement>()).count == 1)
     }
 
     @Test @MainActor func sameDecorationCanBePurchasedMultipleTimesAsSeparateItems() throws {
+        for kind in [AquariumDecorationKind.seaweedA, .smallRockA, .mediumRockA, .coralAPink, .treasureChest] {
+            let container = try makeShopContainer()
+            let player = Player(coins: 2_500)
+            container.mainContext.insert(player)
+            let item = try #require(ShopCatalog.items.first { $0.content == .decoration(kind) })
+
+            let first = try ShopService.purchaseDecoration(item, for: player, in: container.mainContext)
+            let second = try ShopService.purchaseDecoration(item, for: player, in: container.mainContext)
+            let placements = try container.mainContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+
+            #expect(first.decorationID != second.decorationID)
+            #expect(placements.count == 2)
+            #expect(placements.allSatisfy { $0.kind == kind && !$0.isPlaced })
+            #expect(!ShopService.isSoldOut(kind, among: placements))
+            #expect(CurrencyService.balance(of: player) == 2_500 - item.price * 2)
+        }
+    }
+
+    @Test @MainActor func unownedShipwreckCanBePurchasedOnceAndImmediatelyBecomesSoldOut() throws {
         let container = try makeShopContainer()
-        let player = Player(coins: 300)
+        let player = Player(coins: 2_500)
         container.mainContext.insert(player)
-        let seaweed = ShopItem(id: "test-seaweed-a", name: "海藻A", price: 100, category: .decoration, content: .decoration(.seaweedA))
+        let ship = try #require(ShopCatalog.items.first { $0.content == .decoration(.shipwreck) })
+        #expect(!ShopService.isSoldOut(.shipwreck, among: []))
 
-        let first = try ShopService.purchaseDecoration(seaweed, for: player, in: container.mainContext)
-        let second = try ShopService.purchaseDecoration(seaweed, for: player, in: container.mainContext)
-        let placements = try container.mainContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+        let bought = try ShopService.purchaseDecoration(ship, for: player, in: container.mainContext)
+        #expect(bought.kind == .shipwreck && !bought.isPlaced)
+        #expect(player.coins == 1_500)
+        #expect(throws: ShopPurchaseError.soldOut) {
+            try ShopService.purchaseDecoration(ship, for: player, in: container.mainContext)
+        }
+        let reloaded = ModelContext(container)
+        let placements = try reloaded.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+        #expect(placements.map(\.decorationID) == [bought.decorationID])
+        #expect(ShopService.isSoldOut(.shipwreck, among: placements))
+        let savedPlayer = try #require(reloaded.fetch(FetchDescriptor<Player>()).first)
+        #expect(savedPlayer.coins == 1_500)
+    }
 
-        #expect(first.decorationID != second.decorationID)
-        #expect(placements.count == 2)
-        #expect(placements.allSatisfy { $0.kind == .seaweedA && !$0.isPlaced })
-        #expect(CurrencyService.balance(of: player) == 100)
+    @Test(arguments: [true, false]) @MainActor
+    func ownedShipwreckPurchaseIsRejectedWithoutChangingCoinsOrInventory(isPlaced: Bool) throws {
+        let container = try makeShopContainer()
+        let player = Player(coins: 2_500)
+        container.mainContext.insert(player)
+        let ship = try #require(ShopCatalog.items.first { $0.content == .decoration(.shipwreck) })
+        for count in 1...2 { // 既存の複数所持も削除・統合せず、そのまま購入だけを拒否する。
+            _ = try AquariumDecorationService.addPlacement(kind: .shipwreck, isPlaced: isPlaced, in: container.mainContext)
+            let before = try container.mainContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+            #expect(ShopService.isSoldOut(.shipwreck, among: before))
+            #expect(throws: ShopPurchaseError.soldOut) {
+                try ShopService.purchaseDecoration(ship, for: player, in: container.mainContext)
+            }
+            let after = try container.mainContext.fetch(FetchDescriptor<AquariumDecorationPlacement>())
+            #expect(after.count == count)
+            #expect(Set(after.map(\.decorationID)) == Set(before.map(\.decorationID)))
+            #expect(after.allSatisfy { $0.isPlaced == isPlaced })
+            #expect(player.coins == 2_500)
+            for placement in after { placement.isPlaced = false }
+            #expect(ShopService.isSoldOut(.shipwreck, among: after))
+            for placement in after { placement.isPlaced = isPlaced }
+        }
     }
 
     @Test @MainActor func insufficientCoinsDoNotPurchaseDecorationOrChangeBalance() throws {
         let container = try makeShopContainer()
-        let player = Player(coins: 99)
+        let player = Player(coins: 499)
         container.mainContext.insert(player)
-        let seaweed = ShopItem(id: "test-seaweed-a", name: "海藻A", price: 100, category: .decoration, content: .decoration(.seaweedA))
+        let chest = try #require(ShopCatalog.items.first { $0.content == .decoration(.treasureChest) })
 
-        #expect(!CurrencyService.canAfford(seaweed.price, player: player))
+        #expect(!CurrencyService.canAfford(chest.price, player: player))
         #expect(throws: ShopPurchaseError.insufficientCoins) {
-            try ShopService.purchaseDecoration(seaweed, for: player, in: container.mainContext)
+            try ShopService.purchaseDecoration(chest, for: player, in: container.mainContext)
         }
-        #expect(CurrencyService.balance(of: player) == 99)
+        #expect(CurrencyService.balance(of: player) == 499)
         #expect(try container.mainContext.fetch(FetchDescriptor<AquariumDecorationPlacement>()).isEmpty)
     }
+
+#if DEBUG
+    @Test @MainActor func testCoinAdditionPreservesBalanceAndNormalDecorationPrice() throws {
+        let container = try makeShopContainer()
+        let player = Player(coins: 250)
+        container.mainContext.insert(player)
+        let seaweed = try #require(ShopCatalog.items.first { $0.content == .decoration(.seaweedA) })
+
+        let balance = try CurrencyService.addCoins(100_000, to: player, in: container.mainContext)
+        #expect(balance == 100_250)
+        let placement = try ShopService.purchaseDecoration(seaweed, for: player, in: container.mainContext)
+        #expect(seaweed.price == 30 && player.coins == 100_220)
+        #expect(!placement.isPlaced)
+
+        let reloaded = ModelContext(container)
+        let savedPlayer = try #require(reloaded.fetch(FetchDescriptor<Player>()).first)
+        #expect(savedPlayer.coins == 100_220)
+        #expect(try reloaded.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 1)
+    }
+#endif
 
     @Test @MainActor func backgroundProductIsDisplayedButNotPurchasedYet() throws {
         let container = try makeShopContainer()

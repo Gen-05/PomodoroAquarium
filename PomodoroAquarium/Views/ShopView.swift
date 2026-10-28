@@ -6,6 +6,7 @@ struct ShopView: View {
     var products: [ShopItem] = ShopCatalog.items
     @Environment(\.modelContext) private var modelContext
     @Query private var players: [Player]
+    @Query private var ownedDecorations: [AquariumDecorationPlacement]
     @State private var selectedCategory: ShopCategory = .decoration
     @State private var feedback: PurchaseFeedback?
 
@@ -76,10 +77,18 @@ struct ShopView: View {
     private func productCard(_ item: ShopItem) -> some View {
         let canAfford = CurrencyService.canAfford(item.price, player: player)
         let isPurchasable = item.category == .decoration
+        let isSoldOut: Bool
+        if case let .decoration(kind) = item.content {
+            isSoldOut = ShopService.isSoldOut(kind, among: ownedDecorations)
+        } else {
+            isSoldOut = false
+        }
 
         return VStack(spacing: 10) {
             productPreview(item)
                 .frame(height: 92)
+                // scaledToFillの画像領域を操作対象にせず、背後のPickerやスクロールへ通す。
+                .allowsHitTesting(false)
 
             Text(item.name)
                 .font(.headline)
@@ -91,11 +100,11 @@ struct ShopView: View {
             Button {
                 purchase(item)
             } label: {
-                Text(isPurchasable ? (canAfford ? "購入する" : "コイン不足") : "準備中")
+                Text(isSoldOut ? "売り切れ" : (isPurchasable ? (canAfford ? "購入する" : "コイン不足") : "準備中"))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!isPurchasable || player == nil)
+            .disabled(isSoldOut || !isPurchasable || player == nil || feedback != nil)
             .accessibilityIdentifier("purchase-\(item.id)")
         }
         .padding(12)
@@ -103,6 +112,7 @@ struct ShopView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 18)
                 .stroke(canAfford ? Color.cyan.opacity(0.45) : Color.secondary.opacity(0.2))
+                .allowsHitTesting(false)
         }
     }
 
@@ -110,21 +120,23 @@ struct ShopView: View {
     private func productPreview(_ item: ShopItem) -> some View {
         switch item.content {
         case let .decoration(kind):
-            AquariumDecorationView(decoration: AquariumDecoration(
-                id: "shop-preview-\(kind.rawValue)",
-                kind: kind,
-                relativeX: 0.5,
-                relativeY: 0.5,
-                scale: 1
-            ))
-            .scaleEffect(0.65)
+            if kind.isAvailable, let imageName = kind.assetImageName {
+                Image(decorative: imageName)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         case let .background(theme):
-            LinearGradient(
-                colors: theme.fallbackColors,
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            GeometryReader { geometry in
+                // 完成背景の静止画だけを使い、海底の違いが見える下寄せで切り取る。
+                Image(decorative: theme.imageName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .bottom)
+            }
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            .contentShape(RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -140,6 +152,8 @@ struct ShopView: View {
             feedback = PurchaseFeedback(message: "\(item.name)を購入しました")
         } catch ShopPurchaseError.insufficientCoins {
             feedback = PurchaseFeedback(message: "コインが足りません")
+        } catch ShopPurchaseError.soldOut {
+            feedback = PurchaseFeedback(message: "沈没船は売り切れです")
         } catch {
             feedback = PurchaseFeedback(message: "購入できませんでした")
         }
