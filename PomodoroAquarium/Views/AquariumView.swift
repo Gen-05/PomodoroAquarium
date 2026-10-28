@@ -43,6 +43,8 @@ struct AquariumView: View {
     var decorationRestoreRequestID: String?
     var onDecorationRestoreRequestHandled: () -> Void = {}
     var decorationDragPreview: AquariumDecoration?
+    /// 商品の試し置き時だけ、その個体を選択・操作可能にする。通常編集のメニューは出さない。
+    var decorationTrialID: String?
 
     @Environment(\.modelContext) private var modelContext
     @Query private var officialDecorationPlacements: [AquariumDecorationPlacement]
@@ -93,7 +95,8 @@ struct AquariumView: View {
                 if isEditing { decorationInteractionLayer(in: geometry.size) }
                 else { treasureInteractionLayer(in: geometry.size) }
                 fishLayer(in: geometry.size)
-                if isEditing { decorationOperationMenu(in: geometry.size) }
+                    .allowsHitTesting(decorationTrialID == nil)
+                if isEditing && decorationTrialID == nil { decorationOperationMenu(in: geometry.size) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
@@ -112,6 +115,10 @@ struct AquariumView: View {
         .ignoresSafeArea()
         .onAppear {
             updateDisplayedFish()
+            if let decorationTrialID,
+               let placement = decorationPlacements.first(where: { $0.decorationID == decorationTrialID }) {
+                beginEditing(placement)
+            }
         }
         .task {
             await initializePersistentAquariumDataAfterAppearance()
@@ -235,7 +242,14 @@ struct AquariumView: View {
     private func shipwreckLayer(in size: CGSize) -> some View {
         ForEach(Array(decorationPlacements.filter { $0.isPlaced && $0.kind == .shipwreck }
             .sorted { $0.decorationID < $1.decorationID }.prefix(1)), id: \.decorationID) { placement in
-            AquariumShipwreckView(side: placement.facingDirection, theme: backgroundTheme, size: size)
+            Group {
+                if decorationTrialID == placement.decorationID {
+                    AquariumShipwreckView(side: placement.facingDirection, theme: backgroundTheme, size: size)
+                        .modifier(AquariumSelectionGlow(isSelected: true))
+                } else {
+                    AquariumShipwreckView(side: placement.facingDirection, theme: backgroundTheme, size: size)
+                }
+            }
                 .overlay {
                     let rect = AquariumShipwreckPresentation.settings(for: backgroundTheme).bounds(side: placement.facingDirection, size: size)
                     Color.clear.frame(width: rect.width, height: rect.height)
@@ -301,7 +315,9 @@ struct AquariumView: View {
     }
 
     private func decoration(at point: CGPoint, in size: CGSize) -> AquariumDecorationPlacement? {
-        let candidates = decorationPlacements.filter { $0.isPlaced && $0.kind != .shipwreck }.map { placement in
+        let candidates = decorationPlacements.filter {
+            $0.isPlaced && $0.kind != .shipwreck && (decorationTrialID == nil || $0.decorationID == decorationTrialID)
+        }.map { placement in
             let root = position(for: placement)
             return AquariumDecoration(id: placement.decorationID, kind: placement.kind,
                 relativeX: root.x, relativeY: root.y, scale: CGFloat(placement.scale), facingDirection: placement.facingDirection,

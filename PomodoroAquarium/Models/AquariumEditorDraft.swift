@@ -136,13 +136,15 @@ struct AquariumEditorDraftStore {
 final class AquariumEditorWorkingState {
     let player: Player
     private(set) var placements: [AquariumDecorationPlacement]
-    init(official: Player, placements: [AquariumDecorationPlacement], draft: AquariumEditorDraft) {
+    init(official: Player, placements: [AquariumDecorationPlacement], draft: AquariumEditorDraft? = nil) {
         // Every model is detached; no relationship points into the official context.
-        player = Player(ownedFish: official.ownedFish.map { PlayerFish(id: $0.id, species: $0.species) },
-                        activeAquariumFishIDs: draft.fishIDs.filter { id in official.ownedFish.contains { $0.id == id } },
+        // 下書きを渡さない試し置きでは、正式な表示対象だけをコピーし、保存値をそのまま使う。
+        let fish = draft == nil ? official.activeAquariumFish : official.ownedFish
+        player = Player(ownedFish: fish.map { PlayerFish(id: $0.id, species: $0.species) },
+                        activeAquariumFishIDs: (draft?.fishIDs ?? fish.map(\.id)).filter { id in fish.contains { $0.id == id } },
                         hasInitializedActiveAquariumFish: true,
                         coreTutorialRewardFishID: official.coreTutorialRewardFishID)
-        let states = Dictionary(uniqueKeysWithValues: draft.placements.map { ($0.id, $0) })
+        let states = Dictionary(uniqueKeysWithValues: (draft?.placements ?? []).map { ($0.id, $0) })
         self.placements = placements.filter { !$0.kind.isLegacyPlaceholder }.map { original in
             let state = states[original.decorationID]
             let copy = AquariumDecorationPlacement(decorationID: original.decorationID, kind: original.kind,

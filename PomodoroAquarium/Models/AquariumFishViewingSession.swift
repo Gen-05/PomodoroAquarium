@@ -45,6 +45,14 @@ final class AquariumFishViewingSession: ObservableObject {
 
     func snapshot(for fishID: UUID) -> Snapshot? { snapshots[fishID] }
 
+    /// 試し置き用の値コピー。更新権・コマンド・編集セッションは共有せず、本番へ戻さない。
+    func independentPreview(for fishIDs: Set<UUID>) -> AquariumFishViewingSession {
+        let preview = AquariumFishViewingSession(id: id)
+        preview.snapshots = snapshots.filter { fishIDs.contains($0.key) }
+        preview.placedFishIDs = fishIDs
+        return preview
+    }
+
     /// 遷移先だけに更新権を渡す。古いViewのtickやonDisappearは新しい状態を書き戻せない。
     func claim(_ fishID: UUID, owner: UUID, initial: Snapshot, bounds: FishRoamingBounds) -> Snapshot {
         var snapshot = snapshots[fishID] ?? initial

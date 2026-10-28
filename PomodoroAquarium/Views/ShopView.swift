@@ -9,6 +9,10 @@ struct ShopView: View {
     @Query private var ownedDecorations: [AquariumDecorationPlacement]
     @State private var selectedCategory: ShopCategory = .decoration
     @State private var purchaseFlow = ShopPurchaseFlow()
+    @State private var decorationPreview: ShopDecorationPreviewSession?
+    @State private var showsPreviewError = false
+    @Environment(\.aquariumFishViewingSession) private var fishViewingSession
+    @AppStorage(AquariumThemeStore.storageKey) private var backgroundThemeRawValue = AquariumBackgroundTheme.aquarium.rawValue
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -164,6 +168,18 @@ struct ShopView: View {
                     } else if !canAfford {
                         Text("コインが足りません").foregroundStyle(.red)
                     }
+                    Button("自分の水槽で試す") {
+                        guard let player else { return }
+                        do {
+                            decorationPreview = try ShopDecorationPreviewSession(item: item, official: player,
+                                placements: ownedDecorations,
+                                backgroundTheme: AquariumThemeStore.theme(from: backgroundThemeRawValue),
+                                fishViewingSession: fishViewingSession)
+                        } catch { showsPreviewError = true }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(player == nil || decorationPreview != nil)
+                    .accessibilityIdentifier("shop.purchaseConfirmation.tryInAquarium")
                     Button("購入を確定") {
                         purchaseFlow.confirm(player: player, in: modelContext, tutorial: decorationTutorial)
                     }
@@ -181,6 +197,13 @@ struct ShopView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        // 確認sheetの内側に重ね、閉じてもconfirmationや結果のonDismissには触れない。
+        .fullScreenCover(item: $decorationPreview) { session in
+            ShopDecorationPreviewView(session: session)
+        }
+        .alert("プレビューを開けませんでした", isPresented: $showsPreviewError) {
+            Button("OK", role: .cancel) {}
+        }
     }
 }
 
