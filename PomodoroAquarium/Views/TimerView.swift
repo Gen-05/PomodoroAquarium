@@ -359,6 +359,14 @@ struct TimerView: View {
                 isSimulationPaused: false
             )
 
+            // 水槽だけを減光し、時間・操作UI・開始演出はこのレイヤーより手前に置く。
+            Color.black
+                .opacity(focusDisplay.isFocusDisplayMode ? 0.3 : 0)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                .animation(.easeInOut(duration: 0.9), value: focusDisplay.isFocusDisplayMode)
+
             VStack(spacing: 18) {
                 Spacer()
                 sessionConfigurationControls
@@ -374,8 +382,6 @@ struct TimerView: View {
                                 .offset(y: -28)
                         }
                     }
-                    .opacity(focusDisplay.isFocusDisplayMode ? 0.45 : 1)
-                    .animation(.easeInOut(duration: FocusDisplayState.fadeDuration), value: focusDisplay.isFocusDisplayMode)
                 pomodoroProgress
                     .modifier(FocusDisplayControlsModifier(isHidden: focusDisplay.isFocusDisplayMode))
                 sessionActionControls
