@@ -8,12 +8,7 @@ struct ShopView: View {
     @Query private var players: [Player]
     @Query private var ownedDecorations: [AquariumDecorationPlacement]
     @State private var selectedCategory: ShopCategory = .decoration
-    @State private var feedback: PurchaseFeedback?
-
-    private struct PurchaseFeedback: Identifiable {
-        let id = UUID()
-        let message: String
-    }
+    @State private var purchaseFlow = ShopPurchaseFlow()
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -59,12 +54,17 @@ struct ShopView: View {
         .background(Color.cyan.opacity(0.08).ignoresSafeArea())
         .navigationTitle("ショップ")
         .navigationBarTitleDisplayMode(.inline)
-        // onDismissは購入結果の表示が閉じ終わってから呼ばれる。案内と重ねない。
-        .sheet(item: $feedback, onDismiss: { decorationTutorial?.purchaseFeedbackDidDismiss() }) { result in
+        .sheet(item: $purchaseFlow.confirmation, onDismiss: { purchaseFlow.confirmationDidDismiss() }) { item in
+            purchaseConfirmation(item)
+        }
+        // 確認sheetが閉じ終わってから結果を表示し、結果が閉じ終わってから初回案内へ進む。
+        .sheet(item: $purchaseFlow.feedback, onDismiss: {
+            purchaseFlow.feedbackDidDismiss(tutorial: decorationTutorial)
+        }) { result in
             VStack(spacing: 20) {
                 Text("ショップ").font(.headline)
                 Text(result.message).multilineTextAlignment(.center)
-                Button("OK") { feedback = nil }.buttonStyle(.borderedProminent)
+                Button("OK") { purchaseFlow.feedback = nil }.buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("shop.purchaseFeedback.close")
             }
             .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -77,12 +77,7 @@ struct ShopView: View {
     private func productCard(_ item: ShopItem) -> some View {
         let canAfford = CurrencyService.canAfford(item.price, player: player)
         let isPurchasable = item.category == .decoration
-        let isSoldOut: Bool
-        if case let .decoration(kind) = item.content {
-            isSoldOut = ShopService.isSoldOut(kind, among: ownedDecorations)
-        } else {
-            isSoldOut = false
-        }
+        let soldOut = isSoldOut(item)
 
         return VStack(spacing: 10) {
             productPreview(item)
@@ -98,13 +93,13 @@ struct ShopView: View {
                 .foregroundStyle(canAfford ? .yellow : .secondary)
 
             Button {
-                purchase(item)
+                purchaseFlow.requestConfirmation(for: item)
             } label: {
-                Text(isSoldOut ? "売り切れ" : (isPurchasable ? (canAfford ? "購入する" : "コイン不足") : "準備中"))
+                Text(soldOut ? "売り切れ" : (isPurchasable ? (canAfford ? "購入する" : "コイン不足") : "準備中"))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(isSoldOut || !isPurchasable || player == nil || feedback != nil)
+            .disabled(soldOut || !isPurchasable || player == nil || purchaseFlow.isPresenting)
             .accessibilityIdentifier("purchase-\(item.id)")
         }
         .padding(12)
@@ -140,23 +135,52 @@ struct ShopView: View {
         }
     }
 
-    private func purchase(_ item: ShopItem) {
-        guard feedback == nil else { return }
-        decorationTutorial?.purchaseFeedbackWillPresent()
-        do {
-            if let decorationTutorial {
-                try decorationTutorial.purchase(item, player: player, in: modelContext)
-            } else {
-                try ShopService.purchaseDecoration(item, for: player, in: modelContext)
+    private func isSoldOut(_ item: ShopItem) -> Bool {
+        guard case let .decoration(kind) = item.content else { return false }
+        return ShopService.isSoldOut(kind, among: ownedDecorations)
+    }
+
+    private func purchaseConfirmation(_ item: ShopItem) -> some View {
+        let canAfford = CurrencyService.canAfford(item.price, player: player)
+        let soldOut = isSoldOut(item)
+
+        return NavigationStack {
+            ScrollView {
+                VStack(spacing: 22) {
+                    productPreview(item)
+                        .frame(height: 180)
+                        .allowsHitTesting(false)
+                    Text(item.name)
+                        .font(.title2.bold())
+                        .multilineTextAlignment(.center)
+                    VStack(spacing: 12) {
+                        LabeledContent("価格", value: "\(item.price)コイン")
+                        LabeledContent("現在の所持コイン", value: "\(balance)コイン")
+                        LabeledContent("購入後の所持コイン", value: canAfford ? "\(balance - item.price)コイン" : "コイン不足")
+                    }
+                    .monospacedDigit()
+                    if soldOut {
+                        Text("売り切れです").foregroundStyle(.secondary)
+                    } else if !canAfford {
+                        Text("コインが足りません").foregroundStyle(.red)
+                    }
+                    Button("購入を確定") {
+                        purchaseFlow.confirm(player: player, in: modelContext, tutorial: decorationTutorial)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canAfford || soldOut || player == nil || purchaseFlow.confirmation == nil)
+                    .accessibilityIdentifier("shop.purchaseConfirmation.confirm")
+                    Button("キャンセル", role: .cancel) { purchaseFlow.confirmation = nil }
+                        .accessibilityIdentifier("shop.purchaseConfirmation.cancel")
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity)
             }
-            feedback = PurchaseFeedback(message: "\(item.name)を購入しました")
-        } catch ShopPurchaseError.insufficientCoins {
-            feedback = PurchaseFeedback(message: "コインが足りません")
-        } catch ShopPurchaseError.soldOut {
-            feedback = PurchaseFeedback(message: "沈没船は売り切れです")
-        } catch {
-            feedback = PurchaseFeedback(message: "購入できませんでした")
+            .navigationTitle("購入確認")
+            .navigationBarTitleDisplayMode(.inline)
         }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 }
 

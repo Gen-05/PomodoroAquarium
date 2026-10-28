@@ -37,11 +37,24 @@ struct DecorationPurchaseTutorialTests {
         store.mainContext.insert(player)
         let item = try #require(ShopCatalog.items.first { $0.content == .decoration(.seaweedA) })
         let tutorial = DecorationPurchaseTutorial(defaults: settings)
-        let bought = try tutorial.purchase(item, player: player, in: store.mainContext)
+        let flow = ShopPurchaseFlow()
+        flow.requestConfirmation(for: item)
+        #expect(player.coins == 100 && !tutorial.isPurchaseFeedbackVisible)
+        flow.confirm(player: player, in: store.mainContext, tutorial: tutorial)
+        flow.confirm(player: player, in: store.mainContext, tutorial: tutorial) // 連打では二重購入しない。
+        let bought = try #require(store.mainContext.fetch(FetchDescriptor<AquariumDecorationPlacement>()).first)
         #expect(tutorial.phase == .waitingForFeedback && player.coins == 70 && !bought.isPlaced)
+        #expect(flow.confirmation == nil && flow.feedback == nil && tutorial.isPurchaseFeedbackVisible)
         tutorial.requestEditor()
         #expect(tutorial.phase == .waitingForFeedback)
-        tutorial.purchaseFeedbackDidDismiss(); tutorial.requestEditor()
+        flow.confirmationDidDismiss()
+        #expect(flow.feedback != nil && tutorial.phase == .waitingForFeedback)
+        flow.feedback = nil
+        flow.requestConfirmation(for: item)
+        #expect(flow.confirmation == nil) // 結果sheetが閉じ終わるまで次の購入確認を開かない。
+        flow.feedbackDidDismiss(tutorial: tutorial)
+        #expect(tutorial.phase == .invitation)
+        tutorial.requestEditor()
         #expect(tutorial.step == .edit)
         for _ in 0..<10 { tutorial.next() }
         #expect(tutorial.step == .edit && !bought.isPlaced)
@@ -81,6 +94,52 @@ struct DecorationPurchaseTutorialTests {
         try reopened.purchase(item, player: player, in: store.mainContext)
         reopened.purchaseFeedbackDidDismiss()
         #expect(reopened.phase == .idle && player.coins == 40)
+    }
+
+    @Test func purchaseConfirmationCancellationNeverPurchasesOrStartsTutorial() throws {
+        let store = try container(), settings = defaults(), player = Player(coins: 100)
+        store.mainContext.insert(player)
+        let tutorial = DecorationPurchaseTutorial(defaults: settings)
+        let flow = ShopPurchaseFlow()
+        let item = try #require(ShopCatalog.items.first { $0.content == .decoration(.seaweedA) })
+        for _ in 0..<2 { // キャンセルボタンとスワイプ終了はいずれもsheetの選択をnilに戻す。
+            flow.requestConfirmation(for: item)
+            #expect(flow.confirmation == item && player.coins == 100)
+            flow.confirmation = nil
+            flow.confirmationDidDismiss()
+            #expect(flow.feedback == nil && !flow.isPresenting)
+            #expect(tutorial.phase == .idle && !tutorial.isPurchaseFeedbackVisible)
+            #expect(!settings.bool(forKey: DecorationPurchaseTutorial.storageKey))
+            #expect(player.coins == 100)
+            #expect(try store.mainContext.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == 0)
+        }
+    }
+
+    @Test func purchaseConfirmationRechecksChangedBalanceAndOwnership() throws {
+        for kind in [AquariumDecorationKind.seaweedA, .shipwreck] {
+            let store = try container(), settings = defaults(), player = Player(coins: 2_500)
+            store.mainContext.insert(player)
+            let tutorial = DecorationPurchaseTutorial(defaults: settings)
+            let flow = ShopPurchaseFlow()
+            let item = try #require(ShopCatalog.items.first { $0.content == .decoration(kind) })
+            flow.requestConfirmation(for: item)
+            if kind == .shipwreck {
+                _ = try AquariumDecorationService.addPlacement(kind: .shipwreck, in: store.mainContext)
+            } else {
+                _ = try CurrencyService.spendCoins(2_500, from: player, in: store.mainContext)
+            }
+            let coins = player.coins
+            let count = try store.mainContext.fetchCount(FetchDescriptor<AquariumDecorationPlacement>())
+            flow.confirm(player: player, in: store.mainContext, tutorial: tutorial)
+            flow.confirmationDidDismiss()
+            #expect(flow.feedback?.message == (kind == .shipwreck ? "沈没船は売り切れです" : "コインが足りません"))
+            #expect(player.coins == coins)
+            #expect(try store.mainContext.fetchCount(FetchDescriptor<AquariumDecorationPlacement>()) == count)
+            #expect(!settings.bool(forKey: DecorationPurchaseTutorial.storageKey))
+            flow.feedback = nil
+            flow.feedbackDidDismiss(tutorial: tutorial)
+            #expect(tutorial.phase == .idle && !tutorial.isPurchaseFeedbackVisible)
+        }
     }
 
     @Test func failureConditionsAndLoadingOrDebugGrantsNeverStartTutorial() throws {

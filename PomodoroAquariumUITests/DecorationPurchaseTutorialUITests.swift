@@ -22,6 +22,10 @@ final class DecorationPurchaseTutorialUITests: XCTestCase {
         XCTAssertTrue(button.waitForExistence(timeout: 5))
         if !button.isHittable { app.swipeUp() }
         button.tap()
+        let confirm = app.buttons["shop.purchaseConfirmation.confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["shop.purchaseFeedback.close"].exists)
+        confirm.tap()
         XCTAssertTrue(app.buttons["shop.purchaseFeedback.close"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["decorationTutorial.use"].exists)
     }
@@ -61,9 +65,13 @@ final class DecorationPurchaseTutorialUITests: XCTestCase {
 
     @MainActor func testInsufficientFundsLaterAndRelaunchSuppression() {
         let app = launch()
-        buy("small_rock_a", in: app)
-        XCTAssertTrue(app.staticTexts["コインが足りません"].exists)
-        closeFeedback(app)
+        let insufficient = app.buttons["purchase-tutorial-test-small_rock_a"]
+        XCTAssertTrue(insufficient.waitForExistence(timeout: 5))
+        if !insufficient.isHittable { app.swipeUp() }
+        insufficient.tap()
+        XCTAssertTrue(app.staticTexts["コインが足りません"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["shop.purchaseConfirmation.confirm"].isEnabled)
+        app.buttons["shop.purchaseConfirmation.cancel"].tap()
         XCTAssertFalse(app.buttons["decorationTutorial.use"].waitForExistence(timeout: 2))
         app.swipeDown()
         buy("seaweed-a", in: app)

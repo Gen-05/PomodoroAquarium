@@ -2696,7 +2696,7 @@ struct PomodoroAquariumTests {
         #expect(indices == Array(0..<12) + Array(0..<12) + [0, 1])
     }
 
-    @Test func whaleSharkProfileIsStableLongRangeAndNeverStopsOrBursts() {
+    @Test @MainActor func whaleSharkProfileIsStableLongRangeAndNeverStopsOrBursts() {
         let profile = FishMovementProfile.whaleShark
 
         #expect(AquariumFishMotion.movementProfile(for: .whaleShark).baseSpeedRange
@@ -2745,7 +2745,7 @@ struct PomodoroAquariumTests {
         #expect(manta.depthScaleRange == 0.75...1.0)
     }
 
-    @Test func mantaNeverTransitionsIntoBurst() {
+    @Test @MainActor func mantaNeverTransitionsIntoBurst() {
         let id = UUID(uuid: (90, 89, 88, 87, 86, 85, 84, 83, 82, 81, 80, 79, 78, 77, 76, 75))
         var motion = AquariumFishMotion.initialState(for: id, profile: .manta)
 
@@ -2755,7 +2755,7 @@ struct PomodoroAquariumTests {
         }
     }
 
-    @Test func mantaWingCycleAlternatesOneOrTwoFlapsWithRandomGliding() {
+    @Test @MainActor func mantaWingCycleAlternatesOneOrTwoFlapsWithRandomGliding() {
         let profile = WingSwimmingProfile.manta
         var cycle = AquariumFishMotion.WingCycle(
             id: UUID(uuid: (1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31)),
@@ -2886,7 +2886,7 @@ struct PomodoroAquariumTests {
         #expect(jellyfish.depthScaleRange == 0.75...1.0)
     }
 
-    @Test func jellyfishNeverTransitionsIntoBurst() {
+    @Test @MainActor func jellyfishNeverTransitionsIntoBurst() {
         let id = UUID(uuid: (22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7))
         var motion = AquariumFishMotion.initialState(for: id, profile: .jellyfish)
 
@@ -3114,7 +3114,7 @@ struct PomodoroAquariumTests {
         }
     }
 
-    @Test func sideToDiagonalUpUsesIntermediateSpriteBeforeTarget() {
+    @Test @MainActor func sideToDiagonalUpUsesIntermediateSpriteBeforeTarget() {
         var transition = FishSpriteDirectionTransition(direction: .right)
 
         transition.update(toward: .upRight, deltaTime: 1.0 / 30.0)
@@ -3127,7 +3127,7 @@ struct PomodoroAquariumTests {
         #expect(transition.pose == .facing(.upRight))
     }
 
-    @Test func diagonalUpToSideUsesTheSameIntermediateSprite() {
+    @Test @MainActor func diagonalUpToSideUsesTheSameIntermediateSprite() {
         var transition = FishSpriteDirectionTransition(direction: .upRight)
 
         transition.update(toward: .right, deltaTime: 1.0 / 30.0)
@@ -3139,7 +3139,7 @@ struct PomodoroAquariumTests {
         #expect(transition.pose == .facing(.right))
     }
 
-    @Test func leftTurnReusesTheIntermediateSpriteWithHorizontalFlip() {
+    @Test @MainActor func leftTurnReusesTheIntermediateSpriteWithHorizontalFlip() {
         var transition = FishSpriteDirectionTransition(direction: .left)
 
         transition.update(toward: .upLeft, deltaTime: 1.0 / 30.0)
@@ -3161,7 +3161,7 @@ struct PomodoroAquariumTests {
         ).contains(where: { $0.contains("_30_") }))
     }
 
-    @Test func sideToDiagonalDownUsesIntermediateSpriteBeforeTarget() {
+    @Test @MainActor func sideToDiagonalDownUsesIntermediateSpriteBeforeTarget() {
         var transition = FishSpriteDirectionTransition(direction: .right)
 
         transition.update(toward: .downRight, deltaTime: 1.0 / 30.0)
@@ -3174,7 +3174,7 @@ struct PomodoroAquariumTests {
         #expect(transition.pose == .facing(.downRight))
     }
 
-    @Test func diagonalDownToSideUsesTheSameIntermediateSprite() {
+    @Test @MainActor func diagonalDownToSideUsesTheSameIntermediateSprite() {
         var transition = FishSpriteDirectionTransition(direction: .downRight)
 
         transition.update(toward: .right, deltaTime: 1.0 / 30.0)
@@ -3186,7 +3186,7 @@ struct PomodoroAquariumTests {
         #expect(transition.pose == .facing(.right))
     }
 
-    @Test func leftDownTurnReusesTheIntermediateSpriteWithHorizontalFlip() {
+    @Test @MainActor func leftDownTurnReusesTheIntermediateSpriteWithHorizontalFlip() {
         var transition = FishSpriteDirectionTransition(direction: .left)
 
         transition.update(toward: .downLeft, deltaTime: 1.0 / 30.0)
@@ -3249,7 +3249,7 @@ struct PomodoroAquariumTests {
         #expect(motion.position != initialPosition)
     }
 
-    @Test func fishDartAlwaysTransitionsIntoBraking() {
+    @Test @MainActor func fishDartAlwaysTransitionsIntoBraking() {
         let id = UUID(uuid: (31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46))
         var motion = AquariumFishMotion.initialState(for: id)
         motion.behavior = .burst
@@ -3303,7 +3303,7 @@ struct PomodoroAquariumTests {
         #expect(profile.burstCooldownRange == 8.0...20.0)
     }
 
-    @Test func burstKeepsItsCourseUntilBraking() {
+    @Test @MainActor func burstKeepsItsCourseUntilBraking() {
         let id = UUID(uuid: (14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 15, 16))
         var motion = AquariumFishMotion.initialState(for: id)
         motion.behavior = .burst
