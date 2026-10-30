@@ -361,6 +361,8 @@ struct CoreTutorialSpotlightStep: View {
     let targetFrame: CGRect?
     let page: CoreTutorialConversationPage
     let pageIndex: Int
+    // 説明だけの場面では対象frameを吹き出しの配置にだけ利用できる。
+    var showsTargetHighlight = true
     var showsPointingHand = false
     var allowsConversationAdvance = true
     var allowsTargetInteraction = false
@@ -378,7 +380,7 @@ struct CoreTutorialSpotlightStep: View {
             let fixedTargetFrame = resolvedTargetFrame
 
             ZStack {
-                if let fixedTargetFrame {
+                if let fixedTargetFrame, showsTargetHighlight {
                     CoreTutorialSpotlightShape(targetFrame: fixedTargetFrame)
                         .fill(
                             Color.black.opacity(0.43),

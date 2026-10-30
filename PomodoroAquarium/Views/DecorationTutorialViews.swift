@@ -20,16 +20,19 @@ extension View {
 /// 既存Core Tutorialの吹き出し・指差し・対象以外の操作ブロックを共用する。
 struct DecorationTutorialSpotlight: View {
     let tutorial: DecorationPurchaseTutorial
-    let targetFrame: CGRect
+    let targetFrame: CGRect?
     let interactionFrames: [CGRect]
 
     var body: some View {
         if let step = tutorial.step {
+            let isExplanation = step == .tools || step == .completed
             CoreTutorialSpotlightStep(targetFrame: targetFrame,
                 page: .message(DecorationTutorialContent.message(step: step, kind: tutorial.kind)),
-                pageIndex: step.rawValue, showsPointingHand: step != .completed,
-                allowsConversationAdvance: step == .tools || step == .completed,
-                allowsTargetInteraction: true, followsTargetFrame: true,
+                pageIndex: step.rawValue, showsTargetHighlight: step != .tools,
+                showsPointingHand: step != .tools && step != .completed,
+                allowsConversationAdvance: isExplanation,
+                // 説明中は既存の全面タップ経路で全文表示・説明送りを行い、背後へ通さない。
+                allowsTargetInteraction: !isExplanation, followsTargetFrame: true,
                 interactionFrames: interactionFrames,
                 onConversationAdvance: tutorial.next,
                 accessibilityIdentifier: "decorationTutorial.guide.\(step)")

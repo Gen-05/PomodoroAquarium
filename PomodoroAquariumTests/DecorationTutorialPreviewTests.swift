@@ -8,7 +8,26 @@ import Testing
 
 @MainActor
 struct DecorationTutorialPreviewTests {
-    @Test func eachOpeningStartsAfterOneRealPurchaseWithIndependentResources() throws {
+    /// ショップと同じ確認→確定→結果を通し、結果を閉じてから案内へ進む。
+    private func purchaseTreasureChest(in session: DecorationTutorialPreviewSession) throws {
+        let context = session.modelContainer.mainContext
+        let player = try #require(context.fetch(FetchDescriptor<Player>()).first)
+        let item = try #require(DecorationTutorialPreviewSession.products.first { $0.content == .decoration(.treasureChest) })
+        let coins = player.coins
+        let flow = ShopPurchaseFlow()
+        flow.requestConfirmation(for: item)
+        #expect(flow.confirmation == item && player.coins == coins && session.tutorial.phase == .idle)
+        flow.confirm(player: player, in: context, tutorial: session.tutorial)
+        #expect(player.coins == coins - item.price && session.tutorial.phase == .waitingForFeedback)
+        flow.confirmationDidDismiss()
+        #expect(flow.feedback?.message == "\(item.name)を購入しました")
+        #expect(session.tutorial.phase == .waitingForFeedback)
+        flow.feedback = nil
+        flow.feedbackDidDismiss(tutorial: session.tutorial)
+        #expect(session.tutorial.phase == .invitation)
+    }
+
+    @Test func eachOpeningStartsBeforePurchaseWithIndependentResources() throws {
         let first = try DecorationTutorialPreviewSession()
         let second = try DecorationTutorialPreviewSession()
         defer { first.cleanUp(); second.cleanUp() }
@@ -20,13 +39,16 @@ struct DecorationTutorialPreviewTests {
             let context = session.modelContainer.mainContext
             let player = try #require(try context.fetch(FetchDescriptor<Player>()).first)
             let placements = try context.fetch(FetchDescriptor<AquariumDecorationPlacement>())
-            #expect(player.coins == 90)
+            #expect(player.coins == 10_000)
             #expect(player.ownedFish.count == 1)
-            #expect(placements.count == 3)
+            #expect(placements.count == 2)
             #expect(placements.filter(\.isPlaced).map(\.kind) == [.smallRockA])
-            #expect(session.tutorial.phase == .invitation)
-            let bought = try #require(placements.first { $0.decorationID == session.tutorial.placementID })
-            #expect(bought.kind == .treasureChest && !bought.isPlaced)
+            #expect(session.tutorial.phase == .idle && session.tutorial.placementID == nil)
+            #expect(!session.tutorial.isPurchaseFeedbackVisible)
+            #expect(!session.defaults.bool(forKey: DecorationPurchaseTutorial.storageKey))
+            #expect(!placements.contains { $0.kind == .treasureChest })
+            #expect(DecorationTutorialPreviewSession.products == ShopCatalog.items(in: .decoration))
+            #expect(DecorationTutorialPreviewSession.products.allSatisfy { $0.price <= player.coins })
             #expect(try context.fetchCount(FetchDescriptor<RewardHistoryEntry>()) == 0)
             #expect(try context.fetchCount(FetchDescriptor<StudyDailyRecord>()) == 0)
             #expect(try context.fetchCount(FetchDescriptor<FocusSessionRecord>()) == 0)
@@ -36,11 +58,15 @@ struct DecorationTutorialPreviewTests {
             #expect(!core.isActive && core.isPreviewMode)
             #expect(AquariumEditorLaunchPolicy.canRestore(mode: .decorationPreview, defaults: session.defaults))
         }
+        try purchaseTreasureChest(in: first)
         first.tutorial.dismiss()
         let player = try #require(try first.modelContainer.mainContext.fetch(FetchDescriptor<Player>()).first)
-        try first.tutorial.purchase(DecorationTutorialPreviewSession.products[1], player: player, in: first.modelContainer.mainContext)
+        let seaweed = try #require(DecorationTutorialPreviewSession.products.first { $0.content == .decoration(.seaweedA) })
+        try first.tutorial.purchase(seaweed, player: player, in: first.modelContainer.mainContext)
         first.tutorial.purchaseFeedbackDidDismiss()
-        #expect(first.tutorial.phase == .idle && player.coins == 80)
+        #expect(first.tutorial.phase == .idle && player.coins == 9_470)
+        #expect(second.tutorial.phase == .idle)
+        try purchaseTreasureChest(in: second)
         #expect(second.tutorial.phase == .invitation)
     }
 
@@ -77,6 +103,7 @@ struct DecorationTutorialPreviewTests {
         defer { preview.cleanUp() }
         let context = preview.modelContainer.mainContext
         let previewPlayer = try #require(try context.fetch(FetchDescriptor<Player>()).first)
+        try purchaseTreasureChest(in: preview)
         let placements = try context.fetch(FetchDescriptor<AquariumDecorationPlacement>())
         let purchased = try #require(placements.first { $0.decorationID == preview.tutorial.placementID })
         let initial = AquariumEditorDraft(player: previewPlayer, placements: placements, background: .aquarium)
@@ -116,6 +143,7 @@ struct DecorationTutorialPreviewTests {
         let productionURL = AquariumEditorDraftStore.standard.url
         let productionBytes = try? Data(contentsOf: productionURL)
         let preview = try DecorationTutorialPreviewSession()
+        try purchaseTreasureChest(in: preview)
         let core = CoreTutorialCoordinator(mode: .decorationPreview, defaults: preview.defaults,
             timerSessionStore: preview.timerSessionStore)
         let timer = TimerViewModel(studyTime: 25, breakTime: 5, now: Date.init, sessionStore: preview.timerSessionStore,

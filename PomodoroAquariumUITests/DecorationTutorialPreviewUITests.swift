@@ -24,6 +24,23 @@ final class DecorationTutorialPreviewUITests: XCTestCase {
             app.collectionViews.firstMatch.swipeUp()
         }
         XCTAssertTrue(entry.waitForExistence(timeout: 5)); entry.tap()
+        XCTAssertTrue(app.buttons["decorationTutorialPreview.exit"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["decorationTutorial.use"].exists)
+        let preview = app.otherElements["decorationTutorialPreview.container"]
+        let buy = preview.buttons["purchase-decoration-treasure_chest"]
+        for _ in 0..<8 {
+            if buy.exists && buy.isHittable { break }
+            preview.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(buy.exists && buy.isHittable); buy.tap()
+        let confirm = app.buttons["shop.purchaseConfirmation.confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["decorationTutorial.use"].exists)
+        confirm.tap()
+        let result = app.buttons["shop.purchaseFeedback.close"]
+        XCTAssertTrue(result.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["decorationTutorial.use"].exists)
+        result.tap()
         XCTAssertTrue(app.buttons["decorationTutorial.use"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["decorationTutorialPreview.exit"].exists)
         XCTAssertFalse(app.otherElements["decorationTutorialPreview.container"].buttons["mainTab.more"].isEnabled)
@@ -101,13 +118,7 @@ final class DecorationTutorialPreviewUITests: XCTestCase {
         let point = chest.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
         point.press(forDuration: 0.1, thenDragTo: point.withOffset(CGVector(dx: 20, dy: 0)))
         waitStep("tools", app)
-        app.buttons["aquariumEditor.openNudge"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        app.buttons["左へ"].tap()
-        app.buttons["aquariumEditor.closeNudge"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        app.buttons["aquariumEditor.stackingMenu"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        app.buttons["aquariumEditor.closeStacking"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        app.buttons["aquariumEditor.changeTreasureChestDirection"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        capture("Decoration Preview・本番と共通の操作")
+        capture("Decoration Preview・操作を求めない説明")
         acknowledge(app)
         waitStep("save", app)
         capture("Decoration Preview・保存ボタンの案内")

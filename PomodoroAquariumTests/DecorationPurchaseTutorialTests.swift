@@ -272,6 +272,9 @@ struct DecorationPurchaseTutorialTests {
         #expect(tutorial.step == .library)
         #expect(DecorationTutorialContent.message(step: .tools, kind: .treasureChest).contains("向きを変更"))
         #expect(!DecorationTutorialContent.message(step: .tools, kind: .seaweedA).contains("向きを変更"))
+        for kind in [AquariumDecorationKind.treasureChest, .seaweedA, .shipwreck] {
+            #expect(DecorationTutorialContent.message(step: .tools, kind: kind).hasSuffix("「水槽からしまう」で所持に戻せるよ。"))
+        }
         let ship = AquariumDecorationPlacement(kind: .shipwreck, relativeX: 0.5, relativeY: 0.8, scale: 1)
         tutorial.showHint(placements: [ship], selectedID: ship.decorationID)
         tutorial.didDragDecoration(id: ship.decorationID, from: .zero, to: CGPoint(x: 1, y: 1))
@@ -281,7 +284,9 @@ struct DecorationPurchaseTutorialTests {
         tutorial.didChangeShipwreckSide(id: ship.decorationID, from: .left, to: .right)
         #expect(tutorial.step == .tools)
         #expect(!DecorationTutorialContent.message(step: .tools, kind: .shipwreck).contains("微調整"))
-        tutorial.next(); tutorial.didEndEditing(saved: false)
+        tutorial.next()
+        #expect(tutorial.step == .save)
+        tutorial.didEndEditing(saved: false)
         #expect(tutorial.phase == .idle) // 破棄を保存完了として表示しない。
         #expect(DecorationPurchaseTutorial.Step.allCases.allSatisfy { !DecorationTutorialContent.message(step: $0, kind: .shipwreck).contains("サイズ") })
     }

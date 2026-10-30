@@ -16,10 +16,7 @@ final class DecorationTutorialPreviewSession: Identifiable {
     let fishViewingSession = AquariumFishViewingSession()
     let tutorial: DecorationPurchaseTutorial
 
-    static let products: [ShopItem] = [AquariumDecorationKind.treasureChest, .seaweedA, .smallRockA, .shipwreck].map {
-        ShopItem(id: "decoration-preview-\($0.rawValue)", name: $0.displayName,
-            price: 10, category: .decoration, content: .decoration($0))
-    }
+    static let products = ShopCatalog.items(in: .decoration)
 
     init() throws {
         suiteName = "DecorationTutorialPreview.\(UUID().uuidString)"
@@ -47,7 +44,7 @@ final class DecorationTutorialPreviewSession: Identifiable {
             let context = modelContainer.mainContext
             let fish = PlayerFish(species: .clownfish)
             let player = Player(ownedFish: [fish], activeAquariumFishIDs: [fish.id],
-                hasInitializedActiveAquariumFish: true, coins: 100)
+                hasInitializedActiveAquariumFish: true, coins: 10_000)
             context.insert(player)
             context.insert(AquariumDecorationPlacement(kind: .seaweedA,
                 relativeX: 0.25, relativeY: 0.88, scale: 1, isPlaced: false))
@@ -55,9 +52,6 @@ final class DecorationTutorialPreviewSession: Identifiable {
                 relativeX: 0.7, relativeY: 0.87, scale: 1, isPlaced: true))
             try context.save()
             _ = try FocusCategoryService.createDefaultsIfNeeded(in: context)
-            // 本番の購入成功処理を一度実行し、購入結果を閉じた直後の案内から確認する。
-            try tutorial.purchase(Self.products[0], player: player, in: context)
-            tutorial.purchaseFeedbackDidDismiss()
         } catch {
             cleanUp()
             throw error

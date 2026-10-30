@@ -40,6 +40,7 @@ struct AquariumView: View {
     var selectionResetRequestID: UUID?
     var historyRestorationRequestID: UUID?
     var decorationControlsTopInset: CGFloat = 160
+    var showsDecorationToolsExplanation = false
     var decorationRestoreRequestID: String?
     var onDecorationRestoreRequestHandled: () -> Void = {}
     var decorationDragPreview: AquariumDecoration?
@@ -151,6 +152,13 @@ struct AquariumView: View {
         .onChange(of: isEditing) { _, newValue in
             if !newValue {
                 cancelDecorationEditing()
+            }
+        }
+        .onChange(of: showsDecorationToolsExplanation, initial: true) { _, isExplaining in
+            if isExplaining {
+                // 選択した個体は保ち、説明するボタン名が並ぶ基本メニューを表示する。
+                showsDecorationNudge = false
+                showsStackingControls = false
             }
         }
         .onChange(of: decorationRestoreRequestID) { _, decorationID in

@@ -296,6 +296,7 @@ struct HomeView: View {
                         selectionResetRequestID: aquariumSelectionResetRequestID,
                         historyRestorationRequestID: aquariumHistoryRestorationRequestID,
                         decorationControlsTopInset: max(0, editorHistoryBottom - globalCanvasFrame.minY + 12),
+                        showsDecorationToolsExplanation: showsDecorationGuide && decorationGuide.step == .tools,
                         decorationRestoreRequestID: decorationRestoreRequestID,
                         onDecorationRestoreRequestHandled: { decorationRestoreRequestID = nil },
                         decorationDragPreview: decorationPreview(in: aquariumSize),
@@ -397,9 +398,10 @@ struct HomeView: View {
                 .overlayPreferenceValue(DecorationTutorialTargetKey.self) { targets in
                     GeometryReader { proxy in
                         if showsDecorationGuide {
-                            if let frame = decorationGuideTargetFrame(targets, in: proxy) {
+                            let frame = decorationGuideTargetFrame(targets, in: proxy)
+                            if decorationGuide.step == .tools || frame != nil {
                                 DecorationTutorialSpotlight(tutorial: decorationGuide, targetFrame: frame,
-                                    interactionFrames: decorationGuideInteractionFrames(targets, in: proxy, target: frame))
+                                    interactionFrames: decorationGuideInteractionFrames(targets, in: proxy, target: frame ?? .zero))
                             } else {
                                 CoreTutorialInteractionBlocker(targetFrame: nil, containerSize: proxy.size,
                                     allowedFrames: decorationGuideInteractionFrames(targets, in: proxy, target: .zero))
@@ -1364,7 +1366,7 @@ struct HomeView: View {
         case .add: decorationGuide.kind.map { .add($0) } ?? .additions
         case .select: decorationGuide.placementID.map { .placement($0) }
         case .move: decorationGuide.kind == .shipwreck ? .operations : decorationGuide.placementID.map { .placement($0) }
-        case .tools: .operations
+        case .tools: .operations // 配置基準だけに使い、強調や操作の許可はしない。
         case .save: .done
         default: nil
         }
@@ -1377,6 +1379,8 @@ struct HomeView: View {
     }
 
     private func decorationGuideInteractionFrames(_ targets: [DecorationTutorialTarget: Anchor<CGRect>], in proxy: GeometryProxy, target: CGRect) -> [CGRect] {
+        // 説明中は操作パネル・装飾・履歴など、背後の編集操作をすべて遮断する。
+        if decorationGuide.step == .tools { return [] }
         var allowed: [CGRect] = decorationGuide.step == .completed ? [] : [target]
         if decorationGuide.step == .move, decorationGuide.kind != .shipwreck {
             allowed.append(CGRect(x: 0, y: max(0, editorHistoryBottom - globalCanvasFrame.minY + 12),
