@@ -155,6 +155,11 @@ struct AppFeedbackService {
     }
 
     func playFishAcquisition(isNewFish: Bool) {
+        if AppPreferenceSettings.isSoundEnabled(in: defaults) {
+            performer.playCompletionSound(
+                volume: Float(AppPreferenceSettings.soundEffectsVolume(in: defaults))
+            )
+        }
         guard AppPreferenceSettings.isHapticsEnabled(in: defaults) else { return }
         if isNewFish {
             performer.playSuccessHaptic(level: currentHapticLevel)

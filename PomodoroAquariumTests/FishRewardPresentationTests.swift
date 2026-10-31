@@ -2,6 +2,8 @@ import CoreGraphics
 import Foundation
 import SwiftData
 import Testing
+import SwiftUI
+import UIKit
 @testable import PomodoroAquarium
 
 @MainActor
@@ -35,11 +37,14 @@ struct FishRewardPresentationTests {
         do {
             let container = try ModelContainer(for: Player.self, PlayerFish.self, configurations: configuration)
             let context = ModelContext(container)
+            context.autosaveEnabled = false
             context.insert(Player(ownedFish: [PlayerFish(species: .clownfish)]))
             try context.save()
         }
         let reopened = try ModelContainer(for: Player.self, PlayerFish.self, configurations: configuration)
         let context = ModelContext(reopened)
+        // This temporary store is deleted at scope exit; never autosave into it later.
+        context.autosaveEnabled = false
         let player = try #require(context.fetch(FetchDescriptor<Player>()).first)
         let result = try #require(FishAcquisitionResult.capture(for: player) {
             let fish = PlayerFish(species: .clownfish)
@@ -66,7 +71,11 @@ struct FishRewardPresentationTests {
         }
     }
 
-    @Test func preRevealSilhouetteUsesGenericArtwork() {
+    @Test func preRevealSilhouetteUsesGenericArtwork() throws {
+        _ = try #require(UIImage(named: FishRewardMysteryAppearance.backgroundImageName))
+        #expect(FishRewardPresentationTiming.approachDuration == 3.0)
+        #expect(FishRewardPresentationTiming.reducedMotionApproachDuration == 0.18)
+        #expect(FishRewardMysteryAppearance.approachScale == 1.30)
         #expect(FishRewardGenericSilhouette.systemImageName == "fish.fill")
         #expect(FishRewardGenericSilhouette.width == 190)
         #expect(FishRewardGenericSilhouette.height == 120)
@@ -91,6 +100,17 @@ struct FishRewardPresentationTests {
     @Test func revealCanBeginOnlyOnceAndResultInformationWaitsForCompletion() {
         var state = FishRewardPresentationState()
 
+        let didBeginTooEarly = state.beginReveal()
+        #expect(!didBeginTooEarly)
+        let didBeginApproach = state.beginApproach()
+        #expect(didBeginApproach)
+        #expect(state.showsSilhouette)
+        #expect(!state.showsTapPrompt)
+        #expect(!state.showsRarityAppearance)
+        #expect(!state.showsResultInformation)
+        let didBeginApproachAgain = state.beginApproach()
+        #expect(!didBeginApproachAgain)
+
         let didBeginReveal = state.beginReveal()
         #expect(didBeginReveal)
         #expect(state.phase == .reveal)
@@ -103,6 +123,99 @@ struct FishRewardPresentationTests {
         state.finishReveal()
         #expect(state.phase == .result)
         #expect(state.showsResultInformation)
+    }
+
+    @Test func informationAppearsInOrderWhileTheStrokeIsStillPlaying() {
+        for isNewFish in [true, false] {
+            let steps = FishRewardPresentationTiming.informationSteps(isNewFish: isNewFish)
+            #expect(steps.map(\.rawValue) == (isNewFish ? [0, 1, 2, 3, 4] : [0, 2, 3, 4]))
+            var presentation = FishRewardPresentationState()
+            presentation.showInformation(.action)
+            #expect(!presentation.shows(.action))
+            _ = presentation.beginApproach()
+            _ = presentation.beginReveal()
+            for step in steps {
+                #expect(!presentation.shows(step))
+                presentation.showInformation(step)
+                #expect(presentation.shows(step))
+                #expect(!presentation.showsResultInformation)
+            }
+            presentation.showInformation(.rarity)
+            #expect(presentation.shows(.action)) // late/repeated stages cannot rewind
+            presentation.finishReveal()
+            #expect(presentation.showsResultInformation)
+            let didRestart = presentation.beginReveal()
+            #expect(!didRestart)
+
+            let informationDuration = Double(steps.count) * FishRewardPresentationTiming.informationInterval
+                + FishRewardPresentationTiming.informationFadeDuration
+            for species in [FishSpecies.clownfish, .whaleShark] {
+                #expect(informationDuration < FishRewardPresentationTiming.oneStrokeDuration(for: species))
+            }
+        }
+        #expect(FishRewardPresentationTiming.informationInterval == 0.30)
+        #expect(FishRewardPresentationTiming.informationFadeDuration == 0.25)
+        #expect(FishRewardPresentationTiming.fishAppearanceDuration == 0.35)
+    }
+
+    @Test func actualRewardCompletesOnceAfterTheStrokeAndCancelsOnDismissal() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        for (species, isNewFish) in [
+            (FishSpecies.clownfish, true), (.whaleShark, true),
+            (.clownfish, false), (.whaleShark, false)
+        ] {
+            var completions = 0
+            let result = FishAcquisitionResult(fish: PlayerFish(species: species),
+                previousOwnedCount: isNewFish ? 0 : 1, currentOwnedCount: isNewFish ? 1 : 2)
+            let informationDuration = Double(FishRewardPresentationTiming.informationSteps(isNewFish: isNewFish).count)
+                * FishRewardPresentationTiming.informationInterval + FishRewardPresentationTiming.informationFadeDuration
+            let minimumDuration = FishRewardPresentationTiming.approachDuration
+                + FishRewardPresentationTiming.revealHoldDuration(for: species.rarity)
+                + max(FishRewardPresentationTiming.oneStrokeDuration(for: species), informationDuration)
+                + FishRewardPresentationTiming.informationFadeDuration
+            let start = ContinuousClock.now
+            let host = UIHostingController(rootView: FishRewardView(result: result,
+                sequence: .init(startsAutomatically: true, onPresentationFinished: { completions += 1 }, onAdvance: {})))
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true; window.rootViewController = nil }
+            host.view.layoutIfNeeded()
+            while completions == 0 && start.duration(to: .now) < .seconds(minimumDuration + 2) {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            #expect(completions == 1)
+            #expect(start.duration(to: .now) >= .seconds(minimumDuration))
+            try await Task.sleep(for: .milliseconds(250))
+            #expect(completions == 1)
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let image = UIGraphicsImageRenderer(size: window.frame.size, format: format).image { _ in
+                host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+            }
+            let suffix = isNewFish ? "new" : "duplicate"
+            try #require(image.pngData()).write(to: URL(fileURLWithPath:
+                "/private/tmp/FishReward-\(species.rawValue)-\(suffix).png"))
+        }
+
+        var cancelledCompletions = 0
+        let host = UIHostingController(rootView: FishRewardView(result: .init(
+            fish: PlayerFish(species: .clownfish), previousOwnedCount: 0, currentOwnedCount: 1),
+            sequence: .init(startsAutomatically: true,
+                onPresentationFinished: { cancelledCompletions += 1 }, onAdvance: {})))
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        try await Task.sleep(for: .milliseconds(100))
+        window.rootViewController = nil
+        window.isHidden = true
+        try await Task.sleep(for: .seconds(
+            FishRewardPresentationTiming.approachDuration
+                + FishRewardPresentationTiming.revealHoldDuration(for: .common)
+                + FishRewardPresentationTiming.oneStrokeDuration(for: .clownfish)
+                + FishRewardPresentationTiming.informationFadeDuration + 0.5
+        ))
+        #expect(cancelledCompletions == 0)
     }
 
     @Test func rewardRarityColorsUseTheSharedPresentationRoles() {
@@ -136,7 +249,8 @@ struct FishRewardPresentationTests {
         #expect(common.fishAuraPulseScale < rare.fishAuraPulseScale)
         #expect(rare.fishAuraPulseScale < epic.fishAuraPulseScale)
         #expect(epic.fishAuraPulseScale < legendary.fishAuraPulseScale)
-        #expect(common.particleCount == 0)
+        #expect(common.particleCount == 4)
+        #expect(common.particleCount < epic.particleCount)
         #expect(rare.particleCount == 0)
         #expect(epic.particleCount > 0)
         #expect(legendary.particleCount > epic.particleCount)
@@ -236,6 +350,7 @@ struct FishRewardPresentationTests {
         let countAfterAward = player.ownedFish.count
 
         var presentation = FishRewardPresentationState()
+        _ = presentation.beginApproach()
         _ = presentation.beginReveal()
         presentation.finishReveal()
 

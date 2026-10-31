@@ -6,6 +6,7 @@
 //
 
 import XCTest
+import UIKit
 
 private enum CoreTutorialConversationPageCount {
     static let homeIntro = 5
@@ -796,9 +797,11 @@ final class PomodoroAquariumUITests: XCTestCase {
             let prompt = app.staticTexts["fishReward.tapPrompt"]
             XCTAssertTrue(prompt.waitForExistence(timeout: 5))
             assertRewardCenters(app, names: ["container"])
-            XCTAssertFalse(app.staticTexts["fishRarity"].exists)
-            XCTAssertFalse(app.staticTexts["fishReward.getMessage"].exists)
-            XCTAssertFalse(app.staticTexts["fishReward.newBadge"].exists)
+            // Staged rows reserve layout; use the reveal state, not hidden snapshot nodes.
+            let initialState = app.staticTexts["fishReward.debugCoordinates"].label
+            XCTAssertTrue(initialState.contains("phase=silhouette"))
+            XCTAssertTrue(initialState.contains("information=hidden"))
+            XCTAssertFalse(app.buttons["fishReward.close"].isHittable)
             let anticipationAttachment = XCTAttachment(screenshot: app.screenshot())
             anticipationAttachment.name = "Reward anticipation \(rarity)"
             anticipationAttachment.lifetime = .keepAlways
@@ -813,8 +816,12 @@ final class PomodoroAquariumUITests: XCTestCase {
             )
             XCTAssertEqual(XCTWaiter.wait(for: [geometryReady], timeout: 3), .completed)
             assertRewardCenters(app, names: ["container", "composite", "fish", "glow"])
-            XCTAssertTrue(app.staticTexts["fishReward.getMessage"].waitForExistence(timeout: 8))
-            XCTAssertEqual(app.staticTexts["fishReward.newBadge"].exists, rarity != "rare")
+            let presentationFinished = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@",
+                    "phase=result", "information=action"),
+                object: app.staticTexts["fishReward.debugCoordinates"]
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [presentationFinished], timeout: 8), .completed)
 
             let coordinates = app.staticTexts["fishReward.debugCoordinates"]
             XCTAssertTrue(coordinates.exists)
@@ -824,8 +831,56 @@ final class PomodoroAquariumUITests: XCTestCase {
             attachment.name = "Reward center \(rarity)"
             attachment.lifetime = .keepAlways
             add(attachment)
-            app.buttons["fishReward.close"].tap()
+            // Tap the rendered control and verify dismissal rather than relying on AX hit testing.
+            app.buttons["fishReward.close"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            let dismissed = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: coordinates
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
         }
+    }
+
+    @MainActor
+    func testCaveAtmosphereInActualRewardPreview() throws {
+        let app = XCUIApplication()
+        app.launchArguments.append("-core-tutorial-in-memory")
+        launchReturningUser(app)
+        app.buttons["mainTab.more"].tap()
+        app.buttons["more.rewardPreview"].tap()
+        let entry = app.buttons["rewardPreview.common"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        entry.tap()
+        let prompt = app.staticTexts["fishReward.tapPrompt"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 5))
+        func capture(_ name: String) -> XCUIScreenshot {
+            let screenshot = app.screenshot()
+            let attachment = XCTAttachment(screenshot: screenshot)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            return screenshot
+        }
+        let before = capture("cave-wait-start")
+        Thread.sleep(forTimeInterval: 2.5)
+        let after = capture("cave-wait-after-2500ms")
+        let firstImage = try XCTUnwrap(before.image.cgImage)
+        let nextImage = try XCTUnwrap(after.image.cgImage)
+        // Compare only blue water above the silhouette, excluding text and the status bar.
+        let water = CGRect(x: CGFloat(firstImage.width) * 0.25, y: CGFloat(firstImage.height) * 0.28,
+                           width: CGFloat(firstImage.width) * 0.5, height: CGFloat(firstImage.height) * 0.12)
+        let firstWater = UIImage(cgImage: try XCTUnwrap(firstImage.cropping(to: water)))
+        let nextWater = UIImage(cgImage: try XCTUnwrap(nextImage.cropping(to: water)))
+        XCTAssertNotEqual(firstWater.pngData(), nextWater.pngData(), "The cave water must visibly animate while waiting")
+        prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        keepScreenshot(app, name: "cave-approach-start")
+        Thread.sleep(forTimeInterval: 1.2)
+        keepScreenshot(app, name: "cave-approach-middle")
+        Thread.sleep(forTimeInterval: 4)
+        keepScreenshot(app, name: "cave-reveal-finished")
+        let close = app.buttons["fishReward.close"]
+        XCTAssertTrue(close.exists)
+        close.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(close.waitForNonExistence(timeout: 5))
     }
 
     @MainActor

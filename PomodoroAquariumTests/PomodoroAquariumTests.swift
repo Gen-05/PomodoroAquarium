@@ -211,9 +211,30 @@ struct PomodoroAquariumTests {
         service.playFishAcquisition(isNewFish: true)
         service.playFishAcquisition(isNewFish: false)
 
-        #expect(performer.completionSoundCount == 1)
+        #expect(performer.completionSoundCount == 3)
         #expect(performer.successHapticCount == 2)
         #expect(performer.impactHapticCount == 1)
+    }
+
+    @Test func fishAcquisitionSoundAndHapticsAreIndependent() {
+        for soundEnabled in [true, false] {
+            for hapticsEnabled in [true, false] {
+                let defaults = makeTimerDefaults()
+                defaults.set(soundEnabled, forKey: AppPreferenceSettings.soundEnabledKey)
+                defaults.set(hapticsEnabled, forKey: AppPreferenceSettings.hapticsEnabledKey)
+                defaults.set(0.36, forKey: AppPreferenceSettings.soundEffectsVolumeKey)
+                let performer = TestFeedbackPerformer()
+                let service = AppFeedbackService(defaults: defaults, performer: performer)
+                service.playFishAcquisition(isNewFish: true)
+                service.playFishAcquisition(isNewFish: false)
+                #expect(performer.completionSoundCount == (soundEnabled ? 2 : 0))
+                #expect(performer.successHapticCount == (hapticsEnabled ? 1 : 0))
+                #expect(performer.impactHapticCount == (hapticsEnabled ? 1 : 0))
+                if soundEnabled {
+                    #expect(abs((performer.lastSoundVolume ?? 0) - 0.36) < 0.001)
+                }
+            }
+        }
     }
 
     @Test func feedbackAppliesStoredSoundVolumeAndHapticIntensity() {

@@ -38,37 +38,72 @@ private extension View {
     }
 }
 
+enum FishRewardInformationStep: Int, CaseIterable {
+    case rarity, newBadge, name, detail, action
+}
+
 enum FishRewardPresentationPhase: Equatable {
     case silhouette
+    case approaching
     case reveal
     case result
 }
 
 struct FishRewardPresentationState: Equatable {
     private(set) var phase: FishRewardPresentationPhase = .silhouette
+    private(set) var informationStep: FishRewardInformationStep?
 
-    var showsSilhouette: Bool { phase == .silhouette }
-    var showsRarityAppearance: Bool { phase != .silhouette }
+    func shows(_ step: FishRewardInformationStep) -> Bool {
+        guard let informationStep else { return false }
+        return informationStep.rawValue >= step.rawValue
+    }
+
+    mutating func showInformation(_ step: FishRewardInformationStep) {
+        guard phase == .reveal, !shows(step) else { return }
+        informationStep = step
+    }
+
+    var showsSilhouette: Bool { phase == .silhouette || phase == .approaching }
+    var showsTapPrompt: Bool { phase == .silhouette }
+    var showsRarityAppearance: Bool { phase == .reveal || phase == .result }
     var showsResultInformation: Bool { phase == .result }
 
     @discardableResult
-    mutating func beginReveal() -> Bool {
+    mutating func beginApproach() -> Bool {
         guard phase == .silhouette else { return false }
+        phase = .approaching
+        return true
+    }
+
+    @discardableResult
+    mutating func beginReveal() -> Bool {
+        guard phase == .approaching else { return false }
         phase = .reveal
         return true
     }
 
     mutating func finishReveal() {
         guard phase == .reveal else { return }
+        informationStep = .action
         phase = .result
     }
 }
 
 enum FishRewardPresentationTiming {
+    static let approachDuration: TimeInterval = 3.0
+    static let reducedMotionApproachDuration: TimeInterval = 0.18
+    static let silhouetteDissolveDuration: TimeInterval = 0.25
     static let revealDuration: TimeInterval = 0.45
     static let reducedMotionRevealDuration: TimeInterval = 0.18
     static let rewardStrokeDuration: TimeInterval = 3.0
-    static let fishAppearanceDuration: TimeInterval = 0.2
+    static let fishAppearanceDuration: TimeInterval = 0.35
+    static let informationInterval: TimeInterval = 0.30
+    static let informationFadeDuration: TimeInterval = 0.25
+
+    static func informationSteps(isNewFish: Bool) -> [FishRewardInformationStep] {
+        isNewFish ? [.rarity, .newBadge, .name, .detail, .action]
+            : [.rarity, .name, .detail, .action]
+    }
 
     static func revealHoldDuration(for rarity: FishRarity) -> TimeInterval {
         switch rarity {
@@ -167,14 +202,14 @@ struct FishRewardGlowStyle: Equatable {
                 restingOpacity: 0.40,
                 revealOpacity: 0.64,
                 blurRadius: 14,
-                particleCount: 0,
-                particleRestingOpacity: 0,
+                particleCount: 4,
+                particleRestingOpacity: 0.24,
                 usesSparkles: false,
                 pulseScale: 1.025,
                 pulseOpacity: 0.46,
                 pulseDuration: 2.8,
                 rotationDuration: 0,
-                ringOpacity: 0.08,
+                ringOpacity: 0.13,
                 fishAuraScale: 1.04,
                 fishAuraPulseScale: 1.065,
                 fishAuraOpacity: 0.18,
@@ -246,12 +281,46 @@ struct FishRewardGlowStyle: Equatable {
 }
 
 enum FishRewardMysteryAppearance {
+    static let backgroundImageName = "reward_mystery_cave"
+    static let backgroundDimmingOpacity = 0.08
+    static let approachScale: CGFloat = 1.30
+    static let approachAnchor = UnitPoint(x: 0.55, y: 0.45)
     static let backgroundColors: [Color] = [
-        Color(red: 0.03, green: 0.10, blue: 0.17),
-        Color(red: 0.06, green: 0.20, blue: 0.27),
-        Color(red: 0.02, green: 0.07, blue: 0.13)
+        Color(red: 0.01, green: 0.035, blue: 0.075),
+        Color(red: 0.025, green: 0.105, blue: 0.16),
+        Color(red: 0.005, green: 0.025, blue: 0.06)
     ]
     static let glowColor = Color(red: 0.54, green: 0.82, blue: 0.88)
+}
+
+enum FishRewardSceneAppearance {
+    static func color(for rarity: FishRarity) -> Color {
+        rarity == .common ? Color(red: 0.76, green: 0.91, blue: 1) : rarity.rewardColor
+    }
+
+    static func backgroundColors(for rarity: FishRarity) -> [Color] {
+        rarity == .common ? [
+            Color(red: 0.025, green: 0.09, blue: 0.16),
+            Color(red: 0.09, green: 0.22, blue: 0.31),
+            Color(red: 0.015, green: 0.055, blue: 0.11)
+        ] : rarity.rewardBackgroundColors
+    }
+}
+
+private extension View {
+    // A thin dark edge keeps small bright text readable without a heavy glow.
+    func rewardTextEdge() -> some View {
+        self.shadow(color: .black.opacity(0.75), radius: 0, x: -0.5)
+            .shadow(color: .black.opacity(0.75), radius: 0, x: 0.5)
+            .shadow(color: .black.opacity(0.75), radius: 0, y: -0.5)
+            .shadow(color: .black.opacity(0.75), radius: 0, y: 0.5)
+    }
+
+    func rewardInformationVisibility(_ visible: Bool) -> some View {
+        opacity(visible ? 1 : 0)
+            .allowsHitTesting(visible)
+            .accessibilityHidden(!visible)
+    }
 }
 
 enum FishRewardParticleLayout {
@@ -442,38 +511,16 @@ private struct FishRewardRevealFlash: View {
 
 struct FishRewardNewBadge: View {
     let glowColor: Color
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .subheadline) private var fontSize: CGFloat = 21
-    @State private var popScale: CGFloat = 0.75
-    @State private var opacity = 0.0
 
     var body: some View {
         Text("NEW!")
             .font(.system(size: fontSize, weight: .heavy))
             .tracking(1.1)
             .foregroundStyle(.white)
-            .shadow(color: .white.opacity(0.28), radius: 3)
-            .shadow(color: glowColor.opacity(0.65), radius: 5)
-            .scaleEffect(reduceMotion ? 1 : popScale)
-            .opacity(opacity)
+            .rewardTextEdge()
+            .shadow(color: glowColor.opacity(0.3), radius: 3)
             .accessibilityIdentifier("fishReward.newBadge")
-            .task {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    opacity = 1
-                    popScale = 1.05
-                }
-                guard !reduceMotion else { return }
-                do {
-                    try await Task.sleep(for: .seconds(0.2))
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    popScale = 1
-                }
-            }
     }
 }
 
@@ -488,6 +535,8 @@ struct FishRewardView: View {
     @State private var strokeTask: Task<Void, Never>?
     @State private var revealTask: Task<Void, Never>?
     @State private var silhouettePulse = false
+    @State private var caveScale: CGFloat = 1
+    @State private var silhouetteOpacity = 1.0
     @State private var glowScale: CGFloat = 0.25
     @State private var glowOpacity = 0.0
     @State private var rewardGlowScale: CGFloat = 0.5
@@ -498,6 +547,7 @@ struct FishRewardView: View {
     @State private var fishAuraScale: CGFloat = 0.86
     @State private var fishAuraOpacity = 0.0
     @State private var hasFishAppeared = false
+    @State private var hasInformationFinished = false
     @State private var isSequencePresentationFinished = false
     private var sequence: FishRewardSequenceHooks?
 #if DEBUG
@@ -517,14 +567,9 @@ struct FishRewardView: View {
     }
 
     private var species: FishSpecies { result.species }
-    private var rarityColor: Color { result.rarity.rewardColor }
+    private var rarityColor: Color { FishRewardSceneAppearance.color(for: result.rarity) }
     private var glowStyle: FishRewardGlowStyle {
         FishRewardGlowStyle.style(for: result.rarity)
-    }
-    private var backgroundColors: [Color] {
-        presentation.showsRarityAppearance
-            ? result.rarity.rewardBackgroundColors
-            : FishRewardMysteryAppearance.backgroundColors
     }
     private var ambientGlowColor: Color {
         presentation.showsRarityAppearance
@@ -534,13 +579,7 @@ struct FishRewardView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: backgroundColors,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-            .accessibilityIdentifier("fishReward.fullScreenBackground")
+            rewardBackground
 
             RadialGradient(
                 colors: [ambientGlowColor.opacity(0.22), .clear],
@@ -570,7 +609,7 @@ struct FishRewardView: View {
             }
             .overlay {
                 GeometryReader { geometry in
-                    if presentation.showsResultInformation && result.showsNewBadge {
+                    if result.showsNewBadge {
                         let rarityCenterY = Self.rarityLabelHeight / 2
                         let fishCenterY = geometry.size.height / 2
                         FishRewardNewBadge(glowColor: rarityColor)
@@ -579,7 +618,7 @@ struct FishRewardView: View {
                                 x: geometry.size.width / 2,
                                 y: fishCenterY - (fishCenterY - rarityCenterY) * 0.18 - 4
                             )
-                            .transition(.identity)
+                            .rewardInformationVisibility(presentation.shows(.newBadge))
                     }
                 }
                 .allowsHitTesting(false)
@@ -621,45 +660,76 @@ struct FishRewardView: View {
         .onDisappear(perform: stopAnimations)
     }
 
-    @ViewBuilder
-    private var resultRarityLabel: some View {
-        if presentation.showsResultInformation {
-            Text(result.rarity.rawValue.uppercased())
-                .font(.headline.weight(.bold))
-                .tracking(1.4)
-                .foregroundStyle(rarityColor)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().stroke(rarityColor.opacity(0.7), lineWidth: 1))
-                .shadow(color: rarityColor.opacity(0.35), radius: 10)
-                .accessibilityIdentifier("fishRarity")
-                .transition(.move(edge: .top).combined(with: .opacity))
-        } else {
-            Color.clear
+    private var rewardBackground: some View {
+        ZStack {
+            LinearGradient(
+                colors: FishRewardSceneAppearance.backgroundColors(for: result.rarity),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            // The image and its ambience share the approach transform, independently of the UI.
+            GeometryReader { geometry in
+                ZStack {
+                    Image(FishRewardMysteryAppearance.backgroundImageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .overlay(Color.black.opacity(FishRewardMysteryAppearance.backgroundDimmingOpacity))
+
+                    if presentation.showsSilhouette {
+                        FishRewardCaveAtmosphere()
+                            .transition(.opacity)
+                    }
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .scaleEffect(caveScale, anchor: FishRewardMysteryAppearance.approachAnchor)
+                .clipped()
+            }
+            .opacity(presentation.showsSilhouette ? 1 : 0)
         }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .accessibilityIdentifier("fishReward.fullScreenBackground")
+    }
+
+    private var resultRarityLabel: some View {
+        Text(result.rarity.rawValue.uppercased())
+            .font(.headline.weight(.bold))
+            .tracking(1.4)
+            .foregroundStyle(rarityColor)
+            .rewardTextEdge()
+            .padding(.horizontal, 18)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().stroke(rarityColor.opacity(0.7), lineWidth: 1))
+            .shadow(color: rarityColor.opacity(0.20), radius: 6)
+            .accessibilityIdentifier("fishRarity")
+            .rewardInformationVisibility(presentation.shows(.rarity))
     }
 
     @ViewBuilder
     private var resultAction: some View {
-        if presentation.showsResultInformation {
-            if let sequence {
-                if result.isNewFish {
-                    Button("タップして次へ", action: sequence.onAdvance)
-                        .buttonStyle(AquariumStudyStartButtonStyle())
-                        .frame(maxWidth: 260)
-                        .disabled(!isSequencePresentationFinished)
-                        .transition(.opacity)
-                } else {
-                    Color.clear.frame(height: 50).accessibilityHidden(true)
-                }
+        if let sequence {
+            if result.isNewFish {
+                Button("タップして次へ", action: sequence.onAdvance)
+                    .buttonStyle(AquariumStudyStartButtonStyle())
+                    .frame(maxWidth: 260)
+                    .rewardInformationVisibility(
+                        presentation.shows(.action) && presentation.showsResultInformation
+                    )
+                    .allowsHitTesting(isSequencePresentationFinished)
+                    .accessibilityHidden(!isSequencePresentationFinished)
             } else {
-                standardCloseAction
+                Color.clear.frame(height: 50).accessibilityHidden(true)
             }
         } else {
-            Color.clear
-                .frame(height: 50)
-                .accessibilityHidden(true)
+            standardCloseAction
+                .rewardInformationVisibility(presentation.shows(.action))
+                .allowsHitTesting(hasInformationFinished)
+                .accessibilityHidden(!hasInformationFinished)
         }
     }
 
@@ -673,7 +743,7 @@ struct FishRewardView: View {
 
     private func handleFishTap() {
         if let sequence {
-            if presentation.showsSilhouette && !sequence.startsAutomatically {
+            if presentation.showsTapPrompt && !sequence.startsAutomatically {
                 // 連続演出の最初だけ、通常の1匹Rewardと同じtap待機を維持する。
                 revealFish()
             } else if isSequencePresentationFinished && presentation.showsResultInformation && result.isNewFish {
@@ -697,7 +767,8 @@ struct FishRewardView: View {
                         Image(systemName: FishRewardGenericSilhouette.systemImageName)
                             .resizable()
                             .scaledToFit()
-                            .foregroundStyle(Color(red: 0.01, green: 0.04, blue: 0.09))
+                            .foregroundStyle(Color(red: 0.015, green: 0.055, blue: 0.11))
+                            .shadow(color: Color.cyan.opacity(0.24), radius: 3)
                             .frame(
                                 width: FishRewardGenericSilhouette.width,
                                 height: FishRewardGenericSilhouette.height
@@ -709,6 +780,7 @@ struct FishRewardView: View {
                             .shadow(color: .black.opacity(0.7), radius: 3, y: 1)
                     }
                     .scaleEffect(reduceMotion ? 1 : (silhouettePulse ? 1.025 : 0.985))
+                    .opacity(silhouetteOpacity)
                     .accessibilityHidden(true)
                     .accessibilityIdentifier("fishReward.genericSilhouette")
                 } else {
@@ -747,13 +819,6 @@ struct FishRewardView: View {
 
                         rewardFishImage(size: imageSize)
                             .rewardLayoutProbe("fish")
-                            .scaleEffect(
-                                !hasFishAppeared && !reduceMotion ? 0.92 : 1
-                            )
-                            .transition(
-                                .scale(scale: reduceMotion ? 1 : 0.72)
-                                    .combined(with: .opacity)
-                            )
                             .accessibilityIdentifier("fishReward.revealedFish")
                             .opacity(hasFishAppeared ? 1 : 0)
                     }
@@ -821,7 +886,8 @@ struct FishRewardView: View {
                 .opacity(glowStyle.ringOpacity * rewardGlowOpacity)
 
             ForEach(0..<glowStyle.particleCount, id: \.self) { index in
-                let offset = FishRewardParticleLayout.normalizedOffsets[index]
+                let offsetIndex = index * FishRewardParticleLayout.normalizedOffsets.count / glowStyle.particleCount
+                let offset = FishRewardParticleLayout.normalizedOffsets[offsetIndex]
                 let symbolName = glowStyle.usesSparkles && index.isMultiple(of: 3)
                     ? "sparkle"
                     : "circle.fill"
@@ -859,7 +925,9 @@ struct FishRewardView: View {
                 Text(names.map { name in
                     let center = debugFrames[name]?.midX ?? 0
                     return "\(name)=\(String(format: "%.2f", center))"
-                }.joined(separator: "\n"))
+                }.joined(separator: "\n")
+                    + "\nphase=\(presentation.phase)"
+                    + "\ninformation=\(presentation.informationStep.map { String(describing: $0) } ?? "hidden")")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.white)
                 .padding(8)
@@ -876,33 +944,38 @@ struct FishRewardView: View {
         if presentation.showsSilhouette {
             Text("Tap!")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.cyan.opacity(0.9))
-                .opacity(reduceMotion ? 1 : (silhouettePulse ? 1 : 0.55))
+                .foregroundStyle(Color(red: 0.80, green: 0.94, blue: 1))
+                .rewardTextEdge()
+                .opacity(presentation.showsTapPrompt ? (reduceMotion ? 1 : (silhouettePulse ? 1 : 0.55)) : 0)
+                .accessibilityHidden(!presentation.showsTapPrompt)
                 .accessibilityLabel("タップして魚を確認")
                 .accessibilityIdentifier("fishReward.tapPrompt")
-        } else if presentation.showsResultInformation {
+        } else {
+            // Keep every result row in the layout while fading it in independently.
             VStack(spacing: 8) {
                 Text("\(result.fishName)をゲット！")
                     .font(.title.bold())
                     .foregroundStyle(.white)
+                    .rewardTextEdge()
                     .multilineTextAlignment(.center)
                     .accessibilityIdentifier("fishReward.getMessage")
+                    .rewardInformationVisibility(presentation.shows(.name))
 
-                if result.isNewFish {
-                    Label("図鑑に登録されました", systemImage: "book.closed.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.78))
-                } else {
-                    Text("所持数 \(result.previousOwnedCount)匹 → \(result.currentOwnedCount)匹")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.78))
-                        .monospacedDigit()
-                        .accessibilityIdentifier("ownedCountChange")
+                Group {
+                    if result.isNewFish {
+                        Label("図鑑に登録されました", systemImage: "book.closed.fill")
+                            .font(.subheadline.weight(.medium))
+                    } else {
+                        Text("所持数 \(result.previousOwnedCount)匹 → \(result.currentOwnedCount)匹")
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .accessibilityIdentifier("ownedCountChange")
+                    }
                 }
+                .foregroundStyle(.white.opacity(0.95))
+                .rewardTextEdge()
+                .rewardInformationVisibility(presentation.shows(.detail))
             }
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-        } else {
-            Color.clear
         }
     }
 
@@ -913,36 +986,65 @@ struct FishRewardView: View {
         }
     }
 
+    private func approachCave() async -> Bool {
+        if reduceMotion {
+            withAnimation(.easeOut(duration: FishRewardPresentationTiming.reducedMotionApproachDuration)) {
+                silhouetteOpacity = 0
+            }
+            do {
+                try await Task.sleep(for: .seconds(FishRewardPresentationTiming.reducedMotionApproachDuration))
+            } catch { return false }
+        } else {
+            withAnimation(.easeInOut(duration: FishRewardPresentationTiming.approachDuration)) {
+                caveScale = FishRewardMysteryAppearance.approachScale
+            }
+            do {
+                try await Task.sleep(for: .seconds(
+                    FishRewardPresentationTiming.approachDuration - FishRewardPresentationTiming.silhouetteDissolveDuration
+                ))
+            } catch { return false }
+            guard !Task.isCancelled else { return false }
+            withAnimation(.easeOut(duration: FishRewardPresentationTiming.silhouetteDissolveDuration)) {
+                silhouetteOpacity = 0
+            }
+            do {
+                try await Task.sleep(for: .seconds(FishRewardPresentationTiming.silhouetteDissolveDuration))
+            } catch { return false }
+        }
+        // Hold the enlarged background during the crossfade; never rewind it to 1x.
+        return !Task.isCancelled
+    }
+
     private func revealFish() {
-        guard presentation.phase == .silhouette else { return }
-        let revealDuration = reduceMotion
-            ? FishRewardPresentationTiming.reducedMotionRevealDuration
-            : FishRewardPresentationTiming.revealDuration
-        rewardGlowScale = reduceMotion ? 1 : 0.5
-        rewardGlowOpacity = reduceMotion ? glowStyle.restingOpacity : glowStyle.revealOpacity
-        rewardGlowRotation = 0
-        fishAuraScale = reduceMotion ? glowStyle.fishAuraScale : 0.86
-        fishAuraOpacity = reduceMotion ? glowStyle.fishAuraOpacity : glowStyle.fishAuraPulseOpacity
-        particleExpansion = reduceMotion ? 1 : 0.35
-        particleOpacity = reduceMotion
-            ? 0
-            : min(glowStyle.particleRestingOpacity + 0.38, 0.92)
-        withAnimation(.spring(response: reduceMotion ? 0.18 : 0.42, dampingFraction: 0.76)) {
-            _ = presentation.beginReveal()
-        }
-
-        silhouettePulse = false
-        glowScale = 0.25
-        glowOpacity = reduceMotion ? 0.28 : 0.9
-        withAnimation(.easeOut(duration: revealDuration)) {
-            glowScale = reduceMotion ? 0.8 : 1.45
-            glowOpacity = 0
-        }
-
-        AppFeedbackService.shared.playFishAcquisition(isNewFish: result.isNewFish)
-
+        // Commit synchronously before creating the task so repeated taps cannot restart it.
+        guard presentation.beginApproach() else { return }
         revealTask?.cancel()
         revealTask = Task { @MainActor in
+            guard await approachCave() else { return }
+            let revealDuration = reduceMotion
+                ? FishRewardPresentationTiming.reducedMotionRevealDuration
+                : FishRewardPresentationTiming.revealDuration
+            rewardGlowScale = reduceMotion ? 1 : 0.5
+            rewardGlowOpacity = reduceMotion ? glowStyle.restingOpacity : glowStyle.revealOpacity
+            rewardGlowRotation = 0
+            fishAuraScale = reduceMotion ? glowStyle.fishAuraScale : 0.86
+            fishAuraOpacity = reduceMotion ? glowStyle.fishAuraOpacity : glowStyle.fishAuraPulseOpacity
+            particleExpansion = reduceMotion ? 1 : 0.35
+            particleOpacity = reduceMotion
+                ? 0
+                : min(glowStyle.particleRestingOpacity + 0.38, 0.92)
+            withAnimation(.easeInOut(duration: revealDuration)) {
+                _ = presentation.beginReveal()
+            }
+
+            silhouettePulse = false
+            glowScale = 0.25
+            glowOpacity = reduceMotion ? 0.28 : 0.9
+            withAnimation(.easeOut(duration: revealDuration)) {
+                glowScale = reduceMotion ? 0.8 : 1.45
+                glowOpacity = 0
+            }
+
             if !reduceMotion {
                 withAnimation(.spring(response: 0.50, dampingFraction: 0.58)) {
                     rewardGlowScale = 1
@@ -960,44 +1062,45 @@ struct FishRewardView: View {
             withAnimation(.easeOut(duration: FishRewardPresentationTiming.fishAppearanceDuration)) {
                 hasFishAppeared = true
             }
+            AppFeedbackService.shared.playFishAcquisition(isNewFish: result.isNewFish)
             playOneStroke()
-            let resultDelay = max(
-                revealDuration,
-                FishRewardPresentationTiming.oneStrokeDuration(for: species)
-            )
-            let glowSettleDuration = reduceMotion ? 0 : 0.52
             if !reduceMotion {
-                withAnimation(.spring(response: 0.50, dampingFraction: 0.58)) {
-                    fishAuraScale = glowStyle.fishAuraScale
-                }
                 withAnimation(.easeOut(duration: 0.52)) {
+                    fishAuraScale = glowStyle.fishAuraScale
                     rewardGlowOpacity = glowStyle.restingOpacity
                     particleOpacity = glowStyle.particleRestingOpacity
                     fishAuraOpacity = glowStyle.fishAuraOpacity
                 }
+            }
 
+            // Text and the existing one-stroke animation progress concurrently.
+            // This is the only task scheduling the information stages.
+            for step in FishRewardPresentationTiming.informationSteps(isNewFish: result.isNewFish) {
                 do {
-                    try await Task.sleep(for: .seconds(glowSettleDuration))
-                } catch {
-                    return
-                }
+                    try await Task.sleep(for: .seconds(FishRewardPresentationTiming.informationInterval))
+                } catch { return }
                 guard !Task.isCancelled else { return }
-                startRewardGlowBreathing()
+                withAnimation(.easeOut(duration: FishRewardPresentationTiming.informationFadeDuration)) {
+                    presentation.showInformation(step)
+                }
             }
-
             do {
-                try await Task.sleep(for: .seconds(max(resultDelay - glowSettleDuration, 0)))
-            } catch {
-                return
-            }
+                try await Task.sleep(for: .seconds(FishRewardPresentationTiming.informationFadeDuration))
+            } catch { return }
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.22)) {
+            hasInformationFinished = true
+            startRewardGlowBreathing()
+
+            // Wait for actual stroke completion, not a second estimated countdown.
+            await strokeTask?.value
+            guard !Task.isCancelled, !isSequencePresentationFinished else { return }
+            withAnimation(.easeOut(duration: FishRewardPresentationTiming.informationFadeDuration)) {
                 presentation.finishReveal()
             }
             if let sequence {
-                // Result text/NEW fade must also finish before the wrapper starts its short hold.
+                // The final sequence action must also finish fading before advancing.
                 do {
-                    try await Task.sleep(for: .seconds(result.isNewFish ? 0.35 : 0.22))
+                    try await Task.sleep(for: .seconds(FishRewardPresentationTiming.informationFadeDuration))
                 } catch { return }
                 guard !Task.isCancelled else { return }
                 isSequencePresentationFinished = true
