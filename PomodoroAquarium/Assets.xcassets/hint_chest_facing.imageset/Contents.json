@@ -1,0 +1,12 @@
+{
+  "images": [
+    {
+      "filename": "hint_chest_facing.png",
+      "idiom": "universal"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

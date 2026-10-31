@@ -402,6 +402,7 @@ struct MainTabView: View {
                     NavigationStack {
                         MoreView()
                     }
+                    .environment(\.hintContentBottomBoundary, shopBottomBoundary)
                     .toolbarVisibility(.hidden, for: .tabBar)
                 } label: {
                     Label("その他", systemImage: "ellipsis.circle.fill")

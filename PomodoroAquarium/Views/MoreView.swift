@@ -27,6 +27,13 @@ struct MoreView: View {
             .accessibilityIdentifier("more.acquisitionHistory")
 
             NavigationLink {
+                HintsView()
+            } label: {
+                Label("ヒント", systemImage: "questionmark.circle")
+            }
+            .accessibilityIdentifier("more.hints")
+
+            NavigationLink {
                 SettingsView()
             } label: {
                 Label("設定", systemImage: "gearshape.fill")
