@@ -5,6 +5,7 @@ enum CoreTutorialTarget: Hashable {
     case coinBalance
     case studySummary
     case homeStart
+    case studyCategory
     case studyMode
     case studySettings
     case studyStart
@@ -132,6 +133,7 @@ enum CoreTutorialConversationScript {
     ]
 
     static let studyMode: [CoreTutorialConversationPage] = [
+        .message("ここで集中する内容のカテゴリーを選べます。記録をカテゴリー別に振り返れます。"),
         .message("集中方法は3つあります。"),
         .message("今回はポモドーロを使ってみましょう。")
     ]

@@ -11,7 +11,7 @@ private enum CoreTutorialConversationPageCount {
     static let homeIntro = 5
     static let homePoints = 2
     static let homeStudySummary = 2
-    static let studyMode = 2
+    static let studyMode = 3
     static let studySettings = 2
     static let studyStart = 6
     static let rewardFollowUp = 3
@@ -530,7 +530,9 @@ final class PomodoroAquariumUITests: XCTestCase {
         waitForConversationReady(in: app)
         app.buttons["home.startStudy"].tap()
 
-        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studyModeIntro"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studyCategoryIntro"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["timer.focusCategory"].exists)
+        XCTAssertFalse(app.buttons["timer.focusCategory"].isEnabled)
         sleep(1)
         let fixedTimerElements: [(String, XCUIElement)] = [
             ("mode switcher", app.segmentedControls.firstMatch),
@@ -683,7 +685,9 @@ final class PomodoroAquariumUITests: XCTestCase {
         advanceConversation(in: app, pageCount: 1)
         waitForConversationReady(in: app)
         app.buttons["home.startStudy"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studyModeIntro"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["coreTutorial.studyCategoryIntro"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["timer.focusCategory"].exists)
+        XCTAssertFalse(app.buttons["timer.focusCategory"].isEnabled)
         sleep(1)
         let previewStudyButtonY = app.buttons["timer.startStudy"].frame.minY
         advanceConversation(in: app, pageCount: CoreTutorialConversationPageCount.studyMode)

@@ -1175,10 +1175,10 @@ struct TimerView: View {
     private var sessionConfigurationControls: some View {
         if viewModel.canConfigureSession && !studyStartIsRevealingRunningUI {
             VStack(spacing: 8) {
-                if viewModel.isStudyTime &&
-                    !isCoreTutorialStudy {
+                if viewModel.isStudyTime {
                     HStack {
                         focusCategorySelection
+                            .coreTutorialTarget(.studyCategory)
                         Spacer(minLength: 0)
                     }
                 }
@@ -1379,6 +1379,7 @@ struct TimerView: View {
         .accessibilityLabel("集中カテゴリ")
         .accessibilityValue(selectedFocusCategory?.name ?? "勉強")
         .accessibilityIdentifier("timer.focusCategory")
+        .disabled(isCoreTutorialStudy)
     }
 
     private var focusCategorySelectionLabel: some View {
@@ -1438,7 +1439,7 @@ struct TimerView: View {
             let pages = CoreTutorialConversationScript.studyMode
             let index = coreTutorial?.conversationIndex ?? 0
             CoreTutorialSpotlightStep(
-                targetFrame: targets[.studyMode].map { geometry[$0] },
+                targetFrame: targets[index == 0 ? .studyCategory : .studyMode].map { geometry[$0] },
                 page: coreTutorialConversationPage(in: pages, at: index),
                 pageIndex: index,
                 onConversationAdvance: {
@@ -1446,7 +1447,7 @@ struct TimerView: View {
                         coreTutorial?.dismissStudySetupIntro()
                     }
                 },
-                accessibilityIdentifier: "coreTutorial.studyModeIntro"
+                accessibilityIdentifier: index == 0 ? "coreTutorial.studyCategoryIntro" : "coreTutorial.studyModeIntro"
             )
         } else if coreTutorial?.step == .studySettingsIntro {
             let pages = CoreTutorialConversationScript.studySettings
