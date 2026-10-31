@@ -298,12 +298,13 @@ enum FishRewardSceneAppearance {
         rarity == .common ? Color(red: 0.76, green: 0.91, blue: 1) : rarity.rewardColor
     }
 
-    static func backgroundColors(for rarity: FishRarity) -> [Color] {
-        rarity == .common ? [
-            Color(red: 0.025, green: 0.09, blue: 0.16),
-            Color(red: 0.09, green: 0.22, blue: 0.31),
-            Color(red: 0.015, green: 0.055, blue: 0.11)
-        ] : rarity.rewardBackgroundColors
+    static func backgroundImageName(for rarity: FishRarity) -> String {
+        switch rarity {
+        case .common: "reward_result_common"
+        case .rare: "reward_result_rare"
+        case .epic: "reward_result_epic"
+        case .legendary: "reward_result_legendary"
+        }
     }
 }
 
@@ -662,11 +663,14 @@ struct FishRewardView: View {
 
     private var rewardBackground: some View {
         ZStack {
-            LinearGradient(
-                colors: FishRewardSceneAppearance.backgroundColors(for: result.rarity),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            // Only the selected rarity image sits behind the fading cave layer.
+            GeometryReader { geometry in
+                Image(FishRewardSceneAppearance.backgroundImageName(for: result.rarity))
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+            }
 
             // The image and its ambience share the approach transform, independently of the UI.
             GeometryReader { geometry in
