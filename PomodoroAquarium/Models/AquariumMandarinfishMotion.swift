@@ -132,7 +132,7 @@ enum AquariumMandarinfishMotion {
             duration = random(hoverDuration)
             start = position
             let angle = randomUnit() * .pi * 2
-            let distance = random(correctionBodyLengths) * bodyLength
+            let distance = random(correctionBodyLengths) * bodyLength * AquariumFishMotion.smallFishMovementSpeedMultiplier
             target = localPoint(dx: cos(angle) * distance, dy: sin(angle) * distance * 0.4)
             // 必要時の小さな採餌姿勢だけ。規則的な上下の描画揺れは使わない。
             dip = randomUnit() < 0.25 ? Double(randomUnit()) * 3 : 0
@@ -141,7 +141,8 @@ enum AquariumMandarinfishMotion {
         private mutating func beginMove() {
             phase = .moving
             elapsed = 0
-            duration = random(travelDuration)
+            // 移動距離は保って移動区間だけ短縮する。滞留時間やひれの時計は変えない。
+            duration = random(travelDuration) / Double(AquariumFishMotion.smallFishMovementSpeedMultiplier)
             start = position
             let band = Self.verticalBand(bounds)
             let distance = random(travelBodyLengths) * bodyLength

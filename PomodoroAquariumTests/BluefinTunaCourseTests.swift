@@ -19,12 +19,14 @@ struct BluefinTunaCourseTests {
             let start = state.position
             state.advance(deltaTime: 1.0 / 30, elapsedTime: Double(tick) / 30)
             #expect(state.position.y == start.y)
-            let expected = state.currentSpeed * state.depthSpeedMultiplier * 6.76 / 30
+            let expected = state.currentSpeed * state.depthSpeedMultiplier * 6.76 * AquariumFishMotion.largeFishMovementSpeedMultiplier / 30
             #expect(abs(state.position.x - start.x - expected) < 0.00000001)
         }
         for profile in [FishMovementProfile.clownfish, .seaTurtle, .dolphin] {
             let other = AquariumFishMotion.initialState(for: id, profile: profile)
-            #expect(other.bluefinCruise == nil && other.translationVelocity == other.velocity)
+            #expect(other.bluefinCruise == nil)
+            #expect(other.translationVelocity == CGVector(dx: other.velocity.dx * other.movementProfile.movementSpeedMultiplier,
+                                                         dy: other.velocity.dy * other.movementProfile.movementSpeedMultiplier))
         }
     }
 
@@ -91,7 +93,7 @@ struct BluefinTunaCourseTests {
                     }
                     if oldPhase == .turning {
                         maximumTurningSpeed = max(maximumTurningSpeed, xSpeed)
-                        #expect(xSpeed <= AquariumFishMotion.BluefinTunaCruise.turningSpeed + 0.00001)
+                        #expect(xSpeed <= AquariumFishMotion.BluefinTunaCruise.turningSpeed * AquariumFishMotion.largeFishMovementSpeedMultiplier + 0.00001)
                         if xSpeed < 0.00001 { stoppedTime += 1.0 / 30 } else { stoppedTime = 0 }
                         longestStoppedTime = max(longestStoppedTime, stoppedTime)
                         #expect(stoppedTime <= 2.0 / 30 + 0.00001)
@@ -106,7 +108,7 @@ struct BluefinTunaCourseTests {
                     }
                     let verticalSpeed = abs(state.position.y - previous.y) * size.height * 30
                     maximumSpeed = max(maximumSpeed, verticalSpeed)
-                    #expect(verticalSpeed <= 10.00001)
+                    #expect(verticalSpeed <= 10 * AquariumFishMotion.largeFishMovementSpeedMultiplier + 0.00001)
                     #expect(bounds.horizontal.contains(state.position.x) && bounds.vertical.contains(state.position.y))
                     if !wasChanging && !changing { #expect(state.position.y == previous.y) }
                     #expect(abs(state.position.x - previous.x - state.translationVelocity.dx * state.depthSpeedMultiplier / 30) < 0.00000001)
@@ -128,7 +130,8 @@ struct BluefinTunaCourseTests {
                         let distance = abs(state.position.y - start.y) * size.height
                         let duration = time - start.time
                         #expect(distance >= 39.99 && distance <= 60.01)
-                        #expect(duration >= 4.99 && duration <= 8.05)
+                        #expect(duration >= 5 / Double(AquariumFishMotion.largeFishMovementSpeedMultiplier) - 0.01
+                            && duration <= 8 / Double(AquariumFishMotion.largeFishMovementSpeedMultiplier) + 0.05)
                         directions.insert(state.position.y > start.y ? 1 : -1)
                         records.append(["width": size.width, "height": size.height, "individual": individual,
                             "distancePoints": distance, "signedDistancePoints": (state.position.y - start.y) * size.height,
@@ -185,7 +188,7 @@ struct BluefinTunaCourseTests {
         for tick in 1...330 {
             let before = state.position
             state.advance(deltaTime: 1.0 / 30, elapsedTime: Double(tick) / 30)
-            #expect(abs(state.position.y - before.y) * 852 * 30 <= 10.00001)
+            #expect(abs(state.position.y - before.y) * 852 * 30 <= 10 * AquariumFishMotion.largeFishMovementSpeedMultiplier + 0.00001)
             if tick == 90 {
                 let cruise = try #require(state.bluefinCruise)
                 #expect(abs(cruise.heightElapsed - 3) < 0.000001)
@@ -216,7 +219,7 @@ struct BluefinTunaCourseTests {
                 state.updateRoamingBounds(tightened)
                 #expect(state.bluefinCruise?.heightElapsed == elapsed)
             }
-            #expect(abs(state.position.y - before.y) * 852 * 30 <= 10.00001)
+            #expect(abs(state.position.y - before.y) * 852 * 30 <= 10 * AquariumFishMotion.largeFishMovementSpeedMultiplier + 0.00001)
         }
         #expect(tightened.vertical.contains(state.position.y))
     }

@@ -37,7 +37,8 @@ struct MandarinfishMotionTests {
                 let distance = hypot((action.target.x - origin.x) * size.width, (action.target.y - origin.y) * size.height)
                 maximum = max(maximum, distance)
                 #expect(distance <= fishSize * AquariumMandarinfishMotion.visibleLengthRatio
-                    * AquariumMandarinfishMotion.correctionBodyLengths.upperBound + 0.000001)
+                    * AquariumMandarinfishMotion.correctionBodyLengths.upperBound
+                    * AquariumFishMotion.smallFishMovementSpeedMultiplier + 0.000001)
                 let ready = String(reflecting: action)
                 action.updateGeometry(bounds: bounds, size: .zero)
                 #expect(String(reflecting: action) == ready)
@@ -91,12 +92,12 @@ struct MandarinfishMotionTests {
                                              (current.target.y - current.start.y) * size.height)
                         if current.phase == .moving {
                             moveCount += 1
-                            #expect((0.75...1.875).contains(current.duration))
+                            #expect((0.75...1.875).contains(current.duration * Double(AquariumFishMotion.smallFishMovementSpeedMultiplier)))
                             #expect(distance >= body * 0.3 - 0.0001 && distance <= body * 0.8 + 0.0001)
                         } else {
                             hoverCount += 1
                             #expect((1...3).contains(current.duration))
-                            #expect(distance <= body * 0.022 + 0.0001)
+                            #expect(distance <= body * 0.022 * AquariumFishMotion.smallFishMovementSpeedMultiplier + 0.0001)
                         }
                     }
                     previous = current
