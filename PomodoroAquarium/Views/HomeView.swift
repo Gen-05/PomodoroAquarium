@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
 
 enum HomeViewMode {
     case home
@@ -17,7 +18,8 @@ private enum HomeStatusRowLayout {
     static let spacing: CGFloat = 8
     static let cardHeight: CGFloat = 36
     static let cornerRadius: CGFloat = 13
-    static let sideWidthRatio: CGFloat = 0.25
+    // 上部の見た目を縮めても、既存のSTARTの縦位置は動かさない。
+    static let startReservedHeaderHeight: CGFloat = 120
 }
 
 struct HomePlayerInitializationResult {
@@ -130,6 +132,8 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     
     @Query private var players: [Player]
+    @Query private var focusSessionRecords: [FocusSessionRecord]
+    @State private var showsFishProbabilities = false
     @Query private var officialDecorationPlacements: [AquariumDecorationPlacement]
     @State private var editorHistory: AquariumEditorHistory?
     @State private var editorWorkingState: AquariumEditorWorkingState?
@@ -532,7 +536,10 @@ struct HomeView: View {
 #if DEBUG
             TimerNavigationDiagnostics.record("Home.navigation presented=\(isPresented)", model: timerViewModel)
 #endif
-            if !isPresented { homeStartTransition.reset() }
+            if !isPresented {
+                homeStartTransition.reset()
+                dailyMessageDate = .now
+            }
         }
         .onDisappear(perform: handleHomeDisappearance)
     }
@@ -596,6 +603,15 @@ struct HomeView: View {
                 persistAquariumEditorDraft()
             }
         }
+        .sheet(isPresented: $showsFishProbabilities) {
+            FishProbabilityDetailsView(projection: fishProbabilityProjection)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
+            dailyMessageDate = .now
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            dailyMessageDate = .now
+        }
         .alert("編集内容を破棄しますか？", isPresented: $showsEditorCancelConfirmation) {
             Button("編集を続ける", role: .cancel) {}
             Button("変更を破棄", role: .destructive) { discardAquariumEditorSession(closeEditor: true) }
@@ -641,54 +657,65 @@ struct HomeView: View {
     private var regularHomeControls: some View {
         VStack(spacing: 0) {
             homeStatusRow
+                .frame(minHeight: HomeStatusRowLayout.startReservedHeaderHeight, alignment: .top)
 
             Spacer(minLength: 24)
 
-            Button {
-                guard coreTutorial?.isActive != true || isHomeStartTutorialInteractionAllowed else {
-                    return
-                }
-                _ = homeStartTransition.begin(isDestinationPresented: showsTimerScreen)
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                Button {
+                    guard coreTutorial?.isActive != true || isHomeStartTutorialInteractionAllowed else {
+                        return
+                    }
+                    _ = homeStartTransition.begin(isDestinationPresented: showsTimerScreen)
 #if DEBUG
-                TimerNavigationDiagnostics.record("Home.start tap", model: timerViewModel)
+                    TimerNavigationDiagnostics.record("Home.start tap", model: timerViewModel)
 #endif
-            } label: {
-                Label(
-                    HomeTimerEntryPresentation.title(
-                        for: timerViewModel.phase,
-                        state: timerViewModel.state
-                    ),
-                    systemImage: "timer"
-                )
-            }
-            .buttonStyle(HomeWaterSurfaceButtonStyle())
-            .frame(maxWidth: 290)
-            .coreTutorialTarget(.homeStart)
-            .disabled(
-                homeStartTransition.isOpening ||
-                    (coreTutorial?.isActive == true && !isHomeStartTutorialInteractionAllowed)
-            )
-            .accessibilityHidden(coreTutorial?.isActive == true && !isHomeStartTutorialInteractionAllowed)
-            .accessibilityIdentifier("home.startStudy")
-            .accessibilityLabel(HomeTimerEntryPresentation.title(
-                for: timerViewModel.phase,
-                state: timerViewModel.state
-            ))
-            .overlay {
-                if homeStartTransition.isOpening {
-                    HomeStartRipple()
+                } label: {
+                    Label(
+                        HomeTimerEntryPresentation.title(
+                            for: timerViewModel.phase,
+                            state: timerViewModel.state
+                        ),
+                        systemImage: "timer"
+                    )
                 }
+                .buttonStyle(HomeWaterSurfaceButtonStyle())
+                .frame(maxWidth: 290)
+                .coreTutorialTarget(.homeStart)
+                .disabled(
+                    homeStartTransition.isOpening ||
+                        (coreTutorial?.isActive == true && !isHomeStartTutorialInteractionAllowed)
+                )
+                .accessibilityHidden(coreTutorial?.isActive == true && !isHomeStartTutorialInteractionAllowed)
+                .accessibilityIdentifier("home.startStudy")
+                .accessibilityLabel(HomeTimerEntryPresentation.title(
+                    for: timerViewModel.phase,
+                    state: timerViewModel.state
+                ))
+                .overlay {
+                    if homeStartTransition.isOpening {
+                        HomeStartRipple()
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    Text(HomeDailyMessage.message(on: dailyMessageDate))
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .alignmentGuide(.bottom) { $0[.top] - 12 }
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("home.dailyMessage")
+                }
+                Spacer(minLength: 0)
             }
-            .overlay(alignment: .bottom) {
-                Text(HomeDailyMessage.message(on: dailyMessageDate))
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.55))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .alignmentGuide(.bottom) { $0[.top] - 12 }
-                    .allowsHitTesting(false)
-                    .accessibilityIdentifier("home.dailyMessage")
+            .overlay(alignment: .top) {
+                // 表示だけをボタンの上へ配置し、START自体の位置・サイズを維持する。
+                homeProbabilitySummary
+                    .padding(.bottom, 12)
+                    .alignmentGuide(.top) { $0[.bottom] }
             }
 
             Spacer(minLength: 24)
@@ -699,68 +726,99 @@ struct HomeView: View {
         .padding(.bottom, 24 + MainTabBarHitShieldLayout.tabBarHeight)
     }
 
+    private var fishProbabilityProjection: FishProbabilityProjection {
+        FishProbabilityProjection.make(on: dailyMessageDate, records: focusSessionRecords)
+    }
+
     private var homeStatusRow: some View {
-        GeometryReader { geometry in
-            let availableWidth = max(
-                geometry.size.width - HomeStatusRowLayout.spacing * 2,
-                0
-            )
-            let sideWidth = availableWidth * HomeStatusRowLayout.sideWidthRatio
-            let centerWidth = availableWidth - sideWidth * 2
-
-            HStack(spacing: HomeStatusRowLayout.spacing) {
-                dailyFishProgress
-                    .frame(width: sideWidth, height: HomeStatusRowLayout.cardHeight)
-
-                HStack(spacing: 6) {
-                    Text("今日 \(HomeDashboardPresentation.studyDurationText(minutes: player?.todayStudyMinutes ?? 0))")
-                        .accessibilityIdentifier("home.todayStudyMinutes")
-
-                    Rectangle()
-                        .fill(.white.opacity(0.34))
-                        .frame(width: 1, height: 13)
-                        .accessibilityHidden(true)
-
-                    Text("昨日 \(HomeDashboardPresentation.studyDurationText(minutes: player?.yesterdayStudyMinutes ?? 0))")
-                        .accessibilityIdentifier("home.yesterdayStudyMinutes")
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.24), radius: 1, y: 1)
-                .multilineTextAlignment(.center)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .padding(.horizontal, 7)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .homeStatusGlass()
-                .frame(width: centerWidth, height: HomeStatusRowLayout.cardHeight)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("home.studySummary")
-                .coreTutorialTarget(.studySummary)
-
-                HStack(spacing: 5) {
-                    Image(systemName: "circle.hexagongrid.fill")
-                    Text("\(CurrencyService.balance(of: player))")
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.yellow)
-                .shadow(color: .black.opacity(0.22), radius: 1, y: 1)
-                .padding(.horizontal, 8)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .homeStatusGlass()
-                .frame(width: sideWidth, height: HomeStatusRowLayout.cardHeight)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("所持コイン \(CurrencyService.balance(of: player))枚")
-                .accessibilityIdentifier("home.coinBalance")
-                .coreTutorialTarget(.coinBalance)
-                .allowsHitTesting(false)
+        HStack(spacing: HomeStatusRowLayout.spacing) {
+            dailyFishProgress
+                .frame(height: HomeStatusRowLayout.cardHeight)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 100)
+            Spacer(minLength: 8)
+            HStack(spacing: 5) {
+                Image(systemName: "circle.hexagongrid.fill")
+                Text("\(CurrencyService.balance(of: player))")
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
-            .frame(maxWidth: .infinity)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.yellow)
+            .shadow(color: .black.opacity(0.22), radius: 1, y: 1)
+            .padding(.horizontal, 8)
+            .frame(minWidth: 80, minHeight: HomeStatusRowLayout.cardHeight)
+            .homeStatusGlass()
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("所持コイン \(CurrencyService.balance(of: player))枚")
+            .accessibilityIdentifier("home.coinBalance")
+            .coreTutorialTarget(.coinBalance)
+            .allowsHitTesting(false)
         }
-        .frame(height: HomeStatusRowLayout.cardHeight)
+    }
+
+    private var homeProbabilitySummary: some View {
+        let probabilities = fishProbabilityProjection.today
+        let baseline = FishRewardService.rarityProbabilities(for: 0)
+        let isBoosted = FishProbabilityProjection.increasingRarities.contains {
+            probabilities.probability(for: $0) > baseline.probability(for: $0)
+        }
+        return Button {
+            guard coreTutorial?.isActive != true else { return }
+            showsFishProbabilities = true
+        } label: {
+            VStack(spacing: 4) {
+                Text(isBoosted ? "昨日の集中で、今日の確率UP中" : "今日の獲得確率")
+                    .font(.caption2.weight(.semibold))
+                    .opacity(0.65)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("home.probabilityExplanation")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(FishProbabilityProjection.rarities, id: \.self) { rarity in
+                            homeProbabilityItem(rarity, probabilities: probabilities)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    VStack(spacing: 6) {
+                        HStack(spacing: 12) {
+                            homeProbabilityItem(.common, probabilities: probabilities).frame(maxWidth: .infinity, alignment: .leading)
+                            homeProbabilityItem(.rare, probabilities: probabilities).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        HStack(spacing: 12) {
+                            homeProbabilityItem(.epic, probabilities: probabilities).frame(maxWidth: .infinity, alignment: .leading)
+                            homeProbabilityItem(.legendary, probabilities: probabilities).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .opacity(0.8)
+            }
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.2), radius: 1, y: 1)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("home.probabilitySummary")
+        .accessibilityHint(FishProbabilityProjection.explanation + "タップで詳細を確認")
+        .coreTutorialTarget(.studySummary)
+    }
+
+    private func homeProbabilityItem(_ rarity: FishRarity, probabilities: FishRewardService.RarityProbabilities) -> some View {
+        HStack(spacing: 3) {
+            Circle().fill(rarity.rewardColor).frame(width: 4, height: 4)
+                .accessibilityHidden(true)
+            Text(rarity.rawValue)
+            Text(FishProbabilityProjection.percentageText(probabilities.probability(for: rarity), compact: true))
+                .fontWeight(.bold)
+                .monospacedDigit()
+                .accessibilityIdentifier("home.todayProbability.\(rarity.rawValue)")
+        }
+        .font(.caption)
+        .fixedSize(horizontal: true, vertical: true)
     }
 
     private var dailyFishProgress: some View {

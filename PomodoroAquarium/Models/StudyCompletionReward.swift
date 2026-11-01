@@ -3,6 +3,7 @@ struct StudyCompletionReward: Equatable {
     let streakReward: Int
     let streakDays: Int
     let didEarnFish: Bool
+    let probabilityChange: FishProbabilityChange?
 
     /// 既存の継続報酬の条件。魚・通常ポイントは日次有効秒数の累積側が担う。
     static func isEligibleForExistingRewards(forStudyMinutes minutes: Int) -> Bool {
@@ -13,12 +14,19 @@ struct StudyCompletionReward: Equatable {
         studyReward: Int,
         streakReward: Int,
         streakDays: Int,
-        didEarnFish: Bool = true
+        didEarnFish: Bool = true,
+        probabilityChange: FishProbabilityChange? = nil
     ) {
         self.studyReward = max(0, studyReward)
         self.streakReward = max(0, streakReward)
         self.streakDays = max(0, streakDays)
         self.didEarnFish = didEarnFish
+        self.probabilityChange = probabilityChange
+    }
+
+    func withProbabilityChange(_ change: FishProbabilityChange?) -> Self {
+        Self(studyReward: studyReward, streakReward: streakReward, streakDays: streakDays,
+             didEarnFish: didEarnFish, probabilityChange: change)
     }
 
     var totalReward: Int {
@@ -38,7 +46,8 @@ struct StudyCompletionReward: Equatable {
             studyReward: overflowed ? Int.max : multipliedReward,
             streakReward: streakReward,
             streakDays: streakDays,
-            didEarnFish: didEarnFish
+            didEarnFish: didEarnFish,
+            probabilityChange: probabilityChange
         )
     }
 }

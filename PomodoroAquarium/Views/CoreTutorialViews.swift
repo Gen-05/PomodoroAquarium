@@ -123,8 +123,8 @@ enum CoreTutorialConversationScript {
     ]
 
     static let homeStudySummary: [CoreTutorialConversationPage] = [
-        .message("ここでは、今日と昨日の集中時間を確認できます。"),
-        .message("昨日の集中時間が長いほど、今日は珍しい魚に出会いやすくなります。")
+        .message("ここでは、Common・Rare・Epic・Legendaryそれぞれの、今日の獲得確率を確認できます。"),
+        .message("昨日の確定した集中記録から計算します。今日の集中は、明日の獲得確率に反映されます。")
     ]
 
     static let homeStart: [CoreTutorialConversationPage] = [

@@ -39,8 +39,9 @@ extension HintScreenshot {
         targets: [:])
     static let history = Self(assetName: "hint_history", aspectRatio: 1.057894737,
         targets: [:])
-    static let home = Self(assetName: "hint_home", aspectRatio: 4.638461538,
-        targets: ["progress": CGRect(x: 0.038557214, y: 0.190384615, width: 0.223051403, height: 0.426923077), "summary": CGRect(x: 0.279021559, y: 0.190384615, width: 0.442786070, height: 0.426923077)])
+    // 1206×1367の撮影済み切り抜き画像と、同じ画像内の操作位置。
+    static let home = Self(assetName: "hint_home", aspectRatio: 1206.0 / 1367,
+        targets: ["progress": CGRect(x: 0.052653400, y: 0.035479151, width: 0.223051403, height: 0.081199707), "summary": CGRect(x: 0.039800995, y: 0.756400878, width: 0.920398010, height: 0.087051939)])
     static let homeStart = Self(assetName: "hint_home_start", aspectRatio: 2.275471698,
         targets: ["start": CGRect(x: 0.138308454, y: 0.401509411, width: 0.723383054, height: 0.291320801)])
     static let purchaseConfirmation = Self(assetName: "hint_purchase_confirmation", aspectRatio: 0.555248619,

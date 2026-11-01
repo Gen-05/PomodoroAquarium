@@ -325,6 +325,7 @@ struct TimerView: View {
     @State private var lastFinalizedRewardBatch: FishRewardBatch?
     @State private var lastFinalizedPointReward = 0
     @State private var lastFinalizedSessionID: UUID?
+    @State private var lastFinalizedProbabilityChange: FishProbabilityChange?
     @State private var presentedPomodoroFlowID: UUID?
     @State private var isClosingStudyFlow = false
     @State private var completionReward: StudyCompletionReward?
@@ -757,16 +758,21 @@ struct TimerView: View {
             }
         }
         viewModel.onFocusSessionFinalized = { session in
+            lastFinalizedProbabilityChange = nil
             do {
                 // 過去日の復元結果に、今日の移行用累計を混ぜない。
                 let baseline = Calendar.current.isDateInToday(session.attributionDate)
                     ? (player?.todayStudyMinutes ?? 0) : 0
+                let wasAlreadyRecorded = (try? FishProbabilityPresentationStore.containsSession(session.id, in: modelContext)) ?? true
                 try StudyHistoryService.recordValidFocusSession(
                     session,
                     existingTodayMinutesBeforeCompletion: baseline,
                     for: player,
                     in: modelContext
                 )
+                // Capture only after the record save succeeds; UI failure never blocks rewards.
+                lastFinalizedProbabilityChange = try? FishProbabilityPresentationStore.snapshot(
+                    for: session.id, wasAlreadyRecorded: wasAlreadyRecorded, defaults: defaults, in: modelContext)
                 guard let player else { return false }
                 let pointReward = try DailyPointProgressService.process(
                     sessionID: session.id, for: player, in: modelContext
@@ -814,6 +820,7 @@ struct TimerView: View {
                 lastFinalizedRewardBatch = nil
                 lastFinalizedPointReward = 0
                 lastFinalizedSessionID = nil
+                lastFinalizedProbabilityChange = nil
             }
             let completedStudyMinutes = viewModel.lastCompletedStudyMinutes
             studyFinishedEndReason = viewModel.lastStudySessionEndReason ?? .completed
@@ -916,6 +923,10 @@ struct TimerView: View {
 
     private func queueCompletionReward(_ reward: StudyCompletionReward, minutes: Int,
                                        sessionID: UUID?, flowID: UUID?) {
+        let change = lastFinalizedProbabilityChange.flatMap { change in
+            sessionID.map { change.sessionIDs.contains($0) } == true ? change : nil
+        }
+        let reward = reward.withProbabilityChange(reward.probabilityChange ?? change)
         if let flowID, let sessionID {
             PomodoroFlowRewardStore.append(reward, minutes: minutes, sessionID: sessionID,
                                           flowID: flowID, defaults: defaults)

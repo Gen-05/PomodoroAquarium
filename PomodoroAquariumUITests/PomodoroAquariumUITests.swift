@@ -481,7 +481,7 @@ final class PomodoroAquariumUITests: XCTestCase {
         }
         let studyButton = app.buttons["home.startStudy"]
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
-        let homeIDs = ["home.dailyFishProgress", "home.coinBalance", "home.todayStudyMinutes"]
+        let homeIDs = ["home.dailyFishProgress", "home.coinBalance", "home.todayProbability.Common"]
         let before = homeIDs.map { app.descendants(matching: .any)[$0].label }
         app.terminate()
         app.launchArguments = ["-hasCompletedCoreTutorial", "YES"]
@@ -661,7 +661,7 @@ final class PomodoroAquariumUITests: XCTestCase {
         let dashboardIDs = [
             "home.dailyFishProgress",
             "home.coinBalance",
-            "home.todayStudyMinutes"
+            "home.todayProbability.Common"
         ]
         XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
         let dashboardBeforePreview = dashboardIDs.map {
@@ -884,6 +884,111 @@ final class PomodoroAquariumUITests: XCTestCase {
     }
 
     @MainActor
+    func testProbabilityCardRewardPreviewsAndCaptureHomeHint() throws {
+        let app = XCUIApplication()
+        app.launchArguments.append("-core-tutorial-in-memory")
+        launchReturningUser(app)
+        let card = app.buttons["home.probabilitySummary"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        try captureHomeProbabilityHint(app, card: card)
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(app.staticTexts["Common"].waitForExistence(timeout: 5))
+        for name in ["Rare", "Epic", "Legendary"] { XCTAssertTrue(app.staticTexts[name].exists) }
+        keepScreenshot(app, name: "probability-details")
+        app.buttons["fishProbability.close"].tap()
+        app.buttons["mainTab.more"].tap()
+        app.buttons["more.rewardPreview"].tap()
+        for (entryID, message) in [("rewardPreview.probabilityIncrease", "↑UP"),
+                                    ("rewardPreview.probabilityMaximum", "明日の確率は上限です")] {
+            let entry = app.buttons[entryID]
+            if !entry.isHittable { app.swipeUp() }
+            XCTAssertTrue(entry.waitForExistence(timeout: 5))
+            entry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            if entryID.hasSuffix("Increase") {
+                XCTAssertTrue(app.staticTexts["reward.probabilityUp.Legendary"].waitForExistence(timeout: 8))
+                let lastUp = app.staticTexts["reward.probabilityUp.Legendary"]
+                let complete = NSPredicate(format: "label == %@", "↑UP")
+                expectation(for: complete, evaluatedWith: lastUp)
+                waitForExpectations(timeout: 8)
+            } else {
+                XCTAssertTrue(app.staticTexts[message].waitForExistence(timeout: 8))
+            }
+            for name in ["Rare", "Epic", "Legendary"] {
+                XCTAssertTrue(app.staticTexts["reward.tomorrowProbability.\(name)"].exists)
+            }
+            if entryID.hasSuffix("Maximum") { XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == %@", "↑UP")).firstMatch.exists) }
+            keepScreenshot(app, name: entryID)
+            app.buttons["閉じる"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
+    }
+
+    @MainActor
+    func testCompactHomeProbabilityLayoutAndCaptureHint() throws {
+        let app = XCUIApplication()
+        app.launchArguments.append("-core-tutorial-in-memory")
+        launchReturningUser(app)
+        let card = app.buttons["home.probabilitySummary"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        let progress = app.descendants(matching: .any)["home.dailyFishProgress"].firstMatch
+        let coins = app.descendants(matching: .any)["home.coinBalance"].firstMatch
+        let add = app.buttons["home.increaseDailyFishLimit"]
+        XCTAssertTrue(add.isHittable)
+        XCTAssertLessThanOrEqual(progress.frame.maxX, coins.frame.minX)
+        XCTAssertLessThanOrEqual(progress.frame.maxY, card.frame.minY)
+        XCTAssertLessThanOrEqual(coins.frame.maxY, card.frame.minY)
+        let startButton = app.buttons["home.startStudy"]
+        XCTAssertEqual(startButton.frame.minY - card.frame.maxY, 12, accuracy: 2)
+        XCTAssertTrue(card.staticTexts["home.probabilityExplanation"].label == "今日の獲得確率")
+        let common = card.staticTexts["home.todayProbability.Common"]
+        let legendary = card.staticTexts["home.todayProbability.Legendary"]
+        XCTAssertEqual(common.frame.midY, legendary.frame.midY, accuracy: 2)
+        try captureHomeProbabilityHint(app, card: card)
+        card.tap()
+        XCTAssertTrue(app.buttons["fishProbability.close"].waitForExistence(timeout: 5))
+        app.buttons["fishProbability.close"].tap()
+        app.terminate()
+
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]
+        launchReturningUser(app)
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        let rare = card.staticTexts["home.todayProbability.Rare"]
+        let epic = card.staticTexts["home.todayProbability.Epic"]
+        XCTAssertEqual(common.frame.midY, rare.frame.midY, accuracy: 2)
+        XCTAssertLessThan(common.frame.maxY, epic.frame.minY)
+        XCTAssertEqual(epic.frame.midY, legendary.frame.midY, accuracy: 2)
+        XCTAssertGreaterThanOrEqual(card.frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(card.frame.maxX, app.frame.maxX)
+        keepScreenshot(app, name: "compact-home-large-text")
+    }
+
+    @MainActor
+    private func captureHomeProbabilityHint(_ app: XCUIApplication, card: XCUIElement) throws {
+        let progress = app.descendants(matching: .any)["home.dailyFishProgress"].firstMatch
+        for name in ["Common", "Rare", "Epic", "Legendary"] {
+            XCTAssertTrue(card.staticTexts["home.todayProbability.\(name)"].exists)
+        }
+        let image = app.screenshot().image
+        let source = try XCTUnwrap(image.cgImage)
+        let scale = CGFloat(source.width) / app.frame.width
+        let row = card.frame.union(progress.frame).union(app.buttons["home.startStudy"].frame)
+        let crop = CGRect(x: 0, y: max(0, row.minY - 16), width: app.frame.width, height: row.height + 24)
+        let pixels = CGRect(x: 0, y: crop.minY * scale, width: crop.width * scale, height: crop.height * scale).integral
+        let cropped = try XCTUnwrap(source.cropping(to: pixels))
+        let attachment = XCTAttachment(image: UIImage(cgImage: cropped))
+        attachment.name = "hint_home_probability"; attachment.lifetime = .keepAlways; add(attachment)
+        var targets: [String: [CGFloat]] = [:]
+        for (key, frame) in [("summary", card.frame), ("progress", progress.frame)] {
+            targets[key] = [(frame.minX * scale - pixels.minX) / pixels.width,
+                            (frame.minY * scale - pixels.minY) / pixels.height,
+                            frame.width * scale / pixels.width, frame.height * scale / pixels.height]
+        }
+        let metadata: [String: Any] = ["width": cropped.width, "height": cropped.height, "targets": targets]
+        let data = try JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys])
+        let meta = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        meta.name = "hint_home_probability_metadata"; meta.lifetime = .keepAlways; add(meta)
+    }
+
+    @MainActor
     private func assertRewardCenters(_ app: XCUIApplication, names: [String]) {
         let label = app.staticTexts["fishReward.debugCoordinates"].label
         let values: [String: Double] = Dictionary(uniqueKeysWithValues: label.split(separator: "\n").compactMap { line in
@@ -913,21 +1018,23 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         let dailyFishProgress = app.descendants(matching: .any)["home.dailyFishProgress"]
         let increaseFishLimitButton = app.buttons["home.increaseDailyFishLimit"]
-        let studySummary = app.descendants(matching: .any)["home.studySummary"]
-        let todayStudyMinutes = app.staticTexts["home.todayStudyMinutes"]
-        let yesterdayStudyMinutes = app.staticTexts["home.yesterdayStudyMinutes"]
+        let studySummary = app.descendants(matching: .any)["home.probabilitySummary"]
+        let todayProbability = app.staticTexts["home.todayProbability.Common"]
+        let legendaryProbability = app.staticTexts["home.todayProbability.Legendary"]
         let coinBalance = app.descendants(matching: .any)["home.coinBalance"]
         let customTabBar = app.descendants(matching: .any)["mainTab.customTabBar"]
         XCTAssertTrue(dailyFishProgress.exists)
         XCTAssertTrue(increaseFishLimitButton.exists)
         XCTAssertTrue(studySummary.exists)
-        XCTAssertTrue(todayStudyMinutes.exists)
-        XCTAssertTrue(yesterdayStudyMinutes.exists)
+        XCTAssertTrue(todayProbability.exists)
+        XCTAssertTrue(legendaryProbability.exists)
         XCTAssertTrue(coinBalance.exists)
         XCTAssertTrue(customTabBar.exists)
         XCTAssertLessThanOrEqual(studyButton.frame.maxY, customTabBar.frame.minY)
-        XCTAssertLessThanOrEqual(dailyFishProgress.frame.maxX, studySummary.frame.minX)
-        XCTAssertLessThanOrEqual(studySummary.frame.maxX, coinBalance.frame.minX)
+        XCTAssertLessThanOrEqual(dailyFishProgress.frame.maxX, coinBalance.frame.minX)
+        XCTAssertLessThanOrEqual(dailyFishProgress.frame.maxY, studySummary.frame.minY)
+        XCTAssertLessThanOrEqual(coinBalance.frame.maxY, studySummary.frame.minY)
+        XCTAssertLessThanOrEqual(studySummary.frame.maxY, studyButton.frame.minY)
         let statusBar = app.statusBars.firstMatch
         if statusBar.exists {
             XCTAssertGreaterThanOrEqual(dailyFishProgress.frame.minY, statusBar.frame.maxY)

@@ -106,12 +106,17 @@ enum StudyHistoryService {
     static func focusMinutes(
         on date: Date, from records: [FocusSessionRecord], calendar: Calendar = .current
     ) -> Int {
-        let seconds = records.filter { calendar.isDate($0.attributionDate, inSameDayAs: date) }
+        focusSeconds(on: date, from: records, calendar: calendar) / 60
+    }
+
+    static func focusSeconds(
+        on date: Date, from records: [FocusSessionRecord], calendar: Calendar = .current
+    ) -> Int {
+        records.filter { calendar.isDate($0.attributionDate, inSameDayAs: date) }
             .reduce(0) { total, record in
                 let (next, overflowed) = total.addingReportingOverflow(record.validFocusSeconds)
                 return overflowed ? Int.max : next
             }
-        return seconds / 60
     }
 
     static func minutes(

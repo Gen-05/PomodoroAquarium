@@ -118,7 +118,8 @@ enum HintTopic: String, CaseIterable, Identifiable {
                     Self.page("本日の獲得状況を確認", .home, "ホームで今日の獲得数と上限、次の魚までの進み具合を確認できます。25分未満の端数は翌日へ持ち越しません。", "progress")
                 ]),
                 guide("rarity", "珍しい魚に出会うには", [
-                    Self.page("昨日の集中時間が影響", .home, "前日の集中時間に応じて、珍しい魚に出会う確率が上がります（180分で上限）。ホームの「昨日」で確認できます。", "summary")
+                    Self.page("今日の獲得確率", .home, "4つのレアリティそれぞれの今日の確率を確認できます。昨日の確定した集中記録から計算し、180分で上限になります。", "summary"),
+                    Self.page("集中は明日の確率に反映", .home, "今日の集中後は、報酬画面で明日のRare・Epic・Legendaryの変化を確認できます。集中時間は「統計」から振り返れます。", "summary")
                 ]),
                 guide("reward", "集中後の報酬を確認", [
                     Self.page("「報酬を見る」を押す", .studyFinished, "集中が終わったら「報酬を見る」を押します。獲得条件や当日の上限に応じた報酬が表示されます。", "reward")

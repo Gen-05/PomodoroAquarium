@@ -109,6 +109,19 @@ struct RewardPreviewCatalog {
     ]
 }
 
+private struct ProbabilityRewardPreview: Identifiable {
+    let id = UUID()
+    let reward: StudyCompletionReward
+    static var increase: Self { make(beforeMinutes: 0) }
+    static var maximum: Self { make(beforeMinutes: FishRewardService.maximumBonusStudyMinutes) }
+    private static func make(beforeMinutes: Int) -> Self {
+        let change = FishProbabilityChange(sessionIDs: [UUID()], referenceDay: Calendar.current.startOfDay(for: Date()),
+            beforeSeconds: beforeMinutes * 60, afterSeconds: (beforeMinutes + 25) * 60)
+        return Self(reward: StudyCompletionReward(studyReward: 10, streakReward: 0, streakDays: 0,
+                                                 didEarnFish: false, probabilityChange: change))
+    }
+}
+
 private struct RewardPreviewPresentation: Identifiable {
     let id = UUID()
     let result: FishAcquisitionResult
@@ -200,6 +213,7 @@ struct RewardPreviewView: View {
     @State private var presentation: RewardPreviewPresentation?
     @State private var multipleFishPresentation: RewardPreviewCatalog.MultipleFishItem?
     @State private var showsDailyFishClaimPreview = false
+    @State private var probabilityRewardPreview: ProbabilityRewardPreview?
     @State private var showsLoadingPreview = false
     @State private var previewsNewFish = true
     @State private var showsOnboardingPreview = false
@@ -258,6 +272,12 @@ struct RewardPreviewView: View {
                 Text("Reward Preview")
             } footer: {
                 Text("演出だけを再生します。所持魚、今日の獲得数、コイン、集中記録は変更されません。")
+            }
+            Section("集中報酬・明日の獲得確率") {
+                Button("レアリティ別の確率アップを確認") { probabilityRewardPreview = .increase }
+                    .accessibilityIdentifier("rewardPreview.probabilityIncrease")
+                Button("レアリティ別の上限時を確認") { probabilityRewardPreview = .maximum }
+                    .accessibilityIdentifier("rewardPreview.probabilityMaximum")
             }
             Section {
                 ForEach(RewardPreviewCatalog.multipleFishItems) { item in
@@ -372,6 +392,9 @@ struct RewardPreviewView: View {
         }) { session in
             DecorationTutorialPreviewHost(session: session) { decorationTutorialPreviewSession = nil }
                 .id(session.suiteName)
+        }
+        .sheet(item: $probabilityRewardPreview) { preview in
+            StudyCompletionRewardView(reward: preview.reward)
         }
         .sheet(isPresented: $showsDailyFishClaimPreview) { DailyFishClaimPreviewView() }
         .fullScreenCover(isPresented: $showsLoadingPreview) {

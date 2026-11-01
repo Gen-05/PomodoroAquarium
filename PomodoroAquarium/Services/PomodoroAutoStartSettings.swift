@@ -22,10 +22,12 @@ struct PomodoroFlowRewardSummary: Codable {
     var streakPoints = 0
     var streakDays = 0
     var didEarnFish = false
+    var probabilityChanges: [FishProbabilityChange]?
 
     var completionReward: StudyCompletionReward {
         .init(studyReward: studyPoints, streakReward: streakPoints,
-              streakDays: streakDays, didEarnFish: didEarnFish)
+              streakDays: streakDays, didEarnFish: didEarnFish,
+              probabilityChange: FishProbabilityChange.combined(probabilityChanges ?? []))
     }
 }
 
@@ -44,6 +46,9 @@ enum PomodoroFlowRewardStore {
         var summary = load(flowID: flowID, defaults: defaults) ?? .init(flowID: flowID)
         guard !summary.sessions.contains(sessionID) else { return }
         summary.sessions.append(sessionID)
+        if let change = reward.probabilityChange {
+            summary.probabilityChanges = (summary.probabilityChanges ?? []) + [change]
+        }
         summary.minutes += max(0, minutes)
         summary.studyPoints += reward.studyReward
         summary.streakPoints += reward.streakReward
