@@ -40,6 +40,9 @@ final class ShopDecorationPreviewSession: Identifiable {
         modelContainer = try ModelContainer(for: Player.self, PlayerFish.self, AquariumDecorationPlacement.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         modelContainer.mainContext.autosaveEnabled = false
+#if DEBUG
+        SwiftDataStopDiagnostics.register(modelContainer.mainContext, role: "Preview.shop")
+#endif
     }
 
     func changeFacing() {

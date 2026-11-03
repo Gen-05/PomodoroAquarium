@@ -42,6 +42,7 @@ final class DecorationTutorialPreviewSession: Identifiable {
             defaults.set("25", forKey: TimerConfigurationStorageKey.pomodoroStudyDuration)
             defaults.set("5", forKey: TimerConfigurationStorageKey.pomodoroBreakDuration)
             let context = modelContainer.mainContext
+            SwiftDataStopDiagnostics.register(context, role: "Preview.decoration")
             let fish = PlayerFish(species: .clownfish)
             let player = Player(ownedFish: [fish], activeAquariumFishIDs: [fish.id],
                 hasInitializedActiveAquariumFish: true, coins: 10_000)

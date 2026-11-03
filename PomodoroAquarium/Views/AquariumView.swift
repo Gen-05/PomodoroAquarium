@@ -115,6 +115,10 @@ struct AquariumView: View {
         }
         .ignoresSafeArea()
         .onAppear {
+#if DEBUG
+            SwiftDataStopDiagnostics.references("Aquarium.appear.copy=\(editingPlacements != nil)", context: modelContext,
+                models: (player.map { [$0 as any PersistentModel] } ?? []) + officialDecorationPlacements.map { $0 as any PersistentModel })
+#endif
             updateDisplayedFish()
             if let decorationTrialID,
                let placement = decorationPlacements.first(where: { $0.decorationID == decorationTrialID }) {

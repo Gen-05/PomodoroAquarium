@@ -461,6 +461,9 @@ struct MainTabView: View {
             .onReceive(timer) { _ in
                 timerViewModel.tick()
                 resetDailyFishProgressIfNeeded()
+#if DEBUG
+                SwiftDataStopDiagnostics.checkpoint(context: modelContext, screen: String(describing: tabSelectionState.selection), player: players.first)
+#endif
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase != .active { timerViewModel.setAppActive(false) }

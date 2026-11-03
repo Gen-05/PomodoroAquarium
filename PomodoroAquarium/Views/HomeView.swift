@@ -469,6 +469,10 @@ struct HomeView: View {
     private var observedAquariumContent: some View {
         aquariumContent
         .onAppear {
+#if DEBUG
+            SwiftDataStopDiagnostics.references("Home.\(mode).appear", context: modelContext,
+                models: players.map { $0 as any PersistentModel } + focusSessionRecords.map { $0 as any PersistentModel } + officialDecorationPlacements.map { $0 as any PersistentModel })
+#endif
             if mode == .home {
                 inspectPersistedTimerSession()
                 DailyFishAcquisitionStore.resetIfNeeded(defaults: appDefaults)
@@ -541,7 +545,12 @@ struct HomeView: View {
                 dailyMessageDate = .now
             }
         }
-        .onDisappear(perform: handleHomeDisappearance)
+        .onDisappear {
+#if DEBUG
+            SwiftDataStopDiagnostics.record("Home.\(mode).disappear", context: modelContext)
+#endif
+            handleHomeDisappearance()
+        }
     }
 
     var body: some View {

@@ -444,13 +444,31 @@ final class PomodoroAquariumUITests: XCTestCase {
     func testOnboardingCompletesOnceAndRelaunchesDirectlyIntoHome() {
         let app = XCUIApplication()
         app.launchArguments = [
+            "-core-tutorial-in-memory",
             "-reset-onboarding",
             "-hasCompletedCoreTutorial", "YES"
         ]
         app.launch()
+        XCTAssertTrue(app.buttons["startSurface.start"].waitForExistence(timeout: 8))
+        keepScreenshot(app, name: "adopted-start-surface")
+        app.buttons["startSurface.start"].tap()
         for page in 0..<3 {
-            XCTAssertTrue(app.staticTexts["onboarding.title.\(page)"].waitForExistence(timeout: 5))
+            let title = app.staticTexts["onboarding.title.\(page)"]
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
             XCTAssertFalse(app.buttons["home.startStudy"].exists)
+            XCTAssertFalse(app.buttons["onboarding.next"].exists)
+            XCTAssertFalse(app.buttons["onboarding.continue"].exists)
+            let titleFrame = title.frame
+            // ページ内にはタップせず、見出し→本文→図が自動で揃うことを確認する。
+            XCTAssertTrue(app.buttons["onboarding.next"].waitForExistence(timeout: 30))
+            XCTAssertEqual(title.value as? String, "全文表示済み")
+            for index in 0..<(page == 1 ? 2 : 1) {
+                let sentence = app.staticTexts["onboarding.sentence.\(page).\(index)"]
+                XCTAssertTrue(sentence.exists)
+                XCTAssertEqual(sentence.value as? String, "全文表示済み")
+            }
+            XCTAssertEqual(title.frame.midY, titleFrame.midY, accuracy: 0.5)
+            XCTAssertEqual(app.descendants(matching: .any)["onboarding.pageIndicator"].label, "\(page + 1) / 3ページ")
             if page == 0 {
                 for step in ["集中", "魚をゲット", "水族館が育つ"] {
                     XCTAssertTrue(app.staticTexts[step].exists)
@@ -469,26 +487,31 @@ final class PomodoroAquariumUITests: XCTestCase {
                     XCTAssertTrue(app.staticTexts[rarity].exists)
                 }
             }
+            if page == 1 {
+                app.swipeRight()
+                XCTAssertTrue(app.staticTexts["onboarding.title.0"].waitForExistence(timeout: 3))
+                XCTAssertTrue(app.staticTexts["onboarding.sentence.0.0"].exists)
+                XCTAssertTrue(app.buttons["onboarding.next"].exists)
+                app.swipeLeft()
+                XCTAssertTrue(app.staticTexts["onboarding.title.1"].waitForExistence(timeout: 3))
+                XCTAssertTrue(app.staticTexts["onboarding.sentence.1.1"].exists)
+            }
             let attachment = XCTAttachment(screenshot: app.screenshot())
             attachment.name = "Onboarding page \(page + 1)"
             attachment.lifetime = .keepAlways
             add(attachment)
-            if page == 0 {
-                app.collectionViews["onboarding.pages"].swipeLeft()
-            } else {
-                app.buttons["onboarding.next"].tap()
-            }
+            app.buttons["onboarding.next"].tap()
         }
         let studyButton = app.buttons["home.startStudy"]
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         let homeIDs = ["home.dailyFishProgress", "home.coinBalance", "home.todayProbability.Common"]
         let before = homeIDs.map { app.descendants(matching: .any)[$0].label }
         app.terminate()
-        app.launchArguments = ["-hasCompletedCoreTutorial", "YES"]
+        app.launchArguments = ["-core-tutorial-in-memory", "-hasCompletedCoreTutorial", "YES"]
         app.launch()
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["onboarding.title.0"].exists)
-        XCTAssertFalse(app.buttons["startButton"].exists)
+        XCTAssertFalse(app.buttons["startSurface.start"].exists)
         XCTAssertEqual(homeIDs.map { app.descendants(matching: .any)[$0].label }, before)
         XCTAssertTrue(app.buttons["mainTab.home"].exists)
 
@@ -500,8 +523,12 @@ final class PomodoroAquariumUITests: XCTestCase {
         }
         XCTAssertTrue(onboardingPreview.waitForExistence(timeout: 5))
         onboardingPreview.tap()
+        XCTAssertTrue(app.buttons["startSurface.start"].waitForExistence(timeout: 5))
+        app.buttons["startSurface.start"].tap()
         for page in 0..<3 {
             XCTAssertTrue(app.staticTexts["onboarding.title.\(page)"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["onboarding.continue"].exists)
+            XCTAssertTrue(app.buttons["onboarding.next"].waitForExistence(timeout: 30))
             app.buttons["onboarding.next"].tap()
         }
         XCTAssertTrue(app.buttons["rewardPreview.onboarding"].waitForExistence(timeout: 5))
@@ -510,6 +537,39 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["onboarding.title.0"].exists)
         XCTAssertEqual(homeIDs.map { app.descendants(matching: .any)[$0].label }, before)
+    }
+
+    @MainActor
+    func testStartSurfacePreviewCanExitAndReplayWithoutChangingHome() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-core-tutorial-in-memory")
+        launchReturningUser(app)
+        let ids = ["home.dailyFishProgress", "home.coinBalance", "home.todayProbability.Common"]
+        let before = ids.map { app.descendants(matching: .any)[$0].label }
+        app.buttons["mainTab.more"].tap()
+        app.buttons["more.rewardPreview"].tap()
+        let entry = app.buttons["rewardPreview.startSurface"]
+        for _ in 0..<6 where !entry.isHittable { app.swipeUp() }
+        XCTAssertTrue(entry.isHittable)
+        entry.tap()
+        let start = app.buttons["startSurface.start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["startSurfacePreview.exit"].isHittable)
+        XCTAssertGreaterThanOrEqual(start.frame.height, 44)
+        keepScreenshot(app, name: "start-surface-preview")
+        app.buttons["startSurfacePreview.exit"].tap()
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        entry.tap()
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        XCTAssertTrue(app.staticTexts["onboarding.title.0"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["onboarding.continue"].exists)
+        app.buttons["startSurfacePreview.exit"].tap()
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        app.buttons["mainTab.home"].tap()
+        XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
+        XCTAssertEqual(ids.map { app.descendants(matching: .any)[$0].label }, before)
+        XCTAssertFalse(start.exists)
     }
 
     @MainActor
@@ -1159,6 +1219,32 @@ final class PomodoroAquariumUITests: XCTestCase {
         app.buttons["報酬を見る"].tap()
         XCTAssertTrue(app.staticTexts["0コイン"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["獲得魚なし"].exists)
+    }
+
+    /// 通常のSQLite/Query/自動保存を使う。既存シミュレータの保存データでは実行しない。
+    @MainActor
+    func testAquariumIdleSwiftDataInvestigation() async throws {
+        let name = ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"] ?? UIDevice.current.name
+        try XCTSkipUnless(name.hasPrefix("SwiftData Idle Check"), "調査専用の新規シミュレータでのみ実行")
+        let app = XCUIApplication()
+        app.launchArguments += ["-timerSessionState", ""]
+        launchReturningUser(app)
+        // この専用Simulatorに通常編集で保存済みの3匹を使う。検証中に配置を作り直さない。
+        keepScreenshot(app, name: "swiftdata-idle-home-start")
+        try await Task.sleep(for: .seconds(90)) // アプリへ操作・時刻注入をしない。
+        XCTAssertEqual(app.state, .runningForeground)
+        XCTAssertTrue(app.buttons["home.startStudy"].exists)
+        keepScreenshot(app, name: "swiftdata-idle-home-after90s")
+        app.buttons["mainTab.aquarium"].tap()
+        // 調査用の準備操作で残った下書きがあれば、通常のキャンセル経路で正式配置に戻る。
+        if app.buttons["aquariumEditor.cancel"].waitForExistence(timeout: 1) {
+            app.buttons["aquariumEditor.cancel"].tap()
+            app.alerts["編集内容を破棄しますか？"].buttons["変更を破棄"].tap()
+        }
+
+        try await Task.sleep(for: .seconds(90))
+        XCTAssertEqual(app.state, .runningForeground)
+        keepScreenshot(app, name: "swiftdata-idle-aquarium-after90s")
     }
 
     @MainActor

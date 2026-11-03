@@ -57,7 +57,13 @@ struct PomodoroAquariumApp: App {
                     FocusCategory.self,
                     FocusSessionRecord.self,
                     RewardHistoryEntry.self
-                ], inMemory: usesInMemoryUITestStore)
+                ], inMemory: usesInMemoryUITestStore, onSetup: { result in
+#if DEBUG
+                    if case .success(let container) = result {
+                        SwiftDataStopDiagnostics.register(container.mainContext, role: "App.root")
+                    }
+#endif
+                })
         }
     }
 }

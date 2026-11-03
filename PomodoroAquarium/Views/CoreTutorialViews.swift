@@ -1,5 +1,34 @@
 import SwiftUI
 
+/// 共通の文字送りとキャンセル処理。速度指定がなければ既存チュートリアルの20msを使う。
+@MainActor
+enum TutorialTextReveal {
+    static let characterInterval: Duration = .milliseconds(20)
+
+    static func reveal(
+        _ text: String,
+        delayBeforeCharacter: ((Character?, Character) -> Duration)? = nil,
+        onCharacter: (Character) -> Void
+    ) async -> Bool {
+        var previousCharacter: Character?
+        for character in text {
+            let delay = delayBeforeCharacter?(previousCharacter, character) ?? characterInterval
+            if delay > .zero {
+                do {
+                    try await Task.sleep(for: delay)
+                } catch {
+                    return false
+                }
+            }
+            guard !Task.isCancelled else { return false }
+            onCharacter(character)
+            // 改行を挟んでも、その前の句読点による間を失わない。
+            if !character.isNewline { previousCharacter = character }
+        }
+        return true
+    }
+}
+
 enum CoreTutorialTarget: Hashable {
     case dailyFish
     case coinBalance
@@ -637,11 +666,9 @@ private struct CoreTutorialConversationLayer: View {
 
         guard !reduceMotion else { return }
         typingTask = Task { @MainActor in
-            for character in page.text {
-                try? await Task.sleep(for: .milliseconds(20))
-                guard !Task.isCancelled else { return }
+            guard await TutorialTextReveal.reveal(page.text, onCharacter: { character in
                 displayedText.append(character)
-            }
+            }) else { return }
             isTextComplete = true
         }
     }

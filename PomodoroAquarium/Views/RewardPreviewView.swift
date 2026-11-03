@@ -149,6 +149,7 @@ private final class CoreTutorialPreviewDataStore {
                 configurations: [ModelConfiguration(isStoredInMemoryOnly: true)]
             )
             modelContainer = container
+            SwiftDataStopDiagnostics.register(container.mainContext, role: "Preview.core")
             try reset()
             _ = try FocusCategoryService.createDefaultsIfNeeded(in: container.mainContext)
         } catch {
@@ -333,6 +334,14 @@ struct RewardPreviewView: View {
             }
             Section("画面 Preview") {
                 Button {
+                    onboardingPreviewSessionID = UUID()
+                    showsOnboardingPreview = true
+                } label: {
+                    Label("スタート画面 Preview", systemImage: "water.waves")
+                }
+                .accessibilityIdentifier("rewardPreview.startSurface")
+
+                Button {
                     showsLoadingPreview = true
                 } label: {
                     Label("Loading画面 Preview", systemImage: "circle.dotted")
@@ -413,6 +422,13 @@ struct RewardPreviewView: View {
                 showsOnboardingPreview = false
             }
             .id(onboardingPreviewSessionID)
+            .overlay(alignment: .topTrailing) {
+                Button("終了") { showsOnboardingPreview = false }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.black.opacity(0.35))
+                    .padding(16)
+                    .accessibilityIdentifier("startSurfacePreview.exit")
+            }
         }
         .fullScreenCover(isPresented: $showsCoreTutorialPreview) {
             if let modelContainer = coreTutorialPreviewDataStore.modelContainer {

@@ -86,6 +86,7 @@ private final class DailyFishClaimPreviewStore {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         context = ModelContext(container)
+        SwiftDataStopDiagnostics.register(context, role: "Preview.dailyFish")
         defaults = UserDefaults(suiteName: suite)!
         player = Player()
         context.insert(player)
