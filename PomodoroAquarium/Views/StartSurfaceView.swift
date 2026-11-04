@@ -16,7 +16,8 @@ struct StartSurfaceView: View {
             let fish = layout.rect(StartSurfaceLayout.fishRect)
             let button = layout.rect(StartSurfaceLayout.buttonRect)
             ZStack {
-                StartSurfaceWaterView(isActive: isVisible && scenePhase == .active && !reduceMotion)
+                StartSurfaceWaterView(isActive: isVisible && scenePhase == .active && !reduceMotion,
+                                      showsCompletedDot: reduceMotion)
                     .accessibilityHidden(true)
                 Image("start_title_logo")
                     .resizable()

@@ -557,6 +557,10 @@ final class PomodoroAquariumUITests: XCTestCase {
         XCTAssertTrue(app.buttons["startSurfacePreview.exit"].isHittable)
         XCTAssertGreaterThanOrEqual(start.frame.height, 44)
         keepScreenshot(app, name: "start-surface-preview")
+        // 1回の泡演出後、点を保持した状態を短く撮影。開始ボタンは演出中も操作可能。
+        Thread.sleep(forTimeInterval: 4)
+        XCTAssertTrue(start.isHittable)
+        keepScreenshot(app, name: "start-title-bubble-dot")
         app.buttons["startSurfacePreview.exit"].tap()
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
         entry.tap()
