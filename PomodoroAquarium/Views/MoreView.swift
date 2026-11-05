@@ -4,6 +4,8 @@ import SwiftData
 #endif
 
 struct MoreView: View {
+    var canReturnToTitle = true
+    var onReturnToTitle: () -> Void = {}
 #if DEBUG
     @Environment(\.modelContext) private var modelContext
     @Query private var players: [Player]
@@ -39,6 +41,12 @@ struct MoreView: View {
                 Label("設定", systemImage: "gearshape.fill")
             }
             .accessibilityIdentifier("more.settings")
+
+            Button(action: onReturnToTitle) {
+                Label("タイトルへ戻る", systemImage: "water.waves")
+            }
+            .disabled(!canReturnToTitle)
+            .accessibilityIdentifier("more.returnToTitle")
 
 #if DEBUG
             Section("開発") {

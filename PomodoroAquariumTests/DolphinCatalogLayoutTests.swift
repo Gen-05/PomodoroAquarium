@@ -93,7 +93,7 @@ struct DolphinCatalogLayoutTests {
         try #require(renderer.uiImage?.pngData()).write(to: URL(fileURLWithPath: "/private/tmp/DolphinCatalogComparison.png"))
     }
 
-    @Test func catalogOverridesDoNotChangeAquariumRewardsOrOtherSpecies() {
+    @Test func catalogOverridesKeepAquariumAndUnrelatedRewardSizes() {
         #expect(FishSpecies.dolphin.displayScale == 0.80)
         #expect(abs(AquariumFishSizing.displaySize(for: .dolphin, isFavorite: false) - 186.9305134619731) < 0.000001)
         for width: CGFloat in [320, 393, 768] {
@@ -104,8 +104,19 @@ struct DolphinCatalogLayoutTests {
             }
         }
         let rewardSide = FishRewardImageLayout.detailDisplaySize(for: .dolphin, stageSize: CGSize(width: 320, height: 270))
-        #expect(abs(rewardSide - 111.72) < 0.01)
-        #expect(abs(FishRewardImageLayout.displaySize(from: rewardSide) - 98.31) < 0.01)
+        #expect(rewardSide == FishDetailImageLayout.catalogDisplaySize(for: .dolphin,
+            availableSize: CGSize(width: 320, height: 270)))
+        for species in FishSpecies.allCases where species != .dolphin && species != .pennantCoralfish {
+            #expect(FishRewardImageLayout.detailDisplaySize(for: species, stageSize: CGSize(width: 320, height: 270))
+                == FishDetailImageLayout.displaySize(for: species, availableSize: CGSize(width: 320, height: 270)))
+        }
+        let pennantBefore = FishDetailImageLayout.displaySize(for: .pennantCoralfish,
+            availableSize: CGSize(width: 320, height: 270))
+        let pennantAfter = FishRewardImageLayout.detailDisplaySize(for: .pennantCoralfish,
+            stageSize: CGSize(width: 320, height: 270))
+        #expect(abs(pennantAfter / pennantBefore - 0.85) < 0.000001)
+        // 既存の小魚用の下限は維持する。最終frameは約88ptから80ptになる。
+        #expect(FishRewardImageLayout.displaySize(from: pennantAfter) == 80)
     }
 
     @Test func actualEditorListsBookListAndDetailFitOnSmallAndStandardScreens() async throws {

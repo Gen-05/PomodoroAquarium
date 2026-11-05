@@ -224,6 +224,8 @@ struct MainTabView: View {
     @State private var replayRewardHistoryIDs: [UUID] = []
     @State private var showsRewardRecoveryPrompt = false
     @State private var shopBottomBoundary: CGFloat?
+    @State private var showsTitleSurface = false
+    @State private var titleSurfacePresentationID = UUID()
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let appDefaults: UserDefaults
@@ -320,7 +322,7 @@ struct MainTabView: View {
                     HomeView(
                         timerViewModel: timerViewModel,
                         mode: .home,
-                        isAquariumSimulationPaused: MainTabAquariumActivityPolicy
+                        isAquariumSimulationPaused: showsTitleSurface || MainTabAquariumActivityPolicy
                             .isSimulationPaused(
                                 for: .home,
                                 selectedTab: tabSelectionState.selection
@@ -352,7 +354,7 @@ struct MainTabView: View {
                         timerViewModel: timerViewModel,
                         mode: .aquariumEditor,
                         allowsEditorDraftRestoration: AquariumEditorLaunchPolicy.canRestore(mode: coreTutorialMode, defaults: appDefaults),
-                        isAquariumSimulationPaused: MainTabAquariumActivityPolicy
+                        isAquariumSimulationPaused: showsTitleSurface || MainTabAquariumActivityPolicy
                             .isSimulationPaused(
                                 for: .aquarium,
                                 selectedTab: tabSelectionState.selection
@@ -400,7 +402,7 @@ struct MainTabView: View {
 
                 Tab(value: MainAppTab.more) {
                     NavigationStack {
-                        MoreView()
+                        MoreView(canReturnToTitle: canReturnToTitle, onReturnToTitle: presentTitleSurface)
                     }
                     .environment(\.hintContentBottomBoundary, shopBottomBoundary)
                     .toolbarVisibility(.hidden, for: .tabBar)
@@ -515,6 +517,16 @@ struct MainTabView: View {
                 checkForUnacknowledgedRewardIfNeeded()
             }
         }
+        .fullScreenCover(isPresented: $showsTitleSurface) {
+            StartSurfaceView {
+                // 既存のタブとホームのNavigation状態だけを更新。初回フラグには触れない。
+                tabSelectionState.select(.home, whileStudyLocked: timerViewModel.locksMainTabNavigation)
+                homeNavigationResetRequestID = UUID()
+                showsTitleSurface = false
+            }
+            .id(titleSurfacePresentationID)
+            .interactiveDismissDisabled()
+        }
         .alert("前回の報酬があります", isPresented: $showsRewardRecoveryPrompt) {
             Button("あとで", role: .cancel) {
                 pendingRewardRecovery = nil
@@ -535,6 +547,17 @@ struct MainTabView: View {
                 MultipleFishRewardView(results: reward.results)
             }
         }
+    }
+
+    private var canReturnToTitle: Bool {
+        !timerViewModel.locksMainTabNavigation && coreTutorialAllowsSelecting(.home)
+    }
+
+    private func presentTitleSurface() {
+        guard canReturnToTitle, tabSelectionState.selection == .more, !showsTitleSurface else { return }
+        // 表示ごとに新しい描画Coordinatorを使い、泡だけを最初から1回再生する。
+        titleSurfacePresentationID = UUID()
+        showsTitleSurface = true
     }
 
     private func tabBarHitShield(bottomSafeArea: CGFloat) -> some View {

@@ -7,7 +7,7 @@ struct RewardPreviewCatalog {
         let rarity: FishRarity
         let species: FishSpecies
 
-        var id: String { rarity.rawValue }
+        var id: String { species.rawValue }
     }
 
     struct MultipleFishEntry: Identifiable {
@@ -54,6 +54,11 @@ struct RewardPreviewCatalog {
         Item(rarity: .epic, species: .manta),
         Item(rarity: .legendary, species: .whaleShark)
     ]
+
+    // 複数獲得例が添字参照するitemsは維持し、魚種別の一覧を別に用意する。
+    static let speciesItems: [Item] = FishSpecies.allCases.map {
+        Item(rarity: $0.rarity, species: $0)
+    }
 
     static func item(for rarity: FishRarity) -> Item? {
         items.first { $0.rarity == rarity }
@@ -273,6 +278,33 @@ struct RewardPreviewView: View {
                 Text("Reward Preview")
             } footer: {
                 Text("演出だけを再生します。所持魚、今日の獲得数、コイン、集中記録は変更されません。")
+            }
+            Section("魚種別の獲得演出") {
+                ForEach(RewardPreviewCatalog.speciesItems) { item in
+                    Button {
+                        presentation = RewardPreviewPresentation(
+                            result: RewardPreviewCatalog.previewResult(for: item, isNewFish: previewsNewFish),
+                            historyID: nil
+                        )
+                    } label: {
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(item.rarity.rewardColor)
+                                .frame(width: 12, height: 12)
+                            Text(item.species.name)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text(item.rarity.rawValue)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "play.fill")
+                                .font(.caption)
+                                .foregroundStyle(item.rarity.rewardColor)
+                        }
+                    }
+                    .accessibilityLabel("\(item.species.name)、\(item.rarity.rawValue)の獲得演出を再生")
+                    .accessibilityIdentifier("rewardPreview.species.\(item.id)")
+                }
             }
             Section("集中報酬・明日の獲得確率") {
                 Button("レアリティ別の確率アップを確認") { probabilityRewardPreview = .increase }

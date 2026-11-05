@@ -34,7 +34,7 @@ enum FishDetailImageLayout {
         return species == .whaleShark ? preferred * (1168.0 / 1001) : preferred
     }
 
-    /// 図鑑詳細だけの体格調整。報酬は従来のdisplaySizeを使い続ける。
+    /// 図鑑詳細の体格調整。イルカの補正は獲得画面からも利用する。
     static func catalogDisplaySize(for species: FishSpecies, availableSize: CGSize) -> CGFloat {
         if species == .orca {
             let preferred = preferredDisplaySize(for: .manta) * visibleContentRatio(for: .manta).width

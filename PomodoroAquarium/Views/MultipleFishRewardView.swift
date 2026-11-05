@@ -102,9 +102,9 @@ private struct MultipleFishRewardSummary: View {
                 height: FishRewardImageLayout.stageHeight
             )
             let baselineSizes = results.map {
-                FishRewardImageLayout.displaySize(from: FishRewardImageLayout.detailDisplaySize(
+                FishRewardImageLayout.displaySize(
                     for: $0.species, stageSize: stageSize
-                ))
+                )
             }
             let maximumSize = baselineSizes.max() ?? FishDetailImageLayout.minimumPreferredSize
             let minimumContentHeight = CGFloat(rowCount) * (FishDetailImageLayout.minimumPreferredSize + labelHeight)

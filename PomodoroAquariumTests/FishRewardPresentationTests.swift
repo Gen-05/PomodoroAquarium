@@ -86,6 +86,29 @@ struct FishRewardPresentationTests {
         #expect(FishRewardImageLayout.displaySize(from: 80) == 80)
         #expect(FishRewardImageLayout.displaySize(from: 200) == 176)
         #expect(FishRewardImageLayout.displaySize(from: 300) == 264)
+        let stage = CGSize(width: 320, height: 270)
+        for species in FishSpecies.allCases {
+            let size = FishRewardImageLayout.displaySize(for: species, stageSize: stage)
+            let ratio = FishDetailImageLayout.visibleContentRatio(for: species)
+            let target: CGFloat? = switch species {
+            case .manta, .dolphin: 170
+            case .seaTurtle: 150
+            case .orca: 200
+            default: nil
+            }
+            if let target {
+                #expect(abs(size * ratio.width - target) < 0.000001)
+            } else {
+                #expect(size == FishRewardImageLayout.displaySize(from:
+                    FishRewardImageLayout.detailDisplaySize(for: species, stageSize: stage)))
+            }
+            for width: CGFloat in [240, 272, 320, 736] {
+                let frame = FishRewardImageLayout.displaySize(for: species,
+                    stageSize: CGSize(width: width, height: 270))
+                #expect(frame * ratio.width < width)
+                #expect(frame * ratio.height < 270)
+            }
+        }
     }
 
     @Test func rewardStartsAsASilhouetteWithoutResultInformation() {
@@ -363,6 +386,10 @@ struct FishRewardPresentationTests {
 #if DEBUG
     @Test func rewardPreviewProvidesOneRepresentativeForEveryRarity() throws {
         #expect(RewardPreviewCatalog.items.count == 4)
+        let speciesItems = RewardPreviewCatalog.speciesItems
+        #expect(speciesItems.map(\.species) == FishSpecies.allCases)
+        #expect(Set(speciesItems.map(\.id)).count == FishSpecies.allCases.count)
+        #expect(speciesItems.allSatisfy { $0.rarity == $0.species.rarity })
 
         for rarity in [
             FishRarity.common,
@@ -396,12 +423,15 @@ struct FishRewardPresentationTests {
             forKey: DailyFishAcquisitionStorageKey.count
         )
 
-        for item in RewardPreviewCatalog.items {
+        for item in RewardPreviewCatalog.speciesItems {
             for isNewFish in [true, false] {
                 let result = RewardPreviewCatalog.previewResult(for: item, isNewFish: isNewFish)
                 #expect(result.species == item.species)
                 #expect(result.species.rarity == item.rarity)
                 #expect(result.isNewFish == isNewFish)
+                #expect(result.fish.modelContext == nil)
+                let replay = RewardPreviewCatalog.previewResult(for: item, isNewFish: isNewFish)
+                #expect(replay.fish.id != result.fish.id)
             }
         }
 

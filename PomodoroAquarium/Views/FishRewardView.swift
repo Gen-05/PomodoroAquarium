@@ -155,12 +155,46 @@ enum FishRewardImageLayout {
     static let maximumDisplaySize: CGFloat = 264
     static let maximumStageWidth: CGFloat = 340
     static let stageHeight: CGFloat = 270
+    // 長い背びれを含む全体が、ほかの小魚に対して大きくなりすぎないようにする。
+    static let pennantCoralfishScale: CGFloat = 0.85
 
-    /// 1匹演出とPreviewまとめで同じ基準frameを使う。サイズの計算式は従来どおり。
-    static func detailDisplaySize(for species: FishSpecies, stageSize: CGSize) -> CGFloat {
-        FishDetailImageLayout.displaySize(
+    /// 獲得演出での中立画像の可視全長（透明余白を含めない）。小魚と明確な体格差を付ける。
+    private static func preferredVisibleLength(for species: FishSpecies) -> CGFloat? {
+        switch species {
+        case .manta, .dolphin: 170
+        case .seaTurtle: 150
+        case .orca: 200
+        default: nil
+        }
+    }
+
+    /// 最終的な魚のframe。大型4種は専用の可視全長から求め、0.88倍や264pt上限を再適用しない。
+    static func displaySize(for species: FishSpecies, stageSize: CGSize) -> CGFloat {
+        guard let length = preferredVisibleLength(for: species) else {
+            return displaySize(from: detailDisplaySize(for: species, stageSize: stageSize))
+        }
+        let ratio = FishDetailImageLayout.visibleContentRatio(for: species)
+        return FishDetailImageLayout.displaySize(
             for: species,
-            availableSize: CGSize(width: min(stageSize.width, maximumStageWidth), height: stageSize.height)
+            availableSize: CGSize(width: min(stageSize.width, maximumStageWidth), height: stageSize.height),
+            preferredSize: length / ratio.width
+        )
+    }
+
+    /// 単体・連続獲得・Previewまとめで共通の体格を使う。図鑑・水槽には波及させない。
+    static func detailDisplaySize(for species: FishSpecies, stageSize: CGSize) -> CGFloat {
+        let availableSize = CGSize(width: min(stageSize.width, maximumStageWidth), height: stageSize.height)
+        if species == .dolphin {
+            // 図鑑詳細と同じ可視全長補正。ほかの大型魚の採用済み報酬サイズは維持する。
+            return FishDetailImageLayout.catalogDisplaySize(for: species, availableSize: availableSize)
+        }
+        let preferredSize = species == .pennantCoralfish
+            ? FishDetailImageLayout.preferredDisplaySize(for: species) * pennantCoralfishScale
+            : nil
+        return FishDetailImageLayout.displaySize(
+            for: species,
+            availableSize: availableSize,
+            preferredSize: preferredSize
         )
     }
 
@@ -793,7 +827,7 @@ struct FishRewardView: View {
                         stageSize: geometry.size
                     )
                     let imageSize = FishRewardImageLayout.displaySize(
-                        from: detailImageSize
+                        for: species, stageSize: geometry.size
                     )
                     let maximumGlowDiameter = min(geometry.size.width * 1.22, 430)
                     let glowDiameter = min(

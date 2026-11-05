@@ -540,6 +540,29 @@ final class PomodoroAquariumUITests: XCTestCase {
     }
 
     @MainActor
+    func testMoreCanReturnToTitleAndStartAtHomeRepeatedly() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-core-tutorial-in-memory", "-timerSessionState", ""]
+        launchReturningUser(app)
+        let ids = ["home.dailyFishProgress", "home.coinBalance", "home.todayProbability.Common"]
+        let before = ids.map { app.descendants(matching: .any)[$0].label }
+        for _ in 0..<2 {
+            app.buttons["mainTab.more"].tap()
+            let entry = app.buttons["more.returnToTitle"]
+            XCTAssertTrue(entry.waitForExistence(timeout: 5))
+            entry.tap()
+            let start = app.buttons["startSurface.start"]
+            XCTAssertTrue(start.waitForExistence(timeout: 5))
+            XCTAssertTrue(start.isHittable)
+            XCTAssertFalse(app.buttons["mainTab.home"].isHittable)
+            start.tap()
+            XCTAssertTrue(app.buttons["home.startStudy"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.staticTexts["onboarding.title.0"].exists)
+            XCTAssertEqual(ids.map { app.descendants(matching: .any)[$0].label }, before)
+        }
+    }
+
+    @MainActor
     func testStartSurfacePreviewCanExitAndReplayWithoutChangingHome() {
         let app = XCUIApplication()
         app.launchArguments.append("-core-tutorial-in-memory")

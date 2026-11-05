@@ -106,8 +106,8 @@ struct OrcaPresentationTests {
                     availableSize: FishDetailImageLayout.availableSize(in: viewport))
                 contexts.append((CGSize(width: canvas, height: canvas), viewport))
             }
-            let rewardCanvas = FishRewardImageLayout.displaySize(from: FishRewardImageLayout.detailDisplaySize(
-                for: .orca, stageSize: CGSize(width: 320, height: 270)))
+            let rewardCanvas = FishRewardImageLayout.displaySize(
+                for: .orca, stageSize: CGSize(width: 320, height: 270))
             contexts.append((CGSize(width: rewardCanvas, height: rewardCanvas), CGSize(width: 320, height: 270)))
             for (canvas, viewport) in contexts {
                 let image = try render(FishImageView(species: .orca, fixedAnimationFrameIndex: frame)
