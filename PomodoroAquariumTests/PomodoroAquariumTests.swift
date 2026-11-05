@@ -202,6 +202,24 @@ struct PomodoroAquariumTests {
         #expect(performer.impactHapticCount == 0)
     }
 
+    @Test func zeroSoundVolumeSkipsPlaybackWithoutSuppressingHaptics() {
+        let defaults = makeTimerDefaults()
+        defaults.set(0, forKey: AppPreferenceSettings.soundEffectsVolumeKey)
+        let performer = TestFeedbackPerformer()
+        let service = AppFeedbackService(defaults: defaults, performer: performer)
+
+        service.playStudyCompletion()
+        service.playFishAcquisition(isNewFish: true)
+        service.playFishAcquisition(isNewFish: false)
+        service.playSoundPreview()
+
+        #expect(performer.completionSoundCount == 0)
+        #expect(performer.successHapticCount == 2)
+        #expect(performer.impactHapticCount == 1)
+        #expect(AppPreferenceSettings.isSoundEnabled(in: defaults))
+        #expect(AppPreferenceSettings.soundEffectsVolume(in: defaults) == 0)
+    }
+
     @Test func enabledSoundAndHapticsPlayExistingFeedback() {
         let defaults = makeTimerDefaults()
         let performer = TestFeedbackPerformer()

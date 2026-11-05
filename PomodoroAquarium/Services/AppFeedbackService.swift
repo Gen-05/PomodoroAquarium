@@ -56,7 +56,7 @@ protocol FeedbackPerforming {
 }
 
 private final class SystemFeedbackPerformer: FeedbackPerforming {
-    private let soundPlayer = CompletionSoundPlayer()
+    private lazy var soundPlayer = CompletionSoundPlayer()
 
     func playCompletionSound(volume: Float) {
         soundPlayer.play(volume: volume)
@@ -86,23 +86,26 @@ private final class SystemFeedbackPerformer: FeedbackPerforming {
 }
 
 private final class CompletionSoundPlayer {
-    private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private lazy var buffer: AVAudioPCMBuffer? = makeChimeBuffer()
-
-    init() {
+    // サービス生成時や触覚だけの利用時には、音声エンジンを作らない。
+    private lazy var engine: AVAudioEngine = {
+        let engine = AVAudioEngine()
         engine.attach(playerNode)
         engine.connect(playerNode, to: engine.mainMixerNode, format: buffer?.format)
-    }
+        return engine
+    }()
 
     func play(volume: Float) {
         guard volume > 0, let buffer else { return }
-        playerNode.stop()
-        playerNode.volume = min(1, max(0, volume))
         do {
+            // エンジン生成・起動より先に設定。外部音声を停止・減音せず、消音モードに従う。
+            try AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: [])
             if !engine.isRunning {
                 try engine.start()
             }
+            playerNode.stop()
+            playerNode.volume = min(1, max(0, volume))
             playerNode.scheduleBuffer(buffer, at: nil, options: .interrupts)
             playerNode.play()
         } catch {
@@ -145,21 +148,13 @@ struct AppFeedbackService {
     }
 
     func playStudyCompletion() {
-        if AppPreferenceSettings.isSoundEnabled(in: defaults) {
-            performer.playCompletionSound(
-                volume: Float(AppPreferenceSettings.soundEffectsVolume(in: defaults))
-            )
-        }
+        playSoundIfEnabled()
         guard AppPreferenceSettings.isHapticsEnabled(in: defaults) else { return }
         performer.playSuccessHaptic(level: currentHapticLevel)
     }
 
     func playFishAcquisition(isNewFish: Bool) {
-        if AppPreferenceSettings.isSoundEnabled(in: defaults) {
-            performer.playCompletionSound(
-                volume: Float(AppPreferenceSettings.soundEffectsVolume(in: defaults))
-            )
-        }
+        playSoundIfEnabled()
         guard AppPreferenceSettings.isHapticsEnabled(in: defaults) else { return }
         if isNewFish {
             performer.playSuccessHaptic(level: currentHapticLevel)
@@ -170,10 +165,14 @@ struct AppFeedbackService {
 
     /// 設定画面専用。勉強完了などの本番イベント処理は伴わない。
     func playSoundPreview() {
+        playSoundIfEnabled()
+    }
+
+    private func playSoundIfEnabled() {
         guard AppPreferenceSettings.isSoundEnabled(in: defaults) else { return }
-        performer.playCompletionSound(
-            volume: Float(AppPreferenceSettings.soundEffectsVolume(in: defaults))
-        )
+        let volume = Float(AppPreferenceSettings.soundEffectsVolume(in: defaults))
+        guard volume > 0 else { return }
+        performer.playCompletionSound(volume: volume)
     }
 
     /// 設定画面専用。保存済み強度を既存の段階へ変換して1回だけ発生させる。
