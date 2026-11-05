@@ -135,9 +135,13 @@ private struct RewardPreviewPresentation: Identifiable {
 
 @MainActor
 private final class CoreTutorialPreviewDataStore {
+    // Preview終了後もSwiftDataのQuery通知が残る場合があるため、DEBUGの間は
+    // 同じ一時containerを保持する。開くたびにresetし、containerは増やさない。
+    static let shared = CoreTutorialPreviewDataStore()
+
     private(set) var modelContainer: ModelContainer?
 
-    init() {
+    private init() {
         modelContainer = nil
         do {
             let schema = Schema([
@@ -226,7 +230,7 @@ struct RewardPreviewView: View {
     @State private var onboardingPreviewSessionID = UUID()
     @State private var showsCoreTutorialPreview = false
     @State private var coreTutorialPreviewSessionID = UUID()
-    @State private var coreTutorialPreviewDataStore = CoreTutorialPreviewDataStore()
+    private let coreTutorialPreviewDataStore = CoreTutorialPreviewDataStore.shared
     @State private var decorationTutorialPreviewSession: DecorationTutorialPreviewSession?
     @State private var retainedDecorationTutorialPreviewSession: DecorationTutorialPreviewSession?
     @State private var decorationTutorialPreviewError: String?
